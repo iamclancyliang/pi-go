@@ -10,9 +10,12 @@
 **Decides:** the module partition, the dependency rules between modules, which seams must exist at
 v0, and the register of open decisions.
 
-**Does not decide:** whether pi-go's agent loop is built on eino's prebuilt loop or owns its own
-orchestration. That is **ADR-0002**, and it is gated on spikes (#4/#5/#6). This document is written
-so that *either* answer can land without restructuring the modules — see §4.
+**Still formally open, with a proposed answer.** ADR-0002 (**proposed, not yet accepted**) recommends
+building the loop on eino's prebuilt `adk.TurnLoop`, with pi-go owning session truth, the model port,
+and the `model_changed` event. All three spikes are closed and the evidence is in. **This section and
+the §4 edge register are updated atomically when ADR-0002 is accepted — not before.** Because this
+document was written so either answer could land without restructuring modules, no module moves
+either way — see §4.
 
 Anything below marked **[OPEN]** is not yet a decision. Do not implement against it.
 
@@ -194,8 +197,11 @@ successful execution fact (C2, C6). This is a correctness rule, not error handli
 
 **Settled:** eino provides the model/provider component (`ChatModel`) inside the `ai` subsystem.
 
-**Open:** whether the agent loop is built on eino's prebuilt loop (`TurnLoop` / Runner /
-ChatModelAgent) or pi-go owns orchestration and uses eino as a component library.
+**Proposed by ADR-0002 (awaiting acceptance):** build the loop on eino's prebuilt `TurnLoop`.
+Until that ADR is accepted this remains **[OPEN]** and the edge register below is unchanged. Evidence:
+`WrapModel` gives per-call model/reasoning control (C8), `Push` covers follow-up (C1a), and
+`WithPreempt` + pi-go session-truth reconstruction covers steering (C1b). Checkpoint resume is
+retained for **recovery only** — its injection path depends on a deprecated API at this baseline.
 
 Verified present at v0.9.14 (`adk/turn_loop.go`, exported): `TurnLoop.Push(item, opts...)`,
 `WithPreempt(SafePoint)`, `SafePoint{AfterChatModel, AfterToolCalls, AnySafePoint}`, Stop options,
@@ -224,7 +230,7 @@ No other eino edge may be added without updating this table.
 | ADR | Subject | Status | Gate |
 | --- | --- | --- | --- |
 | 0001 | Module boundary (`internal/` + one public SDK package) | **accepted** — `docs/adr/0001-module-boundary.md` | approved 2026-08-15 |
-| 0002 | eino ownership boundary | **blocked** | spikes #4/#5/#6 |
+| 0002 | eino ownership boundary — **build on eino's prebuilt TurnLoop** | proposed — **drafted**, `docs/adr/0002-eino-ownership-boundary.md` | spikes #4/#5/#6 all closed |
 | 0003 | Extension transport (in-process / out-of-process / hybrid) | **[OPEN]** | v0 seams first; transport at v2 |
 | 0004 | Session storage port shape | proposed | v1, in-memory implementation |
 | 0005 | Event emission strategy (dual interleaving) | proposed | C4/C4.0 conformance tests |

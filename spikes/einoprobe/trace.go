@@ -121,3 +121,71 @@ func (t *trace) counts() (modelCallsPerPrep map[int]int, toolEventsPerPrep map[i
 	}
 	return
 }
+
+// --- query helpers for assertions -------------------------------------------
+//
+// The probes record first and assert second. These helpers turn the raw trace
+// into failable claims, so a regression in observed behaviour breaks the build
+// instead of silently producing a different-but-green trace.
+
+// eventsMatching returns entries whose Event contains sub, in trace order.
+func (t *trace) eventsMatching(sub string) []entry {
+	var out []entry
+	for _, e := range t.snapshot() {
+		if strings.Contains(e.Event, sub) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// detailsMatching returns the Detail strings of entries whose Event contains sub.
+func (t *trace) detailsMatching(sub string) []string {
+	var out []string
+	for _, e := range t.eventsMatching(sub) {
+		out = append(out, e.Detail)
+	}
+	return out
+}
+
+// firstSeq returns the Seq of the first entry whose Event contains eventSub and
+// whose Detail contains detailSub (detailSub may be ""). Returns -1 if absent.
+func (t *trace) firstSeq(eventSub, detailSub string) int {
+	for _, e := range t.snapshot() {
+		if strings.Contains(e.Event, eventSub) && (detailSub == "" || strings.Contains(e.Detail, detailSub)) {
+			return e.Seq
+		}
+	}
+	return -1
+}
+
+// nthSeq returns the Seq of the n-th (1-based) entry whose Event contains sub.
+func (t *trace) nthSeq(sub string, n int) int {
+	c := 0
+	for _, e := range t.snapshot() {
+		if strings.Contains(e.Event, sub) {
+			c++
+			if c == n {
+				return e.Seq
+			}
+		}
+	}
+	return -1
+}
+
+// countEvents returns how many entries have an Event containing sub.
+func (t *trace) countEvents(sub string) int {
+	return len(t.eventsMatching(sub))
+}
+
+// countInGen returns how many entries with Event containing sub fall in GenInput
+// iteration gen.
+func (t *trace) countInGen(sub string, gen int) int {
+	n := 0
+	for _, e := range t.eventsMatching(sub) {
+		if e.GenIter == gen {
+			n++
+		}
+	}
+	return n
+}

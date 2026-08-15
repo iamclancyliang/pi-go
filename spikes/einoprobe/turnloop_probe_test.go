@@ -48,7 +48,32 @@ func (m *scriptedModel) next(method string, input []*schema.Message) *schema.Mes
 		}
 		roles = append(roles, string(msg.Role))
 	}
-	m.tr.add(layerModel, method, fmt.Sprintf("call#%d inputs=%d roles=%v", idx+1, len(input), roles))
+	// P3 requires proving the tool message DELIVERED to this call still pairs
+	// with the original tool call. Recording roles alone would force us to infer
+	// that from two separate facts; record the identifiers directly instead.
+	var pairing []string
+	for _, msg := range input {
+		if msg == nil {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			pairing = append(pairing, fmt.Sprintf("assistantToolCallID=%s", tc.ID))
+		}
+		if msg.Role == schema.Tool {
+			pairing = append(pairing, fmt.Sprintf("toolMsgToolCallID=%s content=%q", msg.ToolCallID, msg.Content))
+		}
+	}
+	// Record the actual user CONTENT delivered to the model. Roles alone cannot
+	// distinguish "the injected message arrived" from "some user message
+	// arrived" — proving it by proxy is what P3 already caught once.
+	var userContents []string
+	for _, msg := range input {
+		if msg != nil && msg.Role == schema.User {
+			userContents = append(userContents, msg.Content)
+		}
+	}
+	m.tr.add(layerModel, method, fmt.Sprintf("call#%d inputs=%d roles=%v userContents=%v pairing=%v",
+		idx+1, len(input), roles, userContents, pairing))
 	return &c
 }
 

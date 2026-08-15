@@ -21,7 +21,7 @@ planned test → evidence/blocker.
 | **A6** parallel slow-A / fast-B ordering | FR-3, FR-5 | **C4.1** | **#11** | @cc | `conformance/a6_ordering_test.go` | contract verified. C4.0 and C4b covered separately by **A15/A16** |
 | **A7** one result requests terminate | FR-1 | **C5** | **#12** | @cc | `conformance/a7_terminate_test.go` | contract verified (agent-loop.ts:582-583) — `every`, not `any` |
 | **A8** cancel after tool call emitted | FR-3, FR-6 | **C6** | **#13** | @cc | `conformance/a8_unmatched_test.go` | contract verified. **v0-testable**: use the minimal in-memory session truth + context projection to show the dangling call survives save/rebuild. Does **not** require the v1 durable storage port |
-| **A9** next-turn hook changes model | FR-4 | **C8** | **#4** | @cc | `conformance/a9_model_swap_test.go` | **blocked on spike #4** — unproven that eino supports per-turn swap |
+| **A9** next-turn hook changes model | FR-4 | **C8** | **#17** (spike #4 closed) | @cc | `conformance/a9_model_swap_test.go` | **UNBLOCKED — spike #4 PASS.** Mechanism: `ChatModelAgentMiddleware.WrapModel`, fires per model call. Instance substitution, common params and provider-specific reasoning level all verified. **Note for the test author:** the swap must also emit a pi-go `model_changed` event — eino emits none, so a mid-turn change is otherwise invisible |
 | **A10** context overflow twice | FR-6 | **S1, S2, S6** | none | @cc | `conformance/a10_overflow_test.go` | contract now exists (`session-compaction-recovery-contracts.md`). One attempt per input boundary (S1); second overflow is a durable terminal failure (S2); the attempt stays durable but is absent from the retry projection (S6) |
 | **A11** death after destructive intent, pre-settlement | FR-6, NFR-6 | **S7, S8** — **class N**, see **G6** | none | @cc | `conformance/a11_settlement_test.go` | ⚠️ **class N — pi-go net-new requirement, no released Pi counterpart.** Verified at the pinned baseline: the current coding-agent has **no** durable tool-intent/settlement mechanism. "Don't blindly replay a destructive tool" comes from AgentHarness's newer durable design and becomes a **pi-go v1 safety policy**. There is no pi behaviour to conform to — do not look for one |
 | **A12** compaction performed | FR-6 | **S3, S4, S5** | none | @cc | `conformance/a12_compaction_test.go` | history and projection are different data (S3); checkpoint is self-contained summary + retained tail (S4); publication is atomic at the projection boundary (S5) |
@@ -118,7 +118,7 @@ only the subject under test changes, not the assertions.
 | A | Why not yet |
 | --- | --- |
 | A1 | the tracer bullet itself: product implementation, not released |
-| A9 | depends directly on spike #4 (can eino swap model per turn?) |
+| ~~A9~~ | ~~depends on spike #4~~ — **closed 2026-08-15**: spike #4 PASS, ticketed as **#17** |
 | A10–A12 | need the v1 session storage port |
 | A13 | v3, and just rewritten for wire decision C |
 
@@ -135,11 +135,11 @@ only the subject under test changes, not the assertions.
 | Scenarios with **partial** contract cover | 1 (A13 — ordering reused, wire surface uncovered) |
 | Scenarios with **no** contract | **0** — G3 closed by S1–S8 |
 | Scenarios that are **class N** (net-new, no Pi counterpart) | **1** (A11 — see G6) |
-| Scenarios blocked on a spike | 1 (A9) |
+| Scenarios blocked on a spike | **0** — A9 unblocked by spike #4 (ADR-0002 proposed) |
 | Scenarios blocked on a product decision | 1 (A13) |
 | Contracts with **no** scenario | **0** — C7/C4.0/C4b closed by A14/A15/A16 |
 | Surfaces with no contract at all | **1** — wire compatibility (G5) |
-| Scenarios with an issue | **11** (A9→#4; A2,A3,A4,A5,A6,A7,A8,A14,A15,A16 → #7–#16) |
-| Scenarios still without an issue | 5 (A1, A10, A11, A12, A13 — each blocked, see §2) |
+| Scenarios with an issue | **11** (A2–A9, A14–A16 → #7–#17) |
+| Scenarios still without an issue | 4 (A1, A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
 
 **Nothing here is closeable until Go is installed**; every planned test is unrunnable today.
