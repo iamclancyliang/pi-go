@@ -22,6 +22,11 @@ Verified locally on go1.26.6 darwin/arm64 against declared minimum 1.25.
 not itself proof that the minimum is supported: the toolchain gate closes only after both hosted
 matrix jobs pass on the committed revision.
 
+**Gate CLOSED 2026-08-15.** Both matrix jobs (`Go 1.25.x`, `Go 1.26.x`) succeeded on `75cc9d3`
+(run `31884705936`). The declared minimum of 1.25 now has hosted evidence behind it, not just a
+local run. This closure is tied to that revision — it is not a standing guarantee for later commits,
+which is what CI on every push is for.
+
 ## Commands
 
 Every command below was run in this repository and passed before being documented here. Do not add

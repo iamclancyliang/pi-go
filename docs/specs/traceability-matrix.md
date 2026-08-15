@@ -142,4 +142,7 @@ only the subject under test changes, not the assertions.
 | Scenarios with an issue | **11** (A2–A9, A14–A16 → #7–#17) |
 | Scenarios still without an issue | 4 (A1, A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
 
-**Nothing here is closeable until Go is installed**; every planned test is unrunnable today.
+**Go is installed (1.26.6) and CI is green on 1.25.x + 1.26.x**, so the toolchain no longer blocks
+anything. What still blocks every conformance row is different and unchanged: **there is no product
+code to test.** The spike suite proves things about *eino*, not about pi-go. Do not read green gates
+as scenario coverage.
