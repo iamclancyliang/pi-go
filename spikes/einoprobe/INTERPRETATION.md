@@ -93,6 +93,54 @@ Decide by pi's three requirements, each independently:
 
 ---
 
+## M1-M4 — multi-handler `WrapModel` composition (registered before running)
+
+**Question.** When two `WrapModel` handlers are registered and one **substitutes** the model
+outright (discarding the model it was given), does it silently bypass the other?
+
+This matters because pi's per-turn model selection *is* a substitution. ADR-0002 lists the bypass
+risk in Consequences; this probe decides whether the risk is real at the pinned baseline.
+
+**Why option values alone cannot answer it.** "No temperature observed" looks identical whether the
+injecting wrapper was discarded or simply never constructed. So the probe records two independent
+things: which model **instance served** the call (`servingModel=`), and whether the injector's
+wrapper was **traversed at call time** (`chain:injectorTraversed`) rather than merely built.
+
+| Row | Observation | Reading |
+| --- | --- | --- |
+| **M1** bypass | serving model = substitute, injector traversed **0** times, no injected option | the substituter discarded the injector's wrapper — ordering/ownership must be made explicit in pi-go, since a model-selection handler would silently void other middleware |
+| **M2** survives | serving model = substitute, injector traversed **1** time, injected option arrives | the injector composes **outside** the substituter; substitution does not void it |
+| **M3** no substitution | serving model = **original** | substitution did not take effect at all — invalidates the probe's premise, re-probe |
+| **M4** anything else | injector traversed ≠ 0 or 1 for a single model call | unregistered outcome — record raw, no verdict |
+
+**Coherence checks (failable).** M1 with an injected option present, or M2 with it absent, is
+self-contradictory and fails rather than being reported.
+
+**Both registration orders are run.** If the verdict differs between them, order is
+caller-controlled and pi-go must pin it; if identical, composition order is fixed by eino.
+
+### M-result (recorded after running `TestWrapModelCompositionOrder`)
+
+| Registration order | Verdict | Observed |
+| --- | --- | --- |
+| `[injector, substituter]` | **M2** | serving = substitute, injector traversed 1x, `observedTemperature=7.0` |
+| `[substituter, injector]` | **M1** | serving = substitute, injector traversed 0x, `observedTemperature=nil` |
+
+**Registration order is outermost-first**, and the verdict differs by order — so per the row above,
+**pi-go must pin handler order**; it is caller-controlled, not fixed by eino.
+
+**The table's M1 row was too weak, and the run falsified an assumption behind it.** M1 was written
+as "constructed then discarded", which presumes handlers are all composed up front. They are not.
+Composition is **lazy**: in the M2 arm the injector's `Generate` ran at seq 4, *before* the
+substituter's `WrapModel` fired at seq 5. Each handler is reached only if the handler outside it
+calls through to it. So in the M1 arm the injector's `WrapModel` **was never invoked at all** — a
+strictly more severe bypass than the row anticipated.
+
+Recorded rather than retro-fitted: the original M1/M2 wording is left above unedited, because a
+pre-registration that gets quietly rewritten to match the result stops being evidence.
+
+---
+
 ## Standing rule
 
 If the trace does not clearly satisfy a row's criteria, the verdict is **inconclusive** and the next

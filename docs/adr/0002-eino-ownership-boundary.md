@@ -38,12 +38,13 @@ Every claim below is a **direct observation with a failable assertion**, not a r
 documentation.
 
 **Negative controls** — a paired run where the mechanism is removed and the effect must disappear —
-exist for exactly **two** claims:
+exist for exactly **three** claims:
 
 | Claim | Control | Asserts |
 | --- | --- | --- |
 | per-call option injection | `TestSpike4NoWrapModelControl` | no handler registered ⇒ model observes `observedTemperature=nil`, `WrapModel:fired`=0 |
 | preempt signal | `TestC1aFollowUpContract` | plain `Push` (no `WithPreempt`) ⇒ `Preempted` never closes |
+| handler reachability | `TestWrapModelCompositionOrder` (2 arms) | moving the injector inside the substituter ⇒ its `WrapModel` never fires and its option disappears |
 
 **Every other claim rests on a positive observation alone.** Specifically: instance substitution,
 reasoning-level control, the streaming path (a second positive arm of C1b, *not* a control),
@@ -55,6 +56,7 @@ proves the observed effect would vanish if the mechanism were removed.
 | **C8** per-turn model + reasoning-level change | **PASS** | `WrapModel` fires per model call; instance substitution, common params, and provider-specific reasoning level all verified separately |
 | **C1a** follow-up | **PASS** | plain `Push` buffered to the next `GenInput`; in-flight turn untouched |
 | **C1b** steering | **PASS** | safe-point truncation + pi-go reconstruction |
+| **Handler composition** | **ORDER-SENSITIVE** | lazy, outermost-first; a substituting handler prevents inner handlers from running at all |
 | **Tool replay on resume** | **SAFE** | tool invoked exactly once across a checkpoint resume; settled result published exactly once |
 
 **Nesting (N2):** one `PrepareAgent` instance wraps the whole model→tool→model cycle, so
@@ -75,8 +77,13 @@ proves the observed effect would vanish if the mechanism were removed.
 - **pi-go must emit `model_changed` itself.** eino executes the control plane per call but does not
   interpret it; no event is emitted. Without our own event, a mid-turn model change is invisible to
   RPC clients and session records.
-- **`WrapModel` returning a fresh model skips the inner endpoint it discards.** The model-selection
-  handler needs explicit ordering/ownership so it cannot silently bypass other middleware.
+- **A substituting `WrapModel` handler voids every handler registered after it.** Now measured
+  (`TestWrapModelCompositionOrder`), and worse than first stated: composition is **lazy** and
+  **registration order is outermost-first**, so an outer handler that returns a fresh model never
+  calls through — the inner handler's `WrapModel` is **never invoked at all**, not merely discarded.
+  pi's per-turn model selection *is* such a substitution. **pi-go must therefore own and pin handler
+  order**, and register model selection **last (innermost)**, or anything registered after it stops
+  running with no error and no trace.
 - **Checkpoint resume carries a v0.9.14 capability gap.** Targeted `ChatModelAgentResumeData` is not
   delivered on the cancel-resume path; only the deprecated, non-target-scoped `WithHistoryModifier`
   works. This is why resume is scoped to recovery rather than steering.
@@ -98,6 +105,9 @@ proves the observed effect would vanish if the mechanism were removed.
 
 - **Re-evaluate if eino fixes targeted resume data.** `TestSpike3ArmCTargetedGap` asserts current
   behaviour and **will fail by design** when that changes — the trigger to revisit arm C.
-- **Multi-handler composition** around `WrapModel` needs its own test (v0 wiring acceptance).
+- ~~**Multi-handler composition** around `WrapModel` needs its own test (v0 wiring acceptance).~~
+  **CLOSED** by `TestWrapModelCompositionOrder` (both registration orders, pre-registered as M1-M4).
+  Outcome moved into Consequences above. The remaining v0 work is not a spike but a rule: the
+  handler-order policy must be enforced where handlers are registered, not left to convention.
 - Probe assertions currently match formatted trace strings. If these become long-lived contract
   tests, move to structured fields so a formatting change cannot silently weaken them.

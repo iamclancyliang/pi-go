@@ -56,7 +56,7 @@ handling (contract C2). Re-read them when those contracts come up.
 
 > **Outcome.** C8 is achievable on eino's prebuilt loop via `adk.ChatModelAgentMiddleware.WrapModel`,
 > which fires **once per model call** (twice inside one `PrepareAgent` instance, bracketing the tool).
-> Directly observed with failable assertions and negative controls: **instance substitution**
+> Directly observed with failable assertions: **instance substitution**
 > (modelA→modelB), **common params** (temperature 1.0→2.0 via `GetCommonOptions`), **provider-specific
 > reasoning level** (low→high via `GetImplSpecificOptions` *only*, so the common path cannot produce a
 > false pass), **context continuity** (2→4 messages incl. assistant+tool), **unchanged event order**.
@@ -123,7 +123,9 @@ requires rebuilding the graph, check whether rebuilding preserves 2 and 3.
 > non-streaming path would test a route pi never takes.
 >
 > Regression gates: `TestC1aFollowUpContract`, `TestC1bSteeringContract`,
-> `TestC1bSteeringContractStreaming` — each negative-controlled.
+> `TestC1bSteeringContractStreaming`. **Only `TestC1aFollowUpContract` is a negative control** — it
+> is the paired no-`WithPreempt` run for the preempt signal. Both C1b tests are positive arms
+> (non-streaming and streaming); neither removes a mechanism to show the effect disappears.
 
 ### Original plan (retained)
 
@@ -182,7 +184,10 @@ crux; API presence alone proves nothing.
 >
 > That is a factual difference in what each arm must rely on, not a preference.
 >
-> Gates: `TestSpike3ArmCRunOpt`, `TestSpike3ArmCTargetedGap` — both negative-controlled.
+> Gates: `TestSpike3ArmCRunOpt`, `TestSpike3ArmCTargetedGap`. **Neither is a negative control** —
+> they exercise two different mechanisms with different outcomes, not a mechanism-removed pair.
+> `TestSpike3ArmCTargetedGap` asserts an absence, but that absence *is* the finding, not a control
+> for it.
 > The targeted test asserts *current* behaviour: **if eino fixes it, that test fails by design**, so
 > the gap gets re-evaluated rather than silently outliving its cause.
 
