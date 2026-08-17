@@ -89,6 +89,19 @@ MUTATIONS = [
     ("writes limited to the PI_ namespace",
      r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
      r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]'),
+    # The TUI registry/export sets.
+    ("barrel misses `export type {...}`",
+     r'r"\bexport\s+(type\s+)?\{([^}]*)\}"',
+     r'r"\bexport\s*\{([^}]*)\}"'),
+    ("barrel flattens the two declaration spaces",
+     "(types if (whole_clause_is_type or per_clause_type) else values).append(exported)",
+     "values.append(exported)"),
+    ("barrel accepts a wildcard re-export",
+     'if re.search(r"^export \\*", view.structural, re.M):',
+     'if False:'),
+    ("keybinding authorities not compared",
+     "if sorted(set(from_interface)) != sorted(set(from_table)):",
+     "if False:"),
 ]
 
 def run() -> str:

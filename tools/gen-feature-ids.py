@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from census_families import (  # noqa: E402
     app_modes, auth_literals, cli_mode_literals, coding_agent_tool_names,
     environment_names, extension_hook_names, harness_entry_kinds,
+    keybinding_actions, tui_barrel_names,
     harness_tool_names, provider_ids, rpc_event_ids, session_entry_kinds,
     setting_keys, thinking_levels, type_alias_span, union_discriminants,
     union_literals,
@@ -233,6 +234,31 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
                  literals)
         else:
             fail("CompactionReason yielded no literals - its shape probably changed")
+
+    barrel = tui_barrel_names(src)
+    if barrel is not None:
+        # Two declaration spaces, two sets: `fuzzyMatch` and `FuzzyMatch` are both
+        # exported and differ only in leading case, so one flat set cannot hold
+        # them without an ID collision.
+        emit("tui.export.value",
+             "`tui/src/index.ts` barrel, value exports — the package's DECLARED "
+             "public surface; the published `dist/**/*` without an `exports` map is "
+             "wider and is recorded as a packaging risk rather than as members",
+             "the exported name, aliases resolved to what a consumer imports",
+             barrel["value"])
+        emit("tui.export.type",
+             "`tui/src/index.ts` barrel, type-only exports (`export type {...}` and "
+             "`export { type ... }`)",
+             "the exported name",
+             barrel["type"])
+
+    keys = keybinding_actions(src)
+    if keys is not None:
+        emit("tui.keybinding",
+             "`tui/src/keybindings.ts` `Keybindings` interface keys, verified equal "
+             "to the `TUI_KEYBINDINGS` default table's keys",
+             "the action ID as declared",
+             keys)
 
     entry_kinds = session_entry_kinds(src)
     if entry_kinds is not None:

@@ -726,3 +726,104 @@ def provider_ids(src: Source) -> list[str]:
     return [name for _factory, name in resolved_by_factory]
 
 
+
+
+def keybinding_actions(src: Source) -> list[str] | None:
+    """TUI keybinding action IDs, from the registry interface AND the default table.
+
+    Two authorities exist in one file and they must agree, so both are read:
+
+      * `Keybindings` -- the interface whose KEYS are the action IDs. It is
+        declared for declaration merging, so downstream packages can add to it;
+        the set here is the TUI's own.
+      * `TUI_KEYBINDINGS` -- the default table, mapping each action to its keys.
+
+    A port needs the action set, not the key set: `defaultKeys: []` is a real
+    member with no binding (prompt-history navigation ships unbound), so counting
+    bound keys would drop it, and one action may hold several keys.
+    """
+    view = src.view("packages/tui/src/keybindings.ts")
+
+    declaration = re.search(r"^export interface Keybindings \{$", view.structural, re.M)
+    if not declaration:
+        fail("cannot locate the Keybindings interface")
+        return None
+    interface_end = view.structural.find("\n}", declaration.end())
+    from_interface = view.quoted_after(r"\n\t", declaration.end(), interface_end)
+
+    table = re.search(r"^export const TUI_KEYBINDINGS = \{$", view.structural, re.M)
+    if not table:
+        fail("cannot locate the TUI_KEYBINDINGS default table")
+        return None
+    table_end = view.structural.find("\n}", table.end())
+    from_table = view.quoted_after(r"\n\t", table.end(), table_end)
+
+    if not from_interface:
+        fail("the Keybindings interface yielded no action IDs")
+        return None
+    if sorted(set(from_interface)) != sorted(set(from_table)):
+        missing = sorted(set(from_interface) - set(from_table))
+        extra = sorted(set(from_table) - set(from_interface))
+        fail(f"Keybindings interface and TUI_KEYBINDINGS disagree: "
+             f"absent from the table {missing}, absent from the interface {extra}")
+        return None
+    return from_interface
+
+
+def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
+    """Names the TUI package's barrel exports, split by DECLARATION SPACE.
+
+    This is the smaller of two defensible denominators, and the difference matters
+    for parity:
+
+      * the **barrel** (`tui/src/index.ts`) names each export explicitly. There
+        are no `export *` statements, so the list is enumerable rather than
+        implied.
+      * the **published surface** is larger. `package.json` has `main` and
+        `files: ["dist/**/*", ...]` and **no `exports` map**, so every compiled
+        module is importable by path whether or not the barrel names it.
+
+    The barrel is emitted because it is what the package declares as its API. The
+    wider surface is reachable by an accident of packaging rather than by design,
+    and treating it as the parity denominator would commit a port to reproducing
+    module layout as though it were contract. That is a decision, recorded with
+    its reason rather than settled by whoever counts first.
+
+    **Values and types are separate sets because TypeScript has two declaration
+    spaces.** `fuzzyMatch` and `FuzzyMatch` both exist and differ only in leading
+    case, which one flat set cannot represent: they normalise to the same ID, and
+    the collision guard rejected the run rather than silently dropping one. The
+    split is not a workaround for the naming scheme, it is what the language says.
+
+    Three export FORMS all count, and missing one cost a member: `export { X }`,
+    `export { type X }`, and `export type { X }`. The last is a whole-clause type
+    export -- omitting it made this set 132 where the barrel names 133.
+    """
+    view = src.view("packages/tui/src/index.ts")
+
+    if re.search(r"^export \*", view.structural, re.M):
+        fail("the TUI barrel has an `export *` statement; the name list is no "
+             "longer enumerable from this file alone")
+        return None
+
+    alias = re.compile(r"\bas\s+([A-Za-z_$][\w$]*)\s*$", re.S)
+    values: list[str] = []
+    types: list[str] = []
+    for block in view.discover(re.compile(r"\bexport\s+(type\s+)?\{([^}]*)\}", re.S)):
+        whole_clause_is_type = block.group(1) is not None
+        for clause in view.value(*block.span(2)).split(","):
+            stripped = clause.strip()
+            if not stripped:
+                continue
+            per_clause_type = bool(re.match(r"^type\s+", stripped))
+            aliased = alias.search(clause)
+            exported = (aliased.group(1) if aliased
+                        else re.sub(r"^type\s+", "", stripped))
+            if not re.fullmatch(r"[A-Za-z_$][\w$]*", exported):
+                continue
+            (types if (whole_clause_is_type or per_clause_type) else values).append(exported)
+
+    if not values and not types:
+        fail("the TUI barrel yielded no exported names")
+        return None
+    return {"value": values, "type": types}

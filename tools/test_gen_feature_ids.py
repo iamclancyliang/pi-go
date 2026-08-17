@@ -579,6 +579,100 @@ def test_union_discriminants_refuses_a_short_set() -> None:
     gen.errors.clear()
 
 
+BARREL_PATH = "packages/tui/src/index.ts"
+
+# All three export forms, an alias, a name that differs from another only in
+# leading case, and a non-export that must not be collected.
+BARREL_FIXTURE = {
+    BARREL_PATH: "\n".join([
+        'export { Box, type BoxOptions } from "./box.ts";',
+        'export type { EditorComponent } from "./editor-component.ts";',
+        'export { fuzzyMatch, type FuzzyMatch } from "./fuzzy.ts";',
+        'export { internalName as publicName } from "./alias.ts";',
+        'const notExported = 1;',
+        "",
+    ]),
+}
+
+
+def test_barrel_counts_all_three_export_forms() -> None:
+    """`export type { X }` is a form of its own; missing it lost a real member.
+
+    The set was 132 against a barrel naming 133 until whole-clause type exports
+    were handled.
+    """
+    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
+    assert barrel["value"] == ["Box", "fuzzyMatch", "publicName"], barrel["value"]
+    assert barrel["type"] == ["BoxOptions", "EditorComponent", "FuzzyMatch"], barrel["type"]
+
+
+def test_barrel_separates_the_two_declaration_spaces() -> None:
+    """A value and a type differing only in leading case must both survive.
+
+    In one flat set they normalise to the same ID and the collision guard rejects
+    the run, which is how this surfaced.
+    """
+    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
+    assert "fuzzyMatch" in barrel["value"] and "FuzzyMatch" in barrel["type"]
+    assert gen.normalize("fuzzyMatch") == gen.normalize("FuzzyMatch")
+
+
+def test_barrel_refuses_a_wildcard_reexport() -> None:
+    """`export *` makes the list non-enumerable from this file, so it must fail."""
+    wild = {BARREL_PATH: 'export * from "./everything.ts";\n'}
+    gen.errors.clear()
+    result = gen.tui_barrel_names(FakeSource(wild))
+    assert result is None, result
+    assert any("export *" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+KEYS_PATH = "packages/tui/src/keybindings.ts"
+
+
+def test_keybinding_actions_require_the_two_authorities_to_agree() -> None:
+    """The interface and the default table are two authorities in one file."""
+    agreeing = {KEYS_PATH: "\n".join([
+        "export interface Keybindings {",
+        '\t"tui.editor.cursorUp": true;',
+        '\t"tui.input.submit": true;',
+        "}",
+        "",
+        "export const TUI_KEYBINDINGS = {",
+        '\t"tui.editor.cursorUp": { defaultKeys: "up" },',
+        '\t"tui.input.submit": { defaultKeys: [] },',
+        "}",
+        "",
+    ])}
+    actions = gen.keybinding_actions(FakeSource(agreeing))
+    assert actions == ["tui.editor.cursorUp", "tui.input.submit"], actions
+
+    diverged = {KEYS_PATH: agreeing[KEYS_PATH].replace(
+        '\t"tui.input.submit": { defaultKeys: [] },', "")}
+    gen.errors.clear()
+    assert gen.keybinding_actions(FakeSource(diverged)) is None
+    assert any("disagree" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_an_unbound_action_is_still_a_member() -> None:
+    """`defaultKeys: []` is a real action that ships without a binding.
+
+    Counting bound keys instead of actions would drop it.
+    """
+    actions = gen.keybinding_actions(FakeSource({KEYS_PATH: "\n".join([
+        "export interface Keybindings {",
+        '\t"tui.editor.historyPrevious": true;',
+        "}",
+        "",
+        "export const TUI_KEYBINDINGS = {",
+        '\t"tui.editor.historyPrevious": { defaultKeys: [] },',
+        "}",
+        "",
+    ])}))
+    assert actions == ["tui.editor.historyPrevious"], actions
+
+
 AUTH_PATH = "packages/ai/src/auth/types.ts"
 
 # Mirrors the real shape: the object union's own `options: readonly { id: string;
