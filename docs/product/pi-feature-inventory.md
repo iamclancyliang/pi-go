@@ -503,7 +503,7 @@ actions and double-counts the multi-key ones.
 
 | | Size | What it is |
 | --- | --- | --- |
-| **Barrel** (`src/index.ts`) | **133** — 68 values + 62 types + 3 external | Names the package DECLARES as its API. No `export *`, so it is enumerable |
+| **Barrel** (`src/index.ts`) | **133** — 68 values + 64 types + 1 external | Names the package DECLARES as its API. No `export *`, so it is enumerable |
 | **Published surface** | larger | `package.json` has `main` and `files: ["dist/**/*", …]` and **no `exports` map**, so every compiled module is importable by path |
 
 ⚠️ **WHICH ONE IS THE PARITY DENOMINATOR IS AN OPEN PRODUCT DECISION.** It has not been made, and this
@@ -533,12 +533,20 @@ normalisation rule met a genuine limit.
 ⚠️ **The declaration space is decided by the CHECKER, not by the export syntax.** `interface Foo {}`
 followed by `export { Foo }` exports a type through a clause shaped exactly like a value export.
 
-⚠️ **Three of the 133 have no determinable space, and saying otherwise means reading the working
-tree.** The barrel re-exports `Marked`, `Token` and `Tokens` from `marked` — a bare module specifier —
-and **`node_modules` is not in the pinned commit at all**. The installed package does declare `Tokens`
-as a namespace, but that is evidence from the working tree, not from the baseline, so the three are
-emitted as `tui.export.external`. The breakdown from the pinned source alone is **68 values, 62 types,
-3 external**.
+⚠️ **Three facts are orthogonal here and compressing them into one label loses evidence.** What the
+SOURCE states about the export surface, what the target symbol MEANS, and whether the target lies
+outside the pinned inputs are separate questions:
+
+* `export { type Token } from "marked"` states a **type-only surface**, and that holds whether or not
+  the target can be reached. Filing it as undeterminable would discard evidence the pinned source
+  gives directly.
+* A symbol can carry **several meanings at once** — a class is a value and a type, an enum is a value,
+  a type and a namespace — so one dominant kind cannot describe it.
+* `Marked` is re-exported plainly from a bare specifier, and **`node_modules` is not in the pinned
+  commit at all**, so its meanings are genuinely not determinable from the baseline. Reading the
+  installed package would answer from the working tree.
+
+The breakdown from the pinned source alone is therefore **68 values, 64 types and 1 external**.
 
 The generator's compiler host therefore **fails closed**: only files the caller supplies resolve, apart
 from the compiler's own lib, which is part of the tool rather than of the pinned source. A fallback to
@@ -1558,7 +1566,7 @@ tui.export.value.visible-width    # source literal: visibleWidth
 tui.export.value.wrap-text-with-ansi    # source literal: wrapTextWithAnsi
 ```
 
-### `tui.export.type` — 62 members
+### `tui.export.type` — 64 members
 
 - **Membership authority:** `tui/src/index.ts` barrel, exports whose symbol is a TYPE as the checker resolves it — not as the export syntax spells it
 - **Name authority:** the exported name
@@ -1619,6 +1627,8 @@ tui.export.type.tui    # source literal: TUI
 tui.export.type.terminal    # source literal: Terminal
 tui.export.type.terminal-capabilities    # source literal: TerminalCapabilities
 tui.export.type.terminal-color-scheme    # source literal: TerminalColorScheme
+tui.export.type.token    # source literal: Token
+tui.export.type.tokens    # source literal: Tokens
 tui.export.type.tui-alt-screen-options    # source literal: TuiAltScreenOptions
 tui.export.type.tui-input-listener    # source literal: TuiInputListener
 tui.export.type.tui-input-listener-result    # source literal: TuiInputListenerResult
@@ -1628,15 +1638,13 @@ tui.export.type.tui-stop-options    # source literal: TuiStopOptions
 tui.export.type.viewport-tui    # source literal: ViewportTUI
 ```
 
-### `tui.export.external` — 3 members
+### `tui.export.external` — 1 members
 
 - **Membership authority:** `tui/src/index.ts` barrel, exports re-exported from a DEPENDENCY (a bare module specifier). `node_modules` is absent from the pinned tree, so their declaration space is not determinable from the baseline; reading the installed package would answer from the working tree
 - **Name authority:** the exported name
 
 ```
 tui.export.external.marked    # source literal: Marked
-tui.export.external.token    # source literal: Token
-tui.export.external.tokens    # source literal: Tokens
 ```
 
 ### `tui.keybinding` — 47 members

@@ -807,10 +807,28 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
                                     "external": []}
     unknown: list[str] = []
     for export in facts["exports"]:
-        if export["kind"] in spaces:
-            spaces[export["kind"]].append(export["name"])
-        else:
+        # The SOURCE's own statement about the surface comes first. `export { type
+        # Token } from "marked"` is a type-only alias whether or not the target can be
+        # reached, so filing it as undeterminable would discard evidence the pinned
+        # source gives directly.
+        if export["exportTypeOnly"]:
+            spaces["type"].append(export["name"])
+            continue
+        # Otherwise the target's meanings decide, and those are knowable only when the
+        # target is inside the pinned inputs.
+        if export["externalTarget"]:
+            spaces["external"].append(export["name"])
+            continue
+        meanings = export["meanings"]
+        if not meanings:
             unknown.append(export["name"])
+        elif "value" in meanings:
+            spaces["value"].append(export["name"])
+        elif "namespace" in meanings:
+            spaces["namespace"].append(export["name"])
+        else:
+            spaces["type"].append(export["name"])
+
     if unknown:
         fail(f"the checker could not classify {sorted(unknown)} in the TUI barrel - "
              f"an unclassified export must not be folded into a declaration space")

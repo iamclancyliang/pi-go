@@ -40,19 +40,40 @@ def derive(family: str, path: str):
     return register
 
 
+def _tui_space(facts, wanted):
+    """Classify by the surface the SOURCE states, then by the target's meanings."""
+    names = []
+    for export in facts["exports"]:
+        if export["exportTypeOnly"]:
+            space = "type"
+        elif export["externalTarget"]:
+            space = "external"
+        elif "value" in export["meanings"]:
+            space = "value"
+        elif "namespace" in export["meanings"]:
+            space = "namespace"
+        elif export["meanings"]:
+            space = "type"
+        else:
+            space = "unknown"
+        if space == wanted:
+            names.append(export["name"])
+    return names
+
+
 @derive("tui.export.value", "packages/tui/src/index.ts")
 def _tui_values(facts):
-    return [e["name"] for e in facts["exports"] if e["kind"] == "value"]
+    return _tui_space(facts, "value")
 
 
 @derive("tui.export.type", "packages/tui/src/index.ts")
 def _tui_types(facts):
-    return [e["name"] for e in facts["exports"] if e["kind"] == "type"]
+    return _tui_space(facts, "type")
 
 
 @derive("tui.export.external", "packages/tui/src/index.ts")
 def _tui_externals(facts):
-    return [e["name"] for e in facts["exports"] if e["kind"] == "external"]
+    return _tui_space(facts, "external")
 
 
 @derive("tui.keybinding", "packages/tui/src/keybindings.ts")

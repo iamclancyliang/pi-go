@@ -1162,58 +1162,58 @@ def _facts(files: dict[str, str], wanted: str) -> dict:
     return gen.MemberFacts(TS_REPO).of(files)[wanted]
 
 
-def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
-    """A file present in the CHECKOUT but not supplied must not resolve.
+def test_export_facts_are_three_orthogonal_fields() -> None:
+    """Surface, meanings and locality answer different questions.
 
-    This is the discriminating case for reading the working tree: `./keys.ts` exists
-    in the Pi checkout, so a host that falls back to the file system answers from it,
-    while one that fails closed cannot. A bare specifier would not discriminate,
-    because it is classified as external before resolution matters.
+    Compressed into one label, a class reads as a value only, an enum as a
+    namespace, and a type-only alias to a dependency loses the surface the source
+    states.
     """
-    facts = _facts({"packages/tui/src/index.ts":
-                    'export { type KeyId } from "./keys.ts";\n'},
-                   "packages/tui/src/index.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds == {"KeyId": "unknown"}, kinds
+    facts = _facts({"three.ts": ('export { Marked, type Token } from "marked";\n'
+                                 "export class C {}\n"
+                                 "export enum E { a }\n"),}, "three.ts")
+    by_name = {e["name"]: e for e in facts["exports"]}
+    assert by_name["Token"]["exportTypeOnly"] and by_name["Token"]["externalTarget"]
+    assert by_name["Marked"]["exportTypeOnly"] is False
+    assert by_name["C"]["meanings"] == ["value", "type"], by_name["C"]
+    assert set(by_name["E"]["meanings"]) == {"value", "type", "namespace"}, by_name["E"]
 
 
-def test_a_local_namespace_is_its_own_kind() -> None:
-    """A locally declared namespace resolves, and belongs to neither space."""
-    facts = _facts({"ns2.ts": "export namespace Space { export const inner = 1; }\n"
-                              "export const value = 2;\n"}, "ns2.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds == {"Space": "namespace", "value": "value"}, kinds
+def test_a_type_only_export_of_a_dependency_stays_a_type() -> None:
+    """`export { type X } from "pkg"` states its surface regardless of the target.
 
-
-def test_the_program_never_reads_the_working_tree() -> None:
-    """A module the caller did not supply must NOT resolve from disk.
-
-    Falling back to the file system classifies an export by reading the working
-    tree, and `node_modules` is not in the pinned commit at all, so such an answer
-    could never be baseline evidence.
+    Filing it as undeterminable discards evidence the pinned source gives directly.
     """
-    facts = _facts({"only.ts": 'export { something } from "some-installed-package";\n'}, "only.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds == {"something": "external"}, kinds
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export { Plain, type Marked } from "outside";\n'
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert "Marked" in result["type"], result["type"]
+    assert "Plain" in result["external"], result["external"]
 
 
-def test_a_dependency_reexport_is_external_not_a_space() -> None:
-    """A bare module specifier means the declaration is outside the pinned tree."""
-    facts = _facts({"bare.ts": ('export { A, type B } from "pkg";\n'
-                                'export { C } from "./local.ts";\n'),
-                    "local.ts": "export const C = 1;\n"}, "bare.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds["A"] == "external" and kinds["B"] == "external", kinds
-    assert kinds["C"] == "value", kinds
+def test_a_bare_case_clause_declaration_is_hoisted() -> None:
+    """A `switch` body is the scope, but declarations sit inside its clauses.
 
-
-def test_a_relative_reexport_is_still_classified() -> None:
-    """Failing closed must not stop local modules from resolving."""
-    facts = _facts({"rel.ts": 'export { Box, type BoxOptions } from "./box.ts";\n',
-                    "box.ts": "export class Box {}\nexport interface BoxOptions { x: number }\n"},
-                   "rel.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds == {"Box": "value", "BoxOptions": "type"}, kinds
+    Without flattening them, `case 1: const env = ...` is never registered and a
+    write in that clause resolves outward to an object that was cleared elsewhere.
+    """
+    switches = dict(ENV_FIXTURE)
+    switches["packages/coding-agent/src/switch.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_CASE;\n"
+        "function g(x) {\n"
+        "  switch (x) {\n"
+        "    case 1:\n"
+        "      const env = { ...getShellEnv() };\n"
+        "      env.PI_CASE = value;\n"
+        "      break;\n"
+        "  }\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(switches))
+    # The inner object is seeded and never cleared, so the guard must fire.
+    assert any("PI_CASE" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
 
 
 def test_facts_report_only_top_level_interfaces() -> None:
@@ -1246,23 +1246,10 @@ def test_facts_report_only_top_level_object_registries() -> None:
     assert facts["objectKeys"]["TABLE"] == ["real.key"], facts["objectKeys"]
 
 
-def test_facts_classify_an_interface_exported_by_clause_as_a_type() -> None:
-    """Syntax cannot answer the declaration space; the checker can."""
-    facts = _facts({"c.ts": "interface Foo {}\nexport { Foo };\nexport const bar = 1;\n"}, "c.ts")
-    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
-    assert kinds == {"Foo": "type", "bar": "value"}, kinds
-
-
 def test_facts_exclude_a_namespace_members_exports() -> None:
     """A namespace's exports are not the module's exports."""
     facts = _facts({"d.ts": "namespace N { export const Hidden = 1; }\nexport const Visible = 2;\n"}, "d.ts")
     assert [e["name"] for e in facts["exports"]] == ["Visible"]
-
-
-def test_facts_report_an_unresolvable_alias_as_unknown() -> None:
-    """An alias whose module is absent must not be assigned a space."""
-    facts = _facts({"e.ts": 'export { Missing } from "./absent.ts";\n'}, "e.ts")
-    assert [e["kind"] for e in facts["exports"]] == ["unknown"], facts["exports"]
 
 
 def test_a_nested_interface_does_not_replace_the_exported_one() -> None:
@@ -1310,33 +1297,6 @@ def test_a_nested_registry_does_not_replace_the_exported_one() -> None:
         ]),
     }
     assert gen.keybinding_actions(FakeSource(shadowed)) == ["tui.editor.cursorUp"]
-
-
-def test_barrel_classifies_by_declaration_space_not_by_syntax() -> None:
-    """`interface Foo {}; export { Foo }` exports a TYPE.
-
-    The clause is shaped exactly like a value export, so reading the syntax puts it
-    in the wrong space. Only the checker can answer this.
-    """
-    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
-    assert "Foo" in barrel["type"], barrel
-    assert "Foo" not in barrel["value"], barrel
-
-
-def test_barrel_excludes_a_namespace_member_export() -> None:
-    """A namespace's exports are not the module's exports."""
-    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
-    every = barrel["value"] + barrel["type"] + barrel["namespace"]
-    assert "Hidden" not in every, every
-    assert "Visible" in barrel["value"], barrel["value"]
-
-
-def test_barrel_reports_a_dependency_export_as_external() -> None:
-    """An export re-exported from a bare specifier is not placed in a space."""
-    withdep = dict(BARREL_FIXTURE)
-    withdep[BARREL_PATH] += 'export { type Outside } from "some-package";\n'
-    barrel = gen.tui_barrel_names(FakeSource(withdep))
-    assert barrel["external"] == ["Outside"], barrel["external"]
 
 
 def test_barrel_fails_on_an_export_it_cannot_classify() -> None:

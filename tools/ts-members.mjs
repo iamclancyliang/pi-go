@@ -14,7 +14,8 @@
  * Protocol: `{"<path>": "<source text>", ...}` on stdin, and on stdout
  *
  *   { "<path>": {
- *       "exports": [ { "name", "kind", "form", "local", "module" } ],
+ *       "exports": [ { "name", "exportTypeOnly", "meanings", "externalTarget",
+ *                      "form", "local" } ],
  *       "typeAliasUnions": { "<alias name>": { "literals", "members" } },
  *       "interfaceKeys": { "<interface name>": [ "<key>", ... ] },
  *       "keyedLiterals": [ { "path", "key", "value" } ],
@@ -24,8 +25,11 @@
  *       "bindings": { "<declaration offset>": { "name", "initializer" } }
  *   } }
  *
- *   exports.kind    - "value" or "type": TypeScript's two declaration spaces, in
- *                     which a value and a type may share a name up to case
+ *   exports         - three orthogonal facts per export, never compressed into one
+ *                     label: what the SOURCE says about the surface
+ *                     (`exportTypeOnly`), what the target symbol MEANS
+ *                     (`meanings`, possibly several), and whether the target lies
+ *                     outside the pinned inputs (`externalTarget`)
  *   exports.form    - the syntax that exported it, so a family can require or
  *                     exclude a form instead of guessing from the name
  *   exports.local   - the local name behind an alias, when they differ
@@ -159,10 +163,45 @@ function analyse(path, program, checker) {
 	 * supplied, the kind is `"unknown"` rather than assumed, so a family that needs
 	 * kinds can refuse the result instead of accepting a guess.
 	 */
+	/**
+	 * The module's exports as THREE orthogonal facts, because they answer different
+	 * questions and compressing them loses one:
+	 *
+	 *   exportTypeOnly - what the pinned SOURCE states about the export surface.
+	 *                    `export { type Token }` is a type-only alias whether or not
+	 *                    the target is reachable, so this is baseline evidence on its
+	 *                    own.
+	 *   meanings       - what the target symbol MEANS, from the checker: value, type,
+	 *                    namespace, or several at once. A class is a value and a type;
+	 *                    an enum is a value and a type; a class merged with a namespace
+	 *                    is all three. One dominant kind cannot say that.
+	 *   externalTarget - whether the declaration lives outside the pinned inputs. The
+	 *                    barrel re-exports from a bare specifier, and `node_modules` is
+	 *                    absent from the pinned commit, so the target's meanings are
+	 *                    not determinable from the baseline -- but the export surface
+	 *                    still is.
+	 */
 	function recordExports() {
 		const moduleSymbol = checker.getSymbolAtLocation(file);
 		if (!moduleSymbol) return;
 		for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
+			const declarations = symbol.declarations ?? [];
+
+			// The source's own statement about the surface.
+			const exportTypeOnly = declarations.some((node) => {
+				if (ts.isExportSpecifier(node)) {
+					return Boolean(node.isTypeOnly || node.parent?.parent?.isTypeOnly);
+				}
+				return ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node);
+			});
+
+			// Whether the declaration is outside the pinned inputs.
+			const externalTarget = declarations.some((node) => {
+				const specifier = node.parent?.parent?.moduleSpecifier;
+				return Boolean(specifier && ts.isStringLiteral(specifier) &&
+					!specifier.text.startsWith(".") && !specifier.text.startsWith("/"));
+			});
+
 			let target = symbol;
 			let resolved = true;
 			if (symbol.flags & ts.SymbolFlags.Alias) {
@@ -171,46 +210,28 @@ function analyse(path, program, checker) {
 				} catch {
 					resolved = false;
 				}
-				// A failed resolution yields a synthetic symbol rather than an error, and
-				// it carries no declaration. Treating that as resolved is how every
-				// export came back as one kind.
-				if (!target || target === symbol ||
-					(target.flags & ts.SymbolFlags.Unknown) ||
+				if (!target || target === symbol || (target.flags & ts.SymbolFlags.Unknown) ||
 					!(target.declarations ?? []).length) {
 					resolved = false;
 				}
 			}
-			const flags = resolved ? target.flags : 0;
-			// A namespace is neither a plain value nor a plain type, and this barrel
-			// re-exports one (`Tokens` from `marked`, declared `export declare
-			// namespace`). Folding it into either space would misstate the surface.
-			const isNamespace = Boolean(flags & ts.SymbolFlags.Namespace) &&
-				!(flags & ts.SymbolFlags.Variable);
-			const isValue = Boolean(flags & ts.SymbolFlags.Value);
-			const isType = Boolean(flags & (ts.SymbolFlags.Type | ts.SymbolFlags.TypeAlias |
-				ts.SymbolFlags.Interface));
-			// `external` means the export comes from a DEPENDENCY: the barrel re-exports
-			// it from a bare module specifier, so the declaration is not in the pinned
-			// tree and its declaration space is not determinable from the baseline.
-			// That is a fact the pinned source states, unlike reading the installed
-			// package, which would answer from the working tree.
-			const external = (symbol.declarations ?? []).some((node) => {
-				const statement = node.parent?.parent;
-				const specifier = statement?.moduleSpecifier;
-				return Boolean(specifier && ts.isStringLiteral(specifier) &&
-					!specifier.text.startsWith(".") && !specifier.text.startsWith("/"));
-			});
-			const kind = external ? "external"
-				: !resolved ? "unknown"
-				: isNamespace ? "namespace"
-				: isValue ? "value"
-				: isType ? "type"
-				: "unknown";
-			const declaration = (symbol.declarations ?? [])[0];
+
+			// Every meaning the target carries, not one dominant label.
+			const meanings = [];
+			if (resolved) {
+				const flags = target.flags;
+				if (flags & ts.SymbolFlags.Value) meanings.push("value");
+				if (flags & (ts.SymbolFlags.Type | ts.SymbolFlags.TypeAlias |
+					ts.SymbolFlags.Interface)) meanings.push("type");
+				if (flags & ts.SymbolFlags.Namespace) meanings.push("namespace");
+			}
+
 			exports_.push({
 				name: symbol.getName(),
-				kind,
-				form: declaration ? ts.SyntaxKind[declaration.kind] : "unknown",
+				exportTypeOnly,
+				externalTarget,
+				meanings,
+				form: declarations[0] ? ts.SyntaxKind[declarations[0].kind] : "unknown",
 				...(resolved && target !== symbol ? { local: target.getName() } : {}),
 			});
 		}

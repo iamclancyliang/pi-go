@@ -221,7 +221,19 @@ function analyse(path, source) {
 			}
 		}
 
+		// A `switch` body is the scope, but its declarations sit inside case clauses,
+		// which are not statements of it. Without flattening them, `case 1: const env
+		// = ...` is never registered and writes in that clause resolve outward.
+		const scopeStatements = [];
 		ts.forEachChild(scopeNode, (child) => {
+			if (ts.isCaseClause(child) || ts.isDefaultClause(child)) {
+				for (const statement of child.statements) scopeStatements.push(statement);
+				return;
+			}
+			scopeStatements.push(child);
+		});
+
+		scopeStatements.forEach((child) => {
 			if (ownList(child)) return;   // the loop hoists its own header
 			for (const list of declarationLists(child)) {
 				const blockScoped = Boolean(list.flags &
