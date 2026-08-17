@@ -37,7 +37,8 @@ pi -p @screenshot.png "这是什么"      # 图片同理
 **限制与降级**
 - ⚠️ **运行形态由终端状态决定**：`pi` 在终端里进入交互界面；**一旦输出被重定向（接管道、重定向到文件），
   自动降级为打印模式**。想强制打印用 `-p`。
-- **交互界面无法用 `--mode` 指定**——`--mode` 只接受 `text`/`json`/`rpc`。
+- **没有 `--mode interactive` 这个写法**（参数只认 `text`/`json`/`rpc`），但交互界面**能**通过参数走到：
+  `--mode text` + 两端都是终端 + 不加 `--print`，解析出来就是交互界面。
 - `--offline` 关闭启动时的联网动作（更新检查、包更新、遥测）。
 
 ## 二、交互界面
@@ -209,27 +210,51 @@ pi --mode rpc [--provider anthropic] [--model sonnet] [--no-session]
 **49 个设置项**，覆盖压缩、分支摘要、重试、终端与图像、思考预算、Markdown 渲染、默认模型与厂商、
 队列模式、主题、外部编辑器、shell 路径与前缀、扩展与技能与主题来源、遥测与分析开关等。
 
-**常用环境变量**：`PI_CODING_AGENT_DIR`（配置目录）· `PI_CODING_AGENT_SESSION_DIR`（会话目录）·
-`PI_OFFLINE`（禁联网）· `PI_TELEMETRY`（遥测开关）· `PI_SHARE_VIEWER_URL`（`/share` 的查看地址）·
-`HTTP_PROXY`/`HTTPS_PROXY`（代理）。
-工具执行时还能读到 `PI_SESSION_ID`、`PI_SESSION_FILE`、`PI_PROVIDER`、`PI_MODEL`、`PI_REASONING_LEVEL`。
+**环境变量（源码里读的一共 24 个）**
+
+| 想做什么 | 变量 |
+| --- | --- |
+| 换配置目录 | `PI_CODING_AGENT_DIR` |
+| 换会话目录（`--session-dir` 优先级更高） | `PI_CODING_AGENT_SESSION_DIR` |
+| 完全不联网 | `PI_OFFLINE` |
+| 关遥测 | `PI_TELEMETRY` |
+| 跳过版本检查 | `PI_SKIP_VERSION_CHECK` |
+| 改 `/share` 的查看地址 | `PI_SHARE_VIEWER_URL` |
+| 走代理 | `HTTP_PROXY` / `HTTPS_PROXY` |
+| 打开实验特性（**官方文档未写**） | `PI_EXPERIMENTAL=1` |
+| 改 OAuth 回调主机（**官方文档未写**，默认 `127.0.0.1`） | `PI_OAUTH_CALLBACK_HOST` |
+| 延长 Anthropic/Bedrock/OpenAI 的缓存保留 | `PI_CACHE_RETENTION=long` |
+| 调终端 ESC 判定超时 | `PI_TUI_ESC_TIMEOUT` |
+
+**工具里能读到的会话信息**：`bash` 执行命令时，Pi 会注入 `PI_SESSION_ID`、`PI_SESSION_FILE`、
+`PI_PROVIDER`、`PI_MODEL`、`PI_REASONING_LEVEL`。注入前会先删掉同名的旧值，所以不会串到上一次的会话；
+设置 `exposeSessionEnvironment: false` 可以关掉。
 
 **限制与降级**
 - 项目级设置需要项目被信任才生效（`/trust` 可持久保存决定）。
 - `defaultProjectTrust` 决定默认是询问、信任还是拒绝。
+- ⚠️ **配置目录/会话目录这两个变量名是拼出来的**，前缀取自产品名（默认 `pi`）。改品牌名之后要用
+  `${新名大写}_CODING_AGENT_DIR`，**旧的 `PI_` 前缀会失效**。
+- ⚠️ 另有一批调试/性能开关（`PI_TIMING`、`PI_STARTUP_BENCHMARK`、`PI_TUI_DEBUG`、`PI_DEBUG_REDRAW`、
+  `PI_TUI_WRITE_LOG`、`PI_CLEAR_ON_SHRINK`）官方文档没写，**不建议当稳定接口用**。
 
 ---
 
 ## 附录：怎么核对这份文档
 
-这两份文档的内容都来自固定版本 `086c32e7`。功能条目的成员可以自己重新生成校验：
+内容都来自固定版本 `086c32e7`。可以自己重跑：
 
 ```bash
 cd pi-go
 python3 tools/gen-feature-ids.py --pi-repo /path/to/pi \
         --check-providers tools/expected-providers.txt
+python3 tools/test_gen_feature_ids.py     # 抽取器自身的负向控制
 ```
 
-退出码 0 表示与源码一致；非 0 会写明哪一项不符。工具只读固定版本，不受本地 pi 仓库当前状态影响。
+**退出码 0 只说明**：固定版本可读、抽取器没触发自身守卫（无法归类的调用 / ID 撞车 / 成员数不符）、
+**厂商那一类**与一份独立期望清单集合相等。
+
+**它不说明**：其余 10 类**没有**与另一份独立权威清单做集合比对，所以退出码 0 的意思是
+「**没有发现不一致**」，而不是「**已证明完整**」；它也不替代逐文件独立遗漏审计。
 
 标 🟡 的小节表示**我们还没查完**，不表示「查完了只有这些」。

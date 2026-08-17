@@ -56,6 +56,7 @@ class Source:
     def __init__(self, repo: str, baseline: str) -> None:
         self.repo = repo
         self.baseline = baseline
+        self._views: dict[str, "SourceView"] = {}
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
         """Run git in the repo, surviving an unusable working directory.
@@ -121,6 +122,32 @@ class Source:
             )
         return result.stdout
 
+    def view(self, path: str) -> "SourceView":
+        """The scanned views of one file, read and scanned at most once.
+
+        Caching is not only about cost: it makes one file yield one view, so two
+        extractors reading the same path cannot silently disagree about it.
+        """
+        cached = self._views.get(path)
+        if cached is None:
+            cached = SourceView(path, self.read(path))
+            self._views[path] = cached
+        return cached
+
+    def paths(self, pattern: str) -> list[str]:
+        """Every tracked path at the baseline matching a regex, sorted.
+
+        Listing the tree at the pinned commit -- rather than walking the working
+        directory -- keeps the file set as pinned as the file contents.
+        """
+        listed = self._git("ls-tree", "-r", "--name-only", self.baseline)
+        if listed.returncode != 0:
+            raise SourceUnavailable(
+                f"cannot list the tree at {self.baseline}: {listed.stderr.strip()}"
+            )
+        matcher = re.compile(pattern)
+        return sorted(p for p in listed.stdout.splitlines() if matcher.match(p))
+
 
 def normalize(literal: str) -> str:
     with_boundaries = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", literal)
@@ -151,20 +178,34 @@ def emit(family: str, membership_authority: str, name_authority: str,
     print("```\n")
 
 
+# A `/` is division when a value could already have ended, and starts a regex
+# otherwise. These are the character classes that can END a value in this
+# codebase's TypeScript: an identifier or numeric character, a closing bracket
+# of any kind, or an identifier character that `isalnum` does not cover.
+_CLOSES_A_VALUE = frozenset(")]}")
+_IDENTIFIER_TAIL = frozenset("_$")
+
+
+def _value_may_have_ended(previous: str) -> bool:
+    """Whether the previous significant character could end a value.
+
+    Naming this test is the point: at the call site the bare set membership read
+    as an arbitrary punctuation list, which hid the one rule that decides
+    division from regex.
+    """
+    if not previous:
+        return False
+    return (previous.isalnum()
+            or previous in _CLOSES_A_VALUE
+            or previous in _IDENTIFIER_TAIL)
+
+
 def _scan(source: str, blank_string_contents: bool) -> str:
     """Return source with non-code regions blanked, preserving every offset.
 
-    Two views are derived from this, and the distinction matters:
-
-      * `without_comments` blanks comments and regex literals but KEEPS string
-        contents, because the values being extracted -- ids, type names, command
-        literals -- live inside strings.
-      * `structural` additionally blanks string contents, and is used only where
-        a delimiter is being counted, so a parenthesis inside a string cannot
-        change a depth.
-
-    Both preserve length and newlines, so an offset found in one view addresses
-    the same character in the other.
+    `SourceView` derives both views from this and documents which job each one
+    does; see that class. Both preserve length and newlines, so an offset found
+    in one view addresses the same character in the other.
 
     A `/` begins a regex only where a value cannot already have ended, which is
     the standard test applied to the previous significant character.
@@ -220,7 +261,7 @@ def _scan(source: str, blank_string_contents: bool) -> str:
             continue
 
         previous = previous_significant(index)
-        if char == "/" and not (previous.isalnum() or previous in ")]}_$"):
+        if char == "/" and not _value_may_have_ended(previous):
             scan = index + 1
             in_class = False
             while scan < length:
@@ -248,37 +289,117 @@ def _scan(source: str, blank_string_contents: bool) -> str:
     return "".join(result)
 
 
-def without_comments(source: str) -> str:
-    """Code and string contents, with comments and regex literals blanked."""
-    return _scan(source, blank_string_contents=False)
+class SourceView:
+    """One file under two offset-aligned views, with distinct jobs.
 
+    The two jobs must not be confused, and confusing them is a real defect this
+    class exists to prevent:
 
-def structural(source: str) -> str:
-    """Delimiters only: comments, regex literals and string contents blanked."""
-    return _scan(source, blank_string_contents=True)
+      * `structural` -- comments, regex literals AND string contents blanked.
+        **Discovery runs here.** Pseudo-code inside a string or template
+        (`const s = "export const createPhantomTool = 1"`) has had its contents
+        blanked, so it cannot match a declaration or call shape and cannot
+        become a member.
+      * `extraction` -- comments and regex literals blanked, string contents
+        KEPT, because the values being read (ids, type names, command literals)
+        live inside strings. **Values are read here**, at a span discovered on
+        the structural view.
 
-
-def balanced_argument(visible: str, open_paren: int) -> str | None:
-    """Return the text inside a call's parentheses.
-
-    Depth is counted on the structural view, so a parenthesis in a comment or
-    string cannot shift it, while the text returned comes from the view that
-    still contains string contents.
+    Discovering on `extraction` would accept fabricated members written inside
+    string literals; extracting from `structural` would read blanks. Neither
+    view can do both jobs, which is why both exist and why offsets align.
     """
-    delimiters = structural(visible)
-    depth = 0
-    for index in range(open_paren, len(delimiters)):
-        char = delimiters[index]
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                return visible[open_paren + 1: index]
-    return None
+
+    __slots__ = ("path", "extraction", "structural")
+
+    def __init__(self, path: str, source: str) -> None:
+        self.path = path
+        self.extraction = _scan(source, blank_string_contents=False)
+        self.structural = _scan(source, blank_string_contents=True)
+        # Every guarantee below rests on offset alignment; assert it rather than
+        # trust it, because a scanner change that broke it would otherwise show
+        # up as values silently read from the wrong place.
+        if not (len(self.extraction) == len(self.structural) == len(source)):
+            fail(f"{path}: views lost offset alignment "
+                 f"({len(source)} source, {len(self.extraction)} extraction, "
+                 f"{len(self.structural)} structural)")
+
+    def discover(self, pattern: "re.Pattern[str] | str") -> "list[re.Match[str]]":
+        """Find code sites, on the view where strings cannot fake them."""
+        return list(re.finditer(pattern, self.structural))
+
+    def value(self, begin: int, finish: int) -> str:
+        """Read the real text of a discovered span, string contents included."""
+        return self.extraction[begin:finish]
+
+    def quoted_after(self, prefix: str, begin: int = 0,
+                     finish: int | None = None) -> list[str]:
+        """Values of every `<prefix>"..."` whose PREFIX is real code.
+
+        This is the safe way to read a string literal, and the only one used
+        here. The prefix and both quotes are located on the structural view, so
+        a pair written inside a string or template cannot contribute a value;
+        the value itself is then read from the aligned extraction view, where
+        string contents survive.
+
+        `prefix` must end where the opening quote begins. Single and double
+        quotes both count, since this codebase uses both.
+        """
+        stop = len(self.structural) if finish is None else finish
+        found: list[str] = []
+        for match in re.finditer(prefix + r"[\"']", self.structural[begin:stop]):
+            opening = begin + match.end() - 1
+            closing = self.structural.find(self.structural[opening], opening + 1)
+            if closing == -1 or closing >= stop:
+                # An unterminated literal is a scanner or source problem, not a
+                # value; skipping it silently would publish a short set, so the
+                # caller's own emptiness check has to catch it.
+                continue
+            found.append(self.value(opening + 1, closing))
+        return found
+
+    def quoted_in(self, begin: int, finish: int) -> list[str]:
+        """Every string literal in a span, for declarations of bare literals.
+
+        A type union (`export type Mode = "text" | "json"`) has no key to anchor
+        on, so the quotes themselves are the anchor -- and they are walked on the
+        structural view, pairing each opening quote with its own closing quote,
+        so a quote inside a string can neither open nor close a literal here.
+        """
+        found: list[str] = []
+        index = begin
+        while index < finish:
+            char = self.structural[index]
+            if char in "\"'":
+                closing = self.structural.find(char, index + 1)
+                if closing == -1 or closing >= finish:
+                    break
+                found.append(self.value(index + 1, closing))
+                index = closing + 1
+                continue
+            index += 1
+        return found
+
+    def balanced_argument(self, open_paren: int) -> str | None:
+        """Return the text inside a call's parentheses.
+
+        Depth is counted on the structural view, so a parenthesis inside a
+        comment or string cannot shift it; the text returned comes from the
+        extraction view, which still holds the values.
+        """
+        depth = 0
+        for index in range(open_paren, len(self.structural)):
+            char = self.structural[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return self.value(open_paren + 1, index)
+        return None
 
 
-def union_literals(source: str, declaration: str, what: str) -> list[str] | None:
+def union_literals(view: SourceView, declaration: str, what: str) -> list[str] | None:
     """Collect `type: "..."` literals from one TypeScript union declaration.
 
     The union is bounded by its own STRUCTURE - consecutive lines belonging to
@@ -289,23 +410,26 @@ def union_literals(source: str, declaration: str, what: str) -> list[str] | None
     Returns None when the declaration cannot be located, so the caller can skip
     emitting a set rather than publish a short one.
     """
-    match = re.search(rf"^{re.escape(declaration)}\s*$", source, re.M)
+    match = re.search(rf"^{re.escape(declaration)}\s*$", view.structural, re.M)
     if not match:
         fail(f"cannot locate {what}: declaration {declaration!r} not found")
         return None
 
     collected: list[str] = []
-    for line in source[match.end():].splitlines():
+    offset = match.end()
+    for line in view.structural[match.end():].splitlines(keepends=True):
         stripped = line.strip()
-        if not stripped or stripped.startswith("//") or stripped.startswith("*") \
-                or stripped.startswith("/*"):
-            continue
-        # A union member, or a continuation of one, always begins with `|` or is
-        # indented inside a member's braces. Anything at column zero that is not
-        # a pipe has ended the declaration.
-        if not (stripped.startswith("|") or line.startswith((" ", "\t"))):
-            break
-        collected.extend(re.findall(r'type: "([a-z_]+)"', line))
+        if stripped and not (stripped.startswith("//") or stripped.startswith("*")
+                             or stripped.startswith("/*")):
+            # A union member, or a continuation of one, always begins with `|` or
+            # is indented inside a member's braces. Anything at column zero that
+            # is not a pipe has ended the declaration.
+            if not (stripped.startswith("|") or line.startswith((" ", "\t"))):
+                break
+            collected.extend(
+                view.quoted_after(r"type:\s*", offset, offset + len(line))
+            )
+        offset += len(line)
 
     if not collected:
         fail(f"{what} yielded no type literals - the union shape probably changed")
@@ -319,14 +443,15 @@ def coding_agent_tool_names(src: Source) -> list[str] | None:
     A hardcoded list can agree with the registry today and diverge silently the
     moment a tool is added upstream, because nothing would detect the drift.
     """
-    source = without_comments(src.read("packages/coding-agent/src/core/tools/index.ts"))
+    view = src.view("packages/coding-agent/src/core/tools/index.ts")
     declared = re.search(
-        r"export const allToolNames: Set<ToolName> = new Set\(\[(.*?)\]\)", source, re.S
+        r"export const allToolNames: Set<ToolName> = new Set\(\[(.*?)\]\)",
+        view.structural, re.S,
     )
     if not declared:
         fail("cannot locate allToolNames in core/tools/index.ts")
         return None
-    names = re.findall(r'"([a-z_]+)"', declared.group(1))
+    names = view.quoted_in(*declared.span(1))
     if not names:
         fail("allToolNames yielded no entries - its shape probably changed")
         return None
@@ -340,15 +465,25 @@ def harness_tool_names(src: Source) -> list[str] | None:
     (`export { createXTool } from ...`) and a direct exported declaration
     (`export const createXTool = ...`). A reference that is not exported -- an
     internal alias, for instance -- is not a member.
+
+    Both forms are discovered on the STRUCTURAL view. An export written inside a
+    string (`const s = "export const createPhantomTool = 1"`) has had its
+    contents blanked there, so it cannot fabricate a member; discovering on the
+    extraction view accepted exactly that.
     """
-    source = without_comments(src.read("packages/agent/src/harness/tools/index.ts"))
+    view = src.view("packages/agent/src/harness/tools/index.ts")
 
     creators: set[str] = set()
 
     # Re-export blocks, including `as` aliases: the exported name is what counts.
-    for block in re.finditer(r"\bexport\s*\{([^}]*)\}", source, re.S):
-        for clause in block.group(1).split(","):
-            exported = clause.split(" as ")[-1].strip()
+    # The alias separator is matched as `as` between whitespace RUNS, because a
+    # clause may be split across lines or indented with tabs, and requiring the
+    # exact substring `" as "` silently dropped those aliases.
+    alias = re.compile(r"\bas\s+([A-Za-z_$][\w$]*)\s*$", re.S)
+    for block in view.discover(re.compile(r"\bexport\s*\{([^}]*)\}", re.S)):
+        for clause in view.value(*block.span(1)).split(","):
+            aliased = alias.search(clause)
+            exported = aliased.group(1) if aliased else clause.strip()
             found = re.fullmatch(r"create([A-Z][A-Za-z]*)Tool", exported)
             if found:
                 creators.add(found.group(1))
@@ -359,7 +494,7 @@ def harness_tool_names(src: Source) -> list[str] | None:
         r"\bexport\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
         r"(?:const|let|var|function\*?|class)\s+create([A-Z][A-Za-z]*)Tool\b"
     )
-    for match in declaration.finditer(source):
+    for match in view.discover(declaration):
         creators.add(match.group(1))
 
     if not creators:
@@ -380,12 +515,12 @@ def app_modes(src: Source) -> list[str] | None:
     `AppMode`, because that is the product surface; the CLI literals are its
     input mapping and are recorded as evidence rather than as members.
     """
-    source = without_comments(src.read("packages/coding-agent/src/core/project-trust.ts"))
-    declared = re.search(r"export type AppMode = ([^;]+);", source)
+    view = src.view("packages/coding-agent/src/core/project-trust.ts")
+    declared = re.search(r"export type AppMode = ([^;]+);", view.structural)
     if not declared:
         fail("cannot locate the AppMode type in core/project-trust.ts")
         return None
-    modes = re.findall(r'"([a-z-]+)"', declared.group(1))
+    modes = view.quoted_in(*declared.span(1))
     if not modes:
         fail("AppMode yielded no literals - its shape probably changed")
         return None
@@ -398,18 +533,18 @@ def cli_mode_literals(src: Source) -> list[str]:
     The type and the parser must agree; if they diverge the parser is what a
     user experiences, so a mismatch is an error rather than a silent choice.
     """
-    source = without_comments(src.read("packages/coding-agent/src/cli/args.ts"))
-    declared = re.search(r'export type Mode = ([^;]+);', source)
+    view = src.view("packages/coding-agent/src/cli/args.ts")
+    declared = re.search(r'export type Mode = ([^;]+);', view.structural)
     if not declared:
         fail("cannot locate the Mode type in cli/args.ts")
         return []
-    from_type = re.findall(r'"([a-z-]+)"', declared.group(1))
+    from_type = view.quoted_in(*declared.span(1))
 
-    guard = re.search(r'const mode = args\[\+\+i\];\s*if \(([^)]+)\)', source)
+    guard = re.search(r'const mode = args\[\+\+i\];\s*if \(([^)]+)\)', view.structural)
     if not guard:
         fail("cannot locate the --mode acceptance test in cli/args.ts")
         return []
-    from_parser = re.findall(r'mode === "([a-z-]+)"', guard.group(1))
+    from_parser = view.quoted_after(r"mode\s*===\s*", *guard.span(1))
 
     if sorted(from_type) != sorted(from_parser):
         fail(f"Mode type {sorted(from_type)} disagrees with the parser's accepted "
@@ -424,7 +559,9 @@ def setting_keys(src: Source) -> list[str] | None:
     Authority is the interface declaration, not the settings documentation:
     the two are separate artefacts and may disagree.
     """
-    source = without_comments(src.read("packages/coding-agent/src/core/settings-manager.ts"))
+    # Keys are identifiers, so the structural view holds them intact and is also
+    # the view where a key written inside a string cannot be mistaken for one.
+    source = src.view("packages/coding-agent/src/core/settings-manager.ts").structural
     match = re.search(r"^export interface Settings \{$", source, re.M)
     if not match:
         fail("cannot locate the Settings interface declaration")
@@ -443,6 +580,82 @@ def setting_keys(src: Source) -> list[str] | None:
     return keys
 
 
+def environment_names(src: Source) -> list[str] | None:
+    """Every `PI_*` environment variable the product READS.
+
+    Three facts make a naive scan wrong, and each one cost a wrong count first:
+
+    1. Not every name is a literal. `config.ts` builds two of them from the
+       configurable app name (`${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`), so
+       grepping for `PI_` misses them entirely and a fork named `tau` reads
+       `TAU_*`. They are recorded under their default `pi` spelling, with the
+       derivation as their authority.
+    2. There are three read FORMS, not one: `process.env.X`, `process.env["X"]`
+       and a member of an injected `env` object -- including through the
+       `getProviderEnvValue("X", env)` helper. Scanning only `process.env.X`
+       missed `PI_TUI_ESC_TIMEOUT` and `PI_CACHE_RETENTION`, both documented.
+    3. A name that is only ASSIGNED is not a read, and an assignment matches a
+       naive read pattern. `PI_CODING_AGENT` is set for child processes and never
+       read back, so it is not a configuration input. The `(?!\\s*=[^=])`
+       lookahead in each read pattern is what excludes it -- comparison (`===`)
+       still counts, assignment does not. A name-specific exclusion list was
+       tried first and turned out to be dead code behind this lookahead.
+
+    Membership is every read across the pinned source tree, so a variable added
+    in any package is picked up without this list being edited.
+    """
+    reads = [
+        r"process\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
+        r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
+    ]
+    quoted_reads = [
+        r"process\s*\.\s*env\s*\[\s*",
+        r"(?<!process\.)\benv\s*\[\s*",
+        r"getProviderEnvValue\s*\(\s*",
+    ]
+
+    names: set[str] = set()
+    for path in src.paths(r"packages/[^/]+/src/.*\.tsx?$"):
+        view = src.view(path)
+        for pattern in reads:
+            for match in view.discover(pattern):
+                names.add(match.group(1))
+        for prefix in quoted_reads:
+            for value in view.quoted_after(prefix):
+                if re.fullmatch(r"PI_[A-Z0-9_]+", value):
+                    names.add(value)
+
+    # The two derived names, recorded at their default spelling. Read from the
+    # declaration rather than hardcoded, so a change to the derivation is an
+    # error here instead of a stale entry.
+    # The DECLARATION is discovered structurally; the template body is then read
+    # from the extraction view, because a template's contents are blanked on the
+    # structural view exactly like any other string.
+    config = src.view("packages/coding-agent/src/config.ts")
+    derived: list[str] = []
+    for declaration in config.discover(r"export const ENV_[A-Z_]+ = "):
+        line_end = config.structural.find("\n", declaration.end())
+        body = config.value(
+            declaration.end(),
+            len(config.extraction) if line_end == -1 else line_end,
+        )
+        suffix = re.match(r"`\$\{APP_NAME\.toUpperCase\(\)\}([A-Z_]+)`", body)
+        if suffix:
+            derived.append(suffix.group(1))
+    if len(derived) != 2:
+        fail(f"config.ts no longer derives exactly two env names from APP_NAME "
+             f"(found {len(derived)}) - the derivation rule changed")
+        return None
+    for suffix in derived:
+        names.add("PI" + suffix)
+
+    if not names:
+        fail("no PI_* environment reads found - the scan patterns are stale")
+        return None
+
+    return sorted(names)
+
+
 def rpc_event_ids(src: Source) -> list[str] | None:
     """The RPC stdout event set is the union of THREE sources.
 
@@ -450,11 +663,11 @@ def rpc_event_ids(src: Source) -> list[str] | None:
     events that are emitted but undocumented, so each source is read directly.
     """
     agent_events = union_literals(
-        without_comments(src.read("packages/agent/src/types.ts")),
+        src.view("packages/agent/src/types.ts"),
         "export type AgentEvent =", "AgentEvent",
     )
     session_events = union_literals(
-        without_comments(src.read("packages/coding-agent/src/core/agent-session.ts")),
+        src.view("packages/coding-agent/src/core/agent-session.ts"),
         "export type AgentSessionEvent =", "AgentSessionEvent",
     )
     if agent_events is None or session_events is None:
@@ -466,9 +679,11 @@ def rpc_event_ids(src: Source) -> list[str] | None:
     # `coding-agent.rpc.ui` and must not be counted again here.
     request_envelopes = {"extension_ui_request"}
 
-    # Discovery and parsing both run on the code-only view, so a commented-out
-    # call is not discovered at all and no literal can be read from a comment.
-    rpc_mode = without_comments(src.read("packages/coding-agent/src/modes/rpc/rpc-mode.ts"))
+    # Discovery runs on the STRUCTURAL view, so neither a commented-out call nor
+    # one written inside a string or template literal is discovered at all --
+    # `const s = \`output({ type: "extension_error" })\`` must not contribute a
+    # member, and on the extraction view it did.
+    rpc_mode = src.view("packages/coding-agent/src/modes/rpc/rpc-mode.ts")
 
     # Every `output(` call must be classifiable, not just the ones whose object
     # literal fits on one line. A single-line pattern silently ignores
@@ -493,8 +708,9 @@ def rpc_event_ids(src: Source) -> list[str] | None:
     response_variables = {"response"}
 
     written: set[str] = set()
-    for call in re.finditer(r"\boutput\(", rpc_mode):
-        argument = balanced_argument(rpc_mode, call.end() - 1)
+    for call in rpc_mode.discover(r"\boutput\("):
+        open_paren = call.end() - 1
+        argument = rpc_mode.balanced_argument(open_paren)
         if argument is None:
             fail("rpc-mode has an output( call with unbalanced parentheses")
             continue
@@ -507,9 +723,14 @@ def rpc_event_ids(src: Source) -> list[str] | None:
         if bare and bare.group(1) in response_variables:
             continue
 
-        literal = re.search(r'type: "([a-z_]+)"', argument)
-        if literal:
-            written.add(literal.group(1))
+        # The `type` KEY is located on the structural view too, so a payload
+        # that merely mentions `type: "..."` inside one of its own string values
+        # cannot supply the event name.
+        literals = rpc_mode.quoted_after(
+            r"type:\s*", open_paren, open_paren + 1 + len(argument)
+        )
+        if literals:
+            written.add(literals[0])
             continue
 
         snippet = " ".join(argument[:80].split())
@@ -530,13 +751,24 @@ def rpc_event_ids(src: Source) -> list[str] | None:
 
 def provider_ids(src: Source) -> list[str]:
     """Registry decides membership; each provider's createProvider id names it."""
-    registry_source = without_comments(src.read("packages/ai/src/providers/all.ts"))
-    symbol_to_file = dict(
-        re.findall(r'import \{ (\w+Provider) \} from "\./([\w.-]+)\.ts"', registry_source)
-    )
+    registry = src.view("packages/ai/src/providers/all.ts")
+    symbol_to_file: dict[str, str] = {}
+    for statement in registry.discover(r'import \{ (\w+Provider) \} from ["\']'):
+        # The window must reach past the module literal's CLOSING quote, which is
+        # on the next character after the match at the earliest and end-of-line at
+        # the latest; a window that stops at the opening quote finds nothing.
+        line_end = registry.structural.find("\n", statement.start())
+        module = registry.quoted_after(
+            r'import \{ ' + statement.group(1) + r' \} from \s*',
+            statement.start(),
+            len(registry.structural) if line_end == -1 else line_end,
+        )
+        if module and module[0].startswith("./") and module[0].endswith(".ts"):
+            symbol_to_file[statement.group(1)] = module[0][2:-3]
+
     body = re.search(
         r"function builtinProviders\(\): Provider\[\] \{\s*return \[(.*?)\];",
-        registry_source, re.S,
+        registry.structural, re.S,
     )
     if not body:
         fail("cannot locate builtinProviders() in providers/all.ts")
@@ -549,20 +781,20 @@ def provider_ids(src: Source) -> list[str]:
         if not module:
             fail(f"provider factory {symbol} has no matching import")
             continue
-        provider_source = src.read(f"packages/ai/src/providers/{module}.ts")
+        provider = src.view(f"packages/ai/src/providers/{module}.ts")
 
         # Anchor on createProvider's own id. The first `id:` in a provider file
         # may belong to an auth option, which would yield a set of the right
         # size whose members are not providers.
-        anchored = re.search(r'createProvider(?:<[^>]*>)?\(\{\s*id:\s*"([a-z0-9-]+)"', provider_source)
+        anchored = provider.quoted_after(r'createProvider(?:<[^>]*>)?\(\{\s*id:\s*')
         if anchored:
-            resolved_by_factory.append((symbol, anchored.group(1)))
+            resolved_by_factory.append((symbol, anchored[0]))
             continue
 
         # Some providers take a caller-supplied id with a literal default.
-        configurable = re.search(r'const id = options\.id \?\? "([a-z0-9-]+)"', provider_source)
+        configurable = provider.quoted_after(r'const id = options\.id \?\? ')
         if configurable:
-            resolved_by_factory.append((symbol, configurable.group(1)))
+            resolved_by_factory.append((symbol, configurable[0]))
             continue
 
         fail(f"cannot resolve provider id for {module} - refusing to guess")
@@ -649,25 +881,25 @@ def main() -> int:
 
 def generate(src: "Source", args: argparse.Namespace) -> int:
 
-    rpc_types_source = without_comments(src.read("packages/coding-agent/src/modes/rpc/rpc-types.ts"))
-    request_union = rpc_types_source[
-        rpc_types_source.index("RpcCommand"): rpc_types_source.index("RpcResponse")
-    ]
+    rpc_types = src.view("packages/coding-agent/src/modes/rpc/rpc-types.ts")
+    request_begin = rpc_types.structural.index("RpcCommand")
+    request_end = rpc_types.structural.index("RpcResponse")
     emit("coding-agent.rpc.command",
          "`modes/rpc/rpc-types.ts:20-73` request union",
          "the `type` string literal",
-         sorted(set(re.findall(r'type: "([a-z_]+)"', request_union)) - {"response"}))
+         sorted(set(rpc_types.quoted_after(r"type:\s*", request_begin, request_end))
+                - {"response"}))
 
     emit("coding-agent.rpc.ui",
          "`modes/rpc/rpc-types.ts:238-273` RpcExtensionUIRequest",
          "the `method` string literal",
-         re.findall(r'method: "([A-Za-z_]+)"', rpc_types_source))
+         rpc_types.quoted_after(r"method:\s*"))
 
-    protocol_schemas = without_comments(src.read("packages/protocol/src/schemas.ts"))
+    protocol_schemas = src.view("packages/protocol/src/schemas.ts")
     emit("wire.protocol.command",
          "`packages/protocol/src/schemas.ts:291-310`",
          "the command literal",
-         re.findall(r'command: Type\.Literal\("([a-z_]+)"\)', protocol_schemas))
+         protocol_schemas.quoted_after(r"command:\s*Type\.Literal\(\s*"))
 
     providers = provider_ids(src)
     emit("ai.provider.builtin",
@@ -710,6 +942,15 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              f"which map onto these rather than being members",
              modes)
 
+    environment = environment_names(src)
+    if environment is not None:
+        emit("coding-agent.environment",
+             "every `PI_*` read across `packages/*/src` at the baseline, in all "
+             "three read forms, plus the two names derived from `APP_NAME`",
+             "the variable name, at its default `pi` spelling for the two "
+             "derived ones; assignment-only markers are excluded",
+             environment)
+
     settings = setting_keys(src)
     if settings is not None:
         emit("coding-agent.setting",
@@ -717,17 +958,20 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "the declared key name",
              settings)
 
-    slash_source = without_comments(src.read("packages/coding-agent/src/core/slash-commands.ts"))
+    slash_source = src.view("packages/coding-agent/src/core/slash-commands.ts")
     emit("coding-agent.slash",
          "`core/slash-commands.ts:20-41`",
          "the `name` field",
-         re.findall(r'\{ name: "([a-z-]+)"', slash_source))
+         slash_source.quoted_after(r"\{\s*name:\s*"))
 
-    cli_args_source = without_comments(src.read("packages/coding-agent/src/cli/args.ts"))
+    # The same cached view the mode extractor used, so one file cannot be read
+    # twice and yield two different pictures of itself.
+    cli_args = src.view("packages/coding-agent/src/cli/args.ts")
     emit("coding-agent.flag",
          "`cli/args.ts` `arg ===` comparisons",
          "the long-form flag literal",
-         [flag.lstrip("-") for flag in re.findall(r'arg === "(--[a-z-]+)"', cli_args_source)])
+         [flag.lstrip("-") for flag in cli_args.quoted_after(r"arg\s*===\s*")
+          if flag.startswith("--")])
 
     if errors:
         print(f"\n{len(errors)} unresolved problem(s); output is NOT authoritative",
