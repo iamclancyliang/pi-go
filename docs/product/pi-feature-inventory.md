@@ -27,7 +27,7 @@ always get distinct IDs.
 | Axis | State |
 | --- | --- |
 | Workspace packages | `enumerated` |
-| Modes | `enumerated` — 4 `AppMode` values; the 3 `--mode` literals map onto them (§2); mapping `semantics-needed` |
+| Modes | **closed** — 4 `AppMode` values, 3 `--mode` literals, and the runtime resolution including TTY detection (§2, §2.1) |
 | CLI flags | `enumerated` (40) · semantics per flag `semantics-needed` |
 | Slash commands | `enumerated` (22) · semantics from descriptions |
 | Wire protocol (CBOR) | `enumerated` |
@@ -93,9 +93,27 @@ set — it is a source file name, not a mode.
 | `coding-agent.mode.json` | Emits the event stream as JSON lines | `src/modes/json-event.ts` | `docs/json.md` |
 | `coding-agent.mode.rpc` | Long-lived JSON command/event server | `src/modes/rpc/` | `docs/rpc.md` |
 
-`text` maps onto `interactive` or `print` depending on other flags, which is why the flag set is
-smaller than the mode set. The mapping itself is not yet traced through the dispatch —
-`semantics-needed`.
+### 2.1 The mapping — resolved at runtime from TTY state, not from flags alone
+
+`resolveAppMode()` (`src/main.ts:118-129`) decides in this order:
+
+| Condition | Resulting mode |
+| --- | --- |
+| `--mode rpc` | `rpc` |
+| `--mode json` | `json` |
+| `--print`, **or stdin is not a TTY, or stdout is not a TTY** | `print` |
+| otherwise | `interactive` |
+
+**`text` is never a mode.** It is the "let the environment decide" input, and the decision is made
+from **terminal detection**: the same command line yields `interactive` when run in a terminal and
+`print` when either stream is redirected. A port that mapped flags to modes statically would run the
+interactive TUI into a pipe.
+
+`interactive` is also unreachable via `--mode`; it is only ever the default when both streams are
+TTYs and `--print` is absent.
+
+The reverse direction exists too: `toPrintOutputMode()` (`:131-133`) maps a resolved mode back to an
+output format — `json` stays `json`, everything else becomes `text`.
 
 ## 3. CLI flags — `Kind: flag`, `coding-agent.flag.*`
 
@@ -1672,8 +1690,7 @@ one of these passed a reading that believed it was already following the rule.
 - **Open by decision:** the environment-variable family, where a literal search cannot establish
   closure in one direction.
 - **Not enumerated:** per-file source ledger; TUI, telemetry, evals, server, client and
-  session-backends semantics beyond module listing; auth flow semantics; the `text` to
-  `interactive`/`print` mode mapping.
+  session-backends semantics beyond module listing; auth flow semantics.
 
 Examples, per-hook semantics and settings keys **are** enumerated (§18, §19-24, §16); an earlier
 revision of this list still described them as not started.
