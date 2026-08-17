@@ -38,7 +38,7 @@ always get distinct IDs.
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
 | Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
-| Extension hooks | `enumerated` (names) · `semantics-needed` |
+| Extension hooks | `enumerated` (names); semantics done for `tool_call`/`tool_result` (§19), rest `semantics-needed` |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
 | TUI | `enumerated` (components) · `semantics-needed` |
 | Telemetry | `enumerated` (files) · `schema-needed` |
@@ -537,6 +537,61 @@ Plus `examples/rpc-extension-ui.ts` at the top level.
 > (`agents.ts` with separate planner/reviewer/scout/worker prompt files) and **WASM components**
 > running inside the TUI (the doom example). Both are worth explicit parity rows or explicit
 > exclusions.
+
+
+## 19. Hook semantics — first batch, and one finding that contradicts a pi-go design position
+
+### 19.1 ⚠️ `extension.hook.tool-call` — Pi DOES allow extensions to rewrite tool arguments
+
+| | |
+| --- | --- |
+| Feature ID | `extension.hook.tool-call` |
+| Kind | `hook` |
+| Semantics | Fires after `tool_execution_start` and **before** the tool executes. **Can block.** `event.input` is **mutable, and mutating it in place changes the arguments the tool actually runs with.** |
+| Pi evidence | `coding-agent/src/core/agent-session.ts:480-499` (`beforeToolCall` passes `input: args` by reference); `core/extensions/types.ts:901`, `:1072` |
+| Docs evidence | `docs/extensions.md:751-790` |
+| Coverage state | `enumerated` |
+
+Stated guarantees (`docs/extensions.md:761-766`):
+- mutations to `event.input` affect the actual execution;
+- later handlers see earlier handlers' mutations;
+- **no re-validation is performed after mutation**;
+- blocking is `{ block: true, reason?, terminate? }`;
+- `terminate` applies only to a blocked call, and the agent stops early only when **every** finalized
+  result in the batch is terminating.
+
+Ordering guarantees worth porting exactly:
+- before `tool_call` runs, Pi **drains previously emitted agent events** so session state is current
+  through the assistant's tool-calling message;
+- in parallel mode, sibling calls from one assistant message are **preflighted sequentially, then
+  executed concurrently** — so a `tool_call` handler is *not* guaranteed to see sibling results.
+
+> **Why this is flagged rather than filed quietly.** pi-go's runtime currently offers a
+> policy-and-denial check *only*, and its own source comment states that argument rewriting is
+> deliberately not offered. That position was taken on the belief that argument rewriting was
+> borrowed from another project rather than being a Pi capability. **It is a Pi capability**, in the
+> source and in the docs.
+>
+> For a complete Go replica this is therefore either a **gap to implement** or an **explicit accepted
+> deviation with a written reason** — not something to leave as an unstated design preference. This
+> is exactly the class of omission the inventory-first decision was meant to catch, and it was found
+> by enumerating Pi rather than by reviewing pi-go.
+
+### 19.2 `extension.hook.tool-result`
+
+| | |
+| --- | --- |
+| Semantics | Fires after execution with `toolName`, `toolCallId`, the `input` used, plus `content` and `details` of the result |
+| Pi evidence | `agent-session.ts:501-512` (`afterToolCall`) |
+| Docs evidence | `docs/extensions.md:815` |
+
+### 19.3 Remaining hooks
+
+Still `semantics-needed`: the session group, the agent group (including `context`,
+`before_provider_headers`, `before_provider_request`, `after_provider_response`), `model_select`,
+`thinking_level_select`, `user_bash`, `input`, `project_trust`, `resources_discover`.
+
+The provider hooks matter most for pi-go next, because they sit exactly on its model boundary.
 
 ## Counting discipline — learned the hard way
 
