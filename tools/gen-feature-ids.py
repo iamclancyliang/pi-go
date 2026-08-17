@@ -741,6 +741,78 @@ def extension_hook_names(src: Source) -> list[str] | None:
     return names
 
 
+def union_discriminants(src: Source, path: str, union: str) -> list[str] | None:
+    """Discriminants of a union whose members are interface NAMES.
+
+    Shared by the two session entry models, which is the point: they are
+    different unions in different packages and must be extracted the same way to
+    be comparable at all.
+    """
+    view = src.view(path)
+    span = type_alias_span(view, union)
+    if span is None:
+        return None
+
+    names = re.findall(r"\|\s*(\w+)", view.structural[span[0]:span[1]])
+    if not names:
+        fail(f"the {union} union in {path} yielded no interface names")
+        return None
+
+    kinds: list[str] = []
+    for name in names:
+        # Members may be generic and may extend a base; requiring neither found
+        # five of nine in one union and the tool refused to emit, which is how
+        # this surfaced.
+        declaration = re.search(
+            rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"
+            rf"(?:extends\s+[\w<>, ]+?\s*)?\{{$",
+            view.structural, re.M)
+        if not declaration:
+            fail(f"cannot locate the {name} interface that {union} references")
+            continue
+        end = view.structural.find("\n}", declaration.end())
+        literal = view.quoted_after(r"\btype:\s*", declaration.end(), end)
+        if not literal:
+            fail(f"{name} declares no `type` discriminant")
+            continue
+        kinds.append(literal[0])
+
+    if len(kinds) != len(names):
+        return None
+    return kinds
+
+
+def session_entry_kinds(src: Source) -> list[str] | None:
+    """Discriminants of the coding-agent session file's entry union.
+
+    `SessionHeader` is deliberately excluded: `FileEntry = SessionHeader |
+    SessionEntry` marks it as a file-level record rather than a branch entry, and
+    it is the one record that cannot repeat.
+
+    A stale copy of this union -- five members, with a `firstKeptEntryIndex`
+    field that no longer exists -- is embedded in a test fixture's captured tool
+    output. Anything that searched the repository rather than this declaration
+    would find it.
+    """
+    return union_discriminants(
+        src, "packages/coding-agent/src/core/session-manager.ts", "SessionEntry")
+
+
+def harness_entry_kinds(src: Source) -> list[str] | None:
+    """Discriminants of the AGENT HARNESS's own entry union — a different set.
+
+    This is not the same model as the coding-agent's, and the overlap in names
+    makes that easy to miss. `CompactionEntry` exists in both with the same
+    `"compaction"` discriminant and DIFFERENT fields: the coding-agent stores
+    `firstKeptEntryId`, a boundary pointer, while the harness stores
+    `retainedTail`, the retained messages inline. A port that reads one shape and
+    writes the other produces sessions that load with the right discriminants and
+    the wrong content.
+    """
+    return union_discriminants(
+        src, "packages/agent/src/harness/session/types.ts", "Entry")
+
+
 def thinking_levels(src: Source) -> list[str] | None:
     """The thinking-level set, cross-checked across THREE declarations.
 
@@ -1257,6 +1329,48 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "payload type serves several hooks",
              "the `event` string literal",
              hooks)
+
+    harness_entries = harness_entry_kinds(src)
+    if harness_entries is not None:
+        emit("agent-harness.session-entry",
+             "`agent/src/harness/session/types.ts` `Entry` union — a DIFFERENT "
+             "model from the coding-agent's, sharing several discriminants with "
+             "different field shapes",
+             "the `type` discriminant",
+             harness_entries)
+
+    reasons = src.view("packages/agent/src/harness/session/types.ts")
+    reason_span = type_alias_span(reasons, "CompactionReason")
+    if reason_span is not None:
+        literals = reasons.quoted_in(*reason_span)
+        if literals:
+            emit("agent-harness.compaction-reason",
+                 "`agent/src/harness/session/types.ts` `CompactionReason` union",
+                 "the reason literal",
+                 literals)
+        else:
+            fail("CompactionReason yielded no literals - its shape probably changed")
+
+    entry_kinds = session_entry_kinds(src)
+    if entry_kinds is not None:
+        emit("coding-agent.session-entry",
+             "`core/session-manager.ts` `SessionEntry` union, each member resolved "
+             "to the `type` its interface declares; `SessionHeader` is a file-level "
+             "record and not a member",
+             "the `type` discriminant",
+             entry_kinds)
+
+    ai_types = src.view("packages/ai/src/types.ts")
+    stop_span = type_alias_span(ai_types, "StopReason")
+    if stop_span is not None:
+        stop_reasons = ai_types.quoted_in(*stop_span)
+        if not stop_reasons:
+            fail("StopReason yielded no literals - its shape probably changed")
+        else:
+            emit("ai.stop-reason",
+                 "`ai/src/types.ts` `StopReason` union",
+                 "the reason literal",
+                 stop_reasons)
 
     levels = thinking_levels(src)
     if levels is not None:

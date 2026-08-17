@@ -418,6 +418,51 @@ def test_thinking_levels_fail_when_declarations_diverge() -> None:
     gen.errors.clear()
 
 
+ENTRY_PATH = "packages/coding-agent/src/core/session-manager.ts"
+
+# The two forms that broke the first attempt: a GENERIC member and one that
+# EXTENDS a base. Requiring plain `interface X {` found five of nine members and
+# the tool refused to emit rather than publishing a short set.
+ENTRY_FIXTURE = {
+    ENTRY_PATH: "\n".join([
+        "export type SessionEntry =",
+        "\t| SessionMessageEntry",
+        "\t| CompactionEntry",
+        "\t| LabelEntry;",
+        "",
+        "export interface SessionMessageEntry extends SessionEntryBase {",
+        '\ttype: "message";',
+        "}",
+        "",
+        "export interface CompactionEntry<T = unknown> extends SessionEntryBase {",
+        '\ttype: "compaction";',
+        "\tdetails?: T;",
+        "}",
+        "",
+        "export interface LabelEntry {",
+        '\ttype: "label";',
+        "}",
+        "",
+    ]),
+}
+
+
+def test_union_discriminants_handles_generic_and_extends_members() -> None:
+    kinds = gen.union_discriminants(FakeSource(ENTRY_FIXTURE), ENTRY_PATH, "SessionEntry")
+    assert kinds == ["message", "compaction", "label"], kinds
+
+
+def test_union_discriminants_refuses_a_short_set() -> None:
+    """A member whose interface cannot be found must fail, not shorten the set."""
+    broken = {ENTRY_PATH: ENTRY_FIXTURE[ENTRY_PATH].replace(
+        "export interface LabelEntry {", "interface LabelEntry {")}
+    gen.errors.clear()
+    result = gen.union_discriminants(FakeSource(broken), ENTRY_PATH, "SessionEntry")
+    assert result is None, result
+    assert any("LabelEntry" in message for message in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 AUTH_PATH = "packages/ai/src/auth/types.ts"
 
 # Mirrors the real shape: the object union's own `options: readonly { id: string;

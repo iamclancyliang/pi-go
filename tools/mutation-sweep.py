@@ -71,6 +71,9 @@ MUTATIONS = [
      r'child_writes = [r"(?:process\s*\.\s*)?\benv\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]'),
     ("clear-then-set guard removed",
      "unguarded = exposed - cleared", "unguarded = set()"),
+    ("union member pattern rejects generics and extends",
+     r'rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"',
+     r'rf"^export interface {re.escape(name)}\s*"'),
 ]
 
 def run() -> str:
