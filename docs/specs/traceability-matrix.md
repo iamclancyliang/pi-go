@@ -135,7 +135,7 @@ only the subject under test changes, not the assertions.
 | Scenarios with **partial** contract cover | 1 (A13 — ordering reused, wire surface uncovered) |
 | Scenarios with **no** contract | **0** — G3 closed by S1–S8 |
 | Scenarios that are **class N** (net-new, no Pi counterpart) | **1** (A11 — see G6) |
-| Scenarios blocked on a spike | **0** — A9 unblocked by spike #4 (ADR-0002 proposed) |
+| Scenarios blocked on a spike | **0** — A9 unblocked by spike #4 (ADR-0002 accepted) |
 | Scenarios blocked on a product decision | 1 (A13) |
 | Contracts with **no** scenario | **0** — C7/C4.0/C4b closed by A14/A15/A16 |
 | Surfaces with no contract at all | **1** — wire compatibility (G5) |

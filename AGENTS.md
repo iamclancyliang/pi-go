@@ -45,6 +45,17 @@ go mod tidy         # must produce no diff to go.mod / go.sum
 `go mod tidy` producing a diff is a failure, not a fix: it means the committed module files did not
 match the source.
 
+## Commit identity
+
+All commits use the repository owner's GitHub-linked identity:
+`clancyliang <37497641+iamclancyliang@users.noreply.github.com>`. Configure this identity in the
+repository-local Git config and verify both `git var GIT_AUTHOR_IDENT` and
+`git var GIT_COMMITTER_IDENT` before committing. Agent identities — including Claude Code, Codex,
+and other automation names or emails — must not appear as the author or committer.
+
+Do not rewrite already-pushed history solely to change old identities unless the repository owner
+explicitly requests it.
+
 ## Repository layout (Phase 0)
 
 Only `go.mod` and `spikes/` exist so far, and that is deliberate. `spikes/` holds **isolated

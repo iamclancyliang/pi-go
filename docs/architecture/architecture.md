@@ -10,12 +10,10 @@
 **Decides:** the module partition, the dependency rules between modules, which seams must exist at
 v0, and the register of open decisions.
 
-**Still formally open, with a proposed answer.** ADR-0002 (**proposed, not yet accepted**) recommends
-building the loop on eino's prebuilt `adk.TurnLoop`, with pi-go owning session truth, the model port,
-and the `model_changed` event. All three spikes are closed and the evidence is in. **This section and
-the §4 edge register are updated atomically when ADR-0002 is accepted — not before.** Because this
-document was written so either answer could land without restructuring modules, no module moves
-either way — see §4.
+**Decided by accepted ADR-0002:** build the loop on eino's prebuilt `adk.TurnLoop`, with pi-go owning
+session truth, the model port, and the `model_changed` event. All three spikes are closed. The
+architecture was written so either answer could land without restructuring modules; accepting the
+TurnLoop edge therefore moves no module — see §4.
 
 Anything below marked **[OPEN]** is not yet a decision. Do not implement against it.
 
@@ -101,9 +99,10 @@ partition or violate a §1.5 rule require an ADR; rule-compliant edges go throug
 **Reading notes** (the diagram and these notes must stay mechanically consistent).
 - **Arrows point from dependent to dependency**, without exception.
 - **model port** is drawn as a labelled edge, not a node: `runtime core ──model port──▶ ai`. It is
-  the interface **`ai` defines and implements**; eino and every provider adapter are hidden **inside
-  `ai`'s implementation**. The port is `ai`'s published face, so there is no separate node and no
-  cycle.
+  the interface **`ai` defines and implements**; eino model/provider types and every provider adapter
+  are hidden **inside `ai`'s implementation**. Eino's loop types are separately registered in §4 as
+  a runtime-core implementation dependency. The port is `ai`'s published face, so there is no
+  separate node and no cycle.
 - **storage port** is defined and owned by `session`.
 - **`extension host` has no outgoing edge.** It is assembled by the composition root and reaches the
   runtime only through the §2 seams. It deliberately does **not** depend on `wire schema` — drawing
@@ -128,7 +127,7 @@ Ordinary dependency and interface changes that stay inside the rules go through 
 
 | Interface / seam | Owned by | Consumed by | Release | Notes |
 | --- | --- | --- | --- | --- |
-| model port | `ai` | runtime core | v0 | `ai` defines **and implements** it; eino + provider adapters hidden inside `ai` (§4) |
+| model port | `ai` | runtime core | v0 | `ai` defines **and implements** it; eino model/provider types + provider adapters hidden inside `ai` (§4) |
 | tool registration seam | runtime core | extension host, coding-agent | v0 | §2 |
 | event observation seam | runtime core | extension host, telemetry, wire adapters | v0 | event stream is a public contract (§3.2) |
 | pre-execution policy / denial seam | runtime core | extension host | v0 | **policy + denial only.** Argument rewrite is *not* approved — see §6.3 |
@@ -193,12 +192,11 @@ successful execution fact (C2, C6). This is a correctness rule, not error handli
 
 ---
 
-## 4. The eino boundary **[OPEN — ADR-0002]**
+## 4. The eino boundary — **decided by ADR-0002**
 
 **Settled:** eino provides the model/provider component (`ChatModel`) inside the `ai` subsystem.
 
-**Proposed by ADR-0002 (awaiting acceptance):** build the loop on eino's prebuilt `TurnLoop`.
-Until that ADR is accepted this remains **[OPEN]** and the edge register below is unchanged. Evidence:
+**Accepted by ADR-0002:** build the loop on eino's prebuilt `TurnLoop`. Evidence:
 `WrapModel` gives per-call model/reasoning control (C8), `Push` covers follow-up (C1a), and
 `WithPreempt` + pi-go session-truth reconstruction covers steering (C1b). Checkpoint resume is
 retained for **recovery only** — its injection path depends on a deprecated API at this baseline.
@@ -210,16 +208,16 @@ interrupt/checkpoint types. **Presence is not equivalence** — see the spike pl
 Decision table (spike outcome → conclusion) lives in `eino-verification-plan.md` and issue #3, so
 this ADR is *looked up*, not re-argued.
 
-**Structural requirement either way:** every module edge that exists only because of eino is listed
-here, and the runtime core talks to the model layer through a pi-go-owned interface. If ADR-0002
-lands on "own the loop", no module moves.
+**Structural requirement:** every module edge that exists only because of eino is listed here, and
+the runtime core talks to the model layer through a pi-go-owned interface. If ADR-0002 is revisited
+and the loop becomes pi-go-owned, no module moves.
 
-**Current eino edge register — exactly one edge today:**
+**Current eino edge register — exactly two edges today:**
 
 | # | Edge | Status |
 | --- | --- | --- |
 | E1 | `ai` implementation → eino `ChatModel` + provider adapters | **settled**; hidden behind the model port |
-| — | any `runtime core` → eino loop/TurnLoop edge | **candidate only, pending ADR-0002** |
+| E2 | `runtime core` implementation → eino `adk.TurnLoop` + loop/cancel/checkpoint types | **accepted by ADR-0002**; implementation dependency only, never re-exported |
 
 No other eino edge may be added without updating this table.
 
@@ -230,7 +228,7 @@ No other eino edge may be added without updating this table.
 | ADR | Subject | Status | Gate |
 | --- | --- | --- | --- |
 | 0001 | Module boundary (`internal/` + one public SDK package) | **accepted** — `docs/adr/0001-module-boundary.md` | approved 2026-08-15 |
-| 0002 | eino ownership boundary — **build on eino's prebuilt TurnLoop** | proposed — **drafted**, `docs/adr/0002-eino-ownership-boundary.md` | spikes #4/#5/#6 all closed |
+| 0002 | eino ownership boundary — **build on eino's prebuilt TurnLoop** | **accepted** — `docs/adr/0002-eino-ownership-boundary.md` | approved by @qy-liang 2026-08-17; spikes #4/#5/#6 closed |
 | 0003 | Extension transport (in-process / out-of-process / hybrid) | **[OPEN]** | v0 seams first; transport at v2 |
 | 0004 | Session storage port shape | proposed | v1, in-memory implementation |
 | 0005 | Event emission strategy (dual interleaving) | proposed | C4/C4.0 conformance tests |

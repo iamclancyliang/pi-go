@@ -1,8 +1,6 @@
 # ADR-0002: Build the agent loop on eino's prebuilt TurnLoop
 
-**Status:** proposed (drafted by task #7 from spike evidence; awaiting review)
-**On acceptance:** `architecture.md` §0, §4 and the ADR register must be updated **atomically** —
-until then §4 stays `[OPEN]` and the eino edge register is unchanged.
+**Status:** **accepted** — approved by @qy-liang 2026-08-17
 **Date:** 2026-08-15
 **Related:** `docs/architecture/architecture.md` §4, `docs/specs/eino-verification-plan.md`,
 issues #3 · #4 · #5 · #6 (all closed) · **Supersedes nothing**
