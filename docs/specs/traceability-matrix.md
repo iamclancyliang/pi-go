@@ -14,8 +14,8 @@ planned test → evidence/blocker.
 | A | Requirement | Contract | Issue | Owner | Planned test | Evidence / blocker |
 | --- | --- | --- | --- | --- | --- | --- |
 | **A1** two tools then answer; full trace | FR-1, FR-5 | C1, C4 | **#18** | @cc | `conformance/a1_trace_test.go` | ✅ **IMPLEMENTED AND PASSING.** Exact trace asserted (not a subsequence), tool events paired by `ToolCallID`, tool-result **content** asserted to reach the 2nd model call, session truth = 5 messages with 0 unmatched. Paired negative control: `TestA1NoToolsControl` |
-| **A2** steering during active tool round | FR-2 | **C1** | **#7** | @cc | `conformance/a2_steering_test.go` | contract verified in pi source; test blocked on Go |
-| **A3** follow-up queued during run | FR-2 | **C1** | **#8** | @cc | `conformance/a3_followup_test.go` | contract verified. Errored-turn case is covered separately by **A14** |
+| **A2** steering during active tool round | FR-2 | **C1** | **#7** | @cc | `conformance/a2_a3_steering_test.go` | ✅ **IMPLEMENTED AND PASSING.** All three C1b properties asserted separately. **Mutation-verified**: swapping `Steer`→`Follow` must turn it red (it did — the earlier draft stayed green, so it was not testing steering at all) |
+| **A3** follow-up queued during run | FR-2 | **C1** | **#8** | @cc | `conformance/a2_a3_steering_test.go` | ✅ **IMPLEMENTED AND PASSING.** Also the negative control for A2's preempt: same timing, plain `Push`. Errored-turn case is covered separately by **A14** |
 | **A4** truncated msg, 3 parseable calls | FR-3 | **C2** | **#9** | @cc | `conformance/a4_truncation_test.go` | contract verified (agent-loop.ts:211-214) |
 | **A5** one sequential tool in a batch | FR-3 | **C3** | **#10** | @cc | `conformance/a5_serialisation_test.go` | contract verified (agent-loop.ts:418-426) |
 | **A6** parallel slow-A / fast-B ordering | FR-3, FR-5 | **C4.1** | **#11** | @cc | `conformance/a6_ordering_test.go` | contract verified. C4.0 and C4b covered separately by **A15/A16** |
@@ -141,7 +141,7 @@ only the subject under test changes, not the assertions.
 | Surfaces with no contract at all | **1** — wire compatibility (G5) |
 | Scenarios with an issue | **12** (A1–A9, A14–A16 → #7–#18) |
 | Scenarios still without an issue | 3 (A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
-| Scenarios with a **passing** test | **1** (A1) — every other row is still contract-only |
+| Scenarios with a **passing** test | **3** (A1, A2, A3) — every other row is still contract-only |
 
 **Product code now exists** (`internal/`, `cmd/`, `conformance/`) and **A1 passes**. That changes
 what the remaining blockers are, but not their severity: every other row is still contract-only, and

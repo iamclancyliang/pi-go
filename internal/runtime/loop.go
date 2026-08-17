@@ -97,35 +97,96 @@ func (a *Agent) Capabilities() Capabilities { return a.caps }
 func (a *Agent) State() *StateNamespace { return a.state }
 
 // Run submits one prompt and returns when the resulting work has settled.
+//
+// It is Start followed immediately by Wait, for callers with nothing to submit
+// mid-run.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
-	a.emitter.emit(events.KindAgentStart, nil)
+	r, err := a.Start(ctx, prompt)
+	if err != nil {
+		return err
+	}
+	return r.Wait()
+}
 
-	// The prompt is truth the moment it is accepted, before any model sees
-	// it. Recording it only after a successful turn would lose it on a
-	// crash mid-turn.
-	a.cfg.Session.Append(ai.Message{Role: ai.RoleUser, Content: prompt})
+// Run is a started, still-live agent run.
+//
+// It exists because steering and follow-up are defined by WHEN a message
+// arrives relative to work already in flight (C1). A one-shot call cannot
+// express "while a tool round is active", so it cannot test the contract
+// either.
+type Run struct {
+	agent *Agent
+	loop  *adk.TurnLoop[*schema.Message, *schema.Message]
+	ctx   context.Context
+}
+
+// Start submits a prompt and returns while the run is still in flight.
+func (a *Agent) Start(ctx context.Context, prompt string) (*Run, error) {
+	a.emitter.emit(events.KindAgentStart, nil)
 
 	loop, err := a.buildLoop(ctx)
 	if err != nil {
-		a.emitter.emit(events.KindAgentEnd, func(e *events.Event) {
-			e.Detail.Reason = "error"
-			e.Detail.Err = err.Error()
-		})
-		return err
+		a.failStart(err)
+		return nil, err
 	}
 
 	if ok, _ := loop.Push(schema.UserMessage(prompt)); !ok {
 		err := errors.New("runtime: loop rejected the prompt")
-		a.emitter.emit(events.KindAgentEnd, func(e *events.Event) {
-			e.Detail.Reason = "error"
-			e.Detail.Err = err.Error()
-		})
-		return err
+		a.failStart(err)
+		return nil, err
 	}
 
 	loop.Run(ctx)
-	loop.Stop(adk.UntilIdleFor(idleSettleWindow))
-	exit := loop.Wait()
+	return &Run{agent: a, loop: loop, ctx: ctx}, nil
+}
+
+func (a *Agent) failStart(err error) {
+	a.emitter.emit(events.KindAgentEnd, func(e *events.Event) {
+		e.Detail.Reason = "error"
+		e.Detail.Err = err.Error()
+	})
+}
+
+// Follow queues a follow-up message (C1a).
+//
+// A plain Push. eino buffers it and hands it to the NEXT GenInput iteration, so
+// the in-flight turn finishes untouched and the message is consumed only once
+// the current run would otherwise stop.
+func (r *Run) Follow(text string) error {
+	if ok, _ := r.loop.Push(schema.UserMessage(text)); !ok {
+		return errors.New("runtime: loop rejected the follow-up")
+	}
+	return nil
+}
+
+// Steer injects a message into the work already in flight (C1b).
+//
+// Push with WithPreempt(AfterToolCalls): eino lets the current tool-call round
+// finish, then truncates at that safe point and starts a NEW execution.
+//
+// Continuity is NOT provided by eino. The new execution is seeded from pi-go's
+// projection of session truth in GenInput — that is the whole reason the
+// runtime holds truth itself. Without it the same preempt yields a context
+// containing only the system and steering messages, and every completed tool
+// result is gone.
+func (r *Run) Steer(text string) error {
+	ok, _ := r.loop.Push(
+		schema.UserMessage(text),
+		adk.WithPreempt[*schema.Message, *schema.Message](adk.AfterToolCalls),
+	)
+	if !ok {
+		return errors.New("runtime: loop rejected the steering message")
+	}
+	return nil
+}
+
+// Wait settles the run and emits agent_end.
+func (r *Run) Wait() error {
+	// eino's TurnLoop is long-running: it waits for more input rather than
+	// exiting after a turn. UntilIdleFor is the deterministic exit; without
+	// it Wait blocks forever.
+	r.loop.Stop(adk.UntilIdleFor(idleSettleWindow))
+	exit := r.loop.Wait()
 
 	// ExitReason is an error, and nil means a clean exit — including the
 	// normal path where our GenInput called Stop() with nothing buffered.
@@ -138,12 +199,12 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	// Cancellation outranks a reported error: when the context is done, the
 	// error is usually just the cancellation surfacing, and reporting it as
 	// "error" would hide a deliberate abort.
-	if err := ctx.Err(); err != nil {
+	if err := r.ctx.Err(); err != nil {
 		reason = "aborted"
 		exitErr = err
 	}
 
-	a.emitter.emit(events.KindAgentEnd, func(e *events.Event) {
+	r.agent.emitter.emit(events.KindAgentEnd, func(e *events.Event) {
 		e.Detail.Reason = reason
 		if exitErr != nil {
 			e.Detail.Err = exitErr.Error()
@@ -223,6 +284,25 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			}
 			a.emitter.beginTurn()
 			a.emitter.emit(events.KindTurnStart, nil)
+
+			// Consumed items become truth HERE, at the point they
+			// enter the conversation — not when they were pushed.
+			//
+			// This ordering matters for follow-up: a message pushed
+			// mid-turn that was recorded immediately would sit in
+			// history between an assistant's tool calls and their
+			// results, which is chronologically true but structurally
+			// wrong. Recording at consumption keeps truth readable
+			// as a conversation.
+			for _, item := range items {
+				if item == nil {
+					continue
+				}
+				a.cfg.Session.Append(ai.Message{
+					Role:    fromEinoRoleLocal(item.Role),
+					Content: item.Content,
+				})
+			}
 
 			// The input handed to eino is pi-go's PROJECTION of
 			// session truth, not eino's own accumulated history.
@@ -340,6 +420,26 @@ func toEinoMessages(in []ai.Message) []*schema.Message {
 		out = append(out, msg)
 	}
 	return out
+}
+
+// fromEinoRoleLocal maps a pushed item's role back to pi-go's.
+//
+// Pushed items are user messages in practice, but the role is read rather than
+// assumed: silently relabelling something we did not produce would corrupt
+// truth, which is the one thing this runtime must not do.
+func fromEinoRoleLocal(r schema.RoleType) ai.Role {
+	switch r {
+	case schema.System:
+		return ai.RoleSystem
+	case schema.User:
+		return ai.RoleUser
+	case schema.Assistant:
+		return ai.RoleAssistant
+	case schema.Tool:
+		return ai.RoleTool
+	default:
+		return ai.Role(r)
+	}
 }
 
 func toEinoRole(r ai.Role) schema.RoleType {
