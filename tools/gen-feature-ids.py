@@ -152,21 +152,51 @@ def emit(family: str, membership_authority: str, name_authority: str,
 
 
 def balanced_argument(source: str, open_paren: int) -> str | None:
-    """Return the text inside a call's parentheses, matching them properly.
+    """Return the text inside a call's parentheses, ignoring non-code regions.
 
-    A fixed-size window is unsound: an unclassifiable call can borrow the type
-    literal belonging to the NEXT call and appear classified. Only the argument
-    text actually inside this call may be inspected.
+    Counting parentheses over raw text is not enough: a parenthesis inside a
+    comment or a string literal would change the depth, letting the scan run
+    past the end of this call and read the argument of the next one. This
+    scanner skips line comments, block comments, and single-, double- and
+    backtick-quoted strings, so only parentheses in code are counted.
     """
     depth = 0
-    for index in range(open_paren, len(source)):
+    index = open_paren
+    length = len(source)
+
+    while index < length:
         char = source[index]
+        pair = source[index: index + 2]
+
+        if pair == "//":
+            newline = source.find("\n", index)
+            index = length if newline == -1 else newline + 1
+            continue
+        if pair == "/*":
+            close = source.find("*/", index + 2)
+            index = length if close == -1 else close + 2
+            continue
+        if char in "\"'`":
+            quote = char
+            index += 1
+            while index < length:
+                if source[index] == "\\":
+                    index += 2
+                    continue
+                if source[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            continue
+
         if char == "(":
             depth += 1
         elif char == ")":
             depth -= 1
             if depth == 0:
                 return source[open_paren + 1: index]
+        index += 1
+
     return None
 
 
@@ -206,11 +236,10 @@ def union_literals(source: str, declaration: str, what: str) -> list[str] | None
 
 
 def coding_agent_tool_names(src: Source) -> list[str] | None:
-    """Membership from the registry set, not from a module list passed in here.
+    """Membership from the registry set, never from a list supplied by a caller.
 
-    An earlier version took a hardcoded list of seven modules. It produced the
-    right answer only because the list happened to match; adding a tool
-    upstream would have left the set stale while the run still succeeded.
+    A hardcoded list can agree with the registry today and diverge silently the
+    moment a tool is added upstream, because nothing would detect the drift.
     """
     source = src.read("packages/coding-agent/src/core/tools/index.ts")
     declared = re.search(
@@ -227,16 +256,23 @@ def coding_agent_tool_names(src: Source) -> list[str] | None:
 
 
 def harness_tool_names(src: Source) -> list[str] | None:
-    """Membership from the exported tool creators in the harness barrel file."""
+    """Membership from every exported tool creator in the harness barrel file.
+
+    Two export forms both count and both must be parsed: a re-export block
+    (`export { createXTool } from ...`) and a direct exported declaration
+    (`export const createXTool = ...`). A reference that is not exported -- an
+    internal alias, for instance -- is not a member.
+    """
     source = src.read("packages/agent/src/harness/tools/index.ts")
 
-    # Only names inside `export { ... }` blocks count. Scanning the whole file
-    # for any create*Tool reference would pick up an internal alias or a
-    # commented mention and emit a tool that is not exported at all.
     creators: set[str] = set()
     for block in re.finditer(r"export\s*\{([^}]*)\}", source, re.S):
-        for name in re.findall(r"\bcreate([A-Z][A-Za-z]*)Tool\b", block.group(1)):
-            creators.add(name)
+        creators.update(re.findall(r"\bcreate([A-Z][A-Za-z]*)Tool\b", block.group(1)))
+    for declaration in re.finditer(
+        r"^export\s+(?:const|function|let|var|class)\s+create([A-Z][A-Za-z]*)Tool\b",
+        source, re.M,
+    ):
+        creators.add(declaration.group(1))
 
     if not creators:
         fail("no exported tool creators found in harness tools/index.ts")
@@ -425,9 +461,9 @@ def provider_ids(src: Source) -> list[str]:
             continue
         provider_source = src.read(f"packages/ai/src/providers/{module}.ts")
 
-        # Anchor on createProvider's own id. Searching for the first `id:` in
-        # the file picks up auth-option ids instead, which yields a set of the
-        # right size whose members are not providers at all.
+        # Anchor on createProvider's own id. The first `id:` in a provider file
+        # may belong to an auth option, which would yield a set of the right
+        # size whose members are not providers.
         anchored = re.search(r'createProvider(?:<[^>]*>)?\(\{\s*id:\s*"([a-z0-9-]+)"', provider_source)
         if anchored:
             resolved_by_factory.append((symbol, anchored.group(1)))
@@ -461,10 +497,9 @@ def provider_ids(src: Source) -> list[str]:
 def check_against_expected(extracted: list[str], path: str) -> str | None:
     """Diff the extracted provider set against a committed expected set.
 
-    Regenerating and comparing to your own previous output proves only that the
-    extractor is deterministic. A wrong-but-stable extractor passes that every
-    time, which is how a set containing auth-option ids once passed unnoticed.
-    Correctness needs an independently maintained expectation.
+    Comparing output to a previous run of the same extractor tests determinism
+    only: a wrong but stable extractor passes every time. Correctness requires
+    an independently maintained expectation.
     """
     has_duplicates = False
     try:

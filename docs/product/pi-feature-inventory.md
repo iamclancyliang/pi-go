@@ -615,7 +615,7 @@ Ordering guarantees worth porting exactly:
 > For a complete Go replica this is therefore either a **gap to implement** or an **explicit accepted
 > deviation with a written reason** — not something to leave as an unstated design preference. This
 > is exactly the class of omission the inventory-first decision was meant to catch, and it was found
-> by enumerating Pi rather than by reviewing pi-go.
+> by enumerating Pi's own source, which is the only way a missing capability becomes visible.
 
 ### 19.2 `extension.hook.tool-result`
 
@@ -965,17 +965,16 @@ without that, "we would catch it" would be an assumption rather than a result.
 
 ### 22.5 Why the check mode exists
 
-An earlier version of this extractor took the *first* `id:` in each provider file. That field is not
-the provider's identifier — for two providers it belongs to an authentication option — so the output
-listed `api-key` and `bearer-token` as providers while `amazon-bedrock` and `google-vertex` were
-missing. It produced **40 members, clean stderr, exit 0**: right size, wrong membership,
-indistinguishable from a correct run.
+**Why membership must come from the registry and names from each provider's own declaration:** the
+first `id:` in a provider file may belong to an authentication option, not to the provider. Taking it
+yields a set of the correct size whose members are not providers — `api-key` and `bearer-token`
+present, `amazon-bedrock` and `google-vertex` absent — with clean output and a zero exit, and nothing
+distinguishing it from a correct run.
 
-The check that was supposed to catch this — regenerate, diff against the committed copy — passes for
-any *deterministic* extractor, correct or not. **Determinism is not correctness**, so the diff now
-runs against an independently maintained expectation (`tools/expected-providers.txt`) inside the
-shipped tool, not as an ad-hoc command. Feeding it the old wrong membership exits 1 and names both
-the missing and the unexpected members.
+**Why the check compares against an independent expectation:** regenerating and diffing against the
+tool's own previous output passes for any deterministic extractor, correct or not. Determinism is not
+correctness. The comparison therefore runs against `tools/expected-providers.txt` inside the shipped
+tool. Supplying a wrong membership exits 1 and names both the missing and the unexpected members.
 
 Names are anchored to each provider's own `createProvider({ id })`, including the
 generic-parameter call form, with a separate branch for `radius` — the one provider whose id is
@@ -1397,7 +1396,7 @@ Evidence: `packages/coding-agent/docs/extensions.md:388-519`.
 | --- | --- | --- | --- |
 | `extension.hook.session-start` | session started, loaded or reloaded (:392) | `reason` ∈ `startup`/`reload`/`new`/`resume`/`fork`; `previousSessionFile` for the last three | no |
 | `extension.hook.session-info-changed` | display name set via `/name`, RPC or the API (:404) | `name`, or `undefined` when cleared | no |
-| `extension.hook.session-before-switch` | before `/new` or `/resume` (:415) | `reason` ∈ `new`/`resume`; `targetSessionFile` for resume | **yes** — `{ cancel: true }` |
+| `extension.hook.session-before-switch` | before `/new`, `/resume` or `/import` (:415; import via `agent-session-runtime.ts:361-395`) | `reason` ∈ `new`/`resume` — import reports `resume`; `targetSessionFile` for resume | **yes** — `{ cancel: true }` |
 | `extension.hook.session-before-fork` | `/fork` or `/clone` (:434) | `entryId`; `position` = `before` for fork, `at` for clone | **yes** — also `skipConversationRestore` (`types.ts:1112-1115`) |
 | `extension.hook.session-before-compact` | before compaction (:451) | `preparation`, `branchEntries`, `customInstructions`, `reason`, `willRetry`, `signal` | **yes** — and may **supply the whole `compaction` result** (`types.ts:1117-1120`) |
 | `extension.hook.session-compact` | after compaction (:451) | `compactionEntry`, `fromExtension`, `reason` ∈ `manual`/`threshold`/`overflow`, `willRetry` (`extensions/types.ts:604-613`) | no |
@@ -1642,9 +1641,8 @@ proxy instead of the authoritative source.**
 | Providers | 44 | **42** | `.ts` filenames | `builtinProviders()` / `builtinImagesProviders()` |
 | Harness tools | 6 (incl. `image`) | **4** | `.ts` filenames | `index.ts` exported creators |
 
-The fourth was caught by me rather than by review — the discipline works, but only when applied.
-It had already been written down when I made the mistake again, which says the rule has to be run as
-a check against each finished section, not merely believed.
+The rule must be executed as a check against each finished section, not held as a principle: every
+one of these passed a reading that believed it was already following the rule.
 
 **Rules this imposes on the rest of the census:**
 
@@ -1665,5 +1663,17 @@ a check against each finished section, not merely believed.
   the list is given without a count.
 - Generated surfaces record generator, generated artefact and data separately (§7.2).
 
-**Not yet started:** `packages/coding-agent/examples/` (extension and SDK examples), per-command RPC
-payload schemas, per-tool input schemas, per-hook semantics, settings/environment-variable keys.
+**Remaining work, as of this revision:**
+
+- **`schema-needed`:** the `preparation`, `branchEntries` and `Usage` payload types; per-command RPC
+  response payload internals; the SDK's own API surface.
+- **`source-gap`:** the model catalogue, which is generated at build time and absent from the pinned
+  commit.
+- **Open by decision:** the environment-variable family, where a literal search cannot establish
+  closure in one direction.
+- **Not enumerated:** per-file source ledger; TUI, telemetry, evals, server, client and
+  session-backends semantics beyond module listing; auth flow semantics; the `text` to
+  `interactive`/`print` mode mapping.
+
+Examples, per-hook semantics and settings keys **are** enumerated (§18, §19-24, §16); an earlier
+revision of this list still described them as not started.
