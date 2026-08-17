@@ -55,15 +55,6 @@ MUTATIONS = [
      "if not (sorted(set(from_agent)) == sorted(set(from_ai)) == sorted(set(from_protocol))):",
      "if False:"),
     # The two lexical defects, one in each direction.
-    ("deletion counted as a read",
-     r'r"(?<!delete )(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"',
-     r'r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"'),
-    ("child write and self write merged",
-     "def is_process_env(receiver: str) -> bool:\n    \"\"\"Whether a captured receiver denotes this process's own environment.\"\"\"",
-     "def is_process_env(receiver: str) -> bool:\n    return False\n    \"\"\"Whether a captured receiver denotes this process's own environment.\"\"\""),
-    ("clear-then-set guard removed entirely",
-     "    if unguarded:\n        fail(\"a FINAL child environment is written",
-     "    if False:\n        fail(\"a FINAL child environment is written"),
     ("union member pattern rejects generics and extends",
      r'rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"',
      r'rf"^export interface {re.escape(name)}\s*"'),
@@ -76,15 +67,6 @@ MUTATIONS = [
      'self.structural = blank(source, spans["dead"] + spans["text"])',
      'self.structural = blank(source, spans["dead"])'),
     # The environment rules.
-    ("clear-then-set order not required",
-     "if not any(offset < min(writes) for offset in deletes_here):",
-     "if not deletes_here:"),
-    ("final-map scoping dropped, every receiver must clear",
-     "        if (path, receiver) not in final_receivers:\n            continue",
-     "        if False:\n            continue"),
-    ("writes limited to the PI_ namespace",
-     r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
-     r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]'),
     # The TUI registry/export sets.
     ("barrel misses `export type {...}`",
      r'r"\bexport\s+(type\s+)?\{([^}]*)\}"',
@@ -102,15 +84,9 @@ MUTATIONS = [
     ("utf16 offsets emitted unconverted",
      "\t\tif (!/[\\uD800-\\uDBFF]/.test(source)) return spans; // BMP only: identical",
      "\t\treturn spans;"),
-    ("clear-then-set pairs by file, not receiver",
-     "        if (path, receiver) not in final_receivers:",
-     "        if not any(p == path for p, _ in final_receivers):"),
-    ("process.env accepted as a child receiver",
-     "                if is_process_env(receiver):\n                    continue\n                exposed.add(match.group(2))",
-     "                exposed.add(match.group(2))"),
-    ("seeding through an alias not tracked",
-     '+ [re.escape(name) + r"\\b" for name in sorted(inherited_names)])',
-     '+ [])'),
+    ("env accesses resolved by name, not by scope",
+     "\t\t\tconst binding = resolve(receiver.text);",
+     "\t\t\tconst binding = [...objects.keys()].length ? { __objectId: [...objects.keys()][0] } : undefined;"),
 ]
 
 
@@ -122,7 +98,7 @@ MUTATIONS = [
 # than by cleanup.
 TOOLS = pathlib.Path("tools")
 COPIES = ["census_source.py", "census_families.py", "gen-feature-ids.py",
-          "ts-spans.mjs", "test_gen_feature_ids.py"]
+          "ts-spans.mjs", "ts-env-facts.mjs", "test_gen_feature_ids.py"]
 
 workspace = pathlib.Path(tempfile.mkdtemp(prefix="census-mutation-")) / "tools"
 workspace.mkdir(parents=True)

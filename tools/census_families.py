@@ -463,29 +463,53 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         r"(?<!process\.)\benv\s*\[\s*",
         r"getProviderEnvValue\s*\(\s*",
     ]
-    # The two write forms are deliberately distinguished by whether `process.`
-    # precedes them: `process.env.X = ` mutates this process, `env.X = ` fills an
-    # object built for a child.
-    # WRITES ARE NOT RESTRICTED TO THE `PI_` NAMESPACE. The product also sets
-    # `AI_AGENT=pi`, which a prefix-limited scan missed entirely while the census
-    # prose listed it -- source and documentation could not close.
-    self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]
-    # The RECEIVER is captured, not just the name: `env.X` and `execution.env.X`
-    # are different objects, and the clear-then-set guarantee belongs to an object.
-    # Aggregating by file instead let an unrelated delete elsewhere in the file
-    # excuse a write, and flagged a legitimate override that merely shared a file.
-    child_writes = [r"(?<!process\.)\b((?:\w+\s*\.\s*)*env)\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]
-    deletes = [r"\bdelete\s+(?<!process\.)\b((?:\w+\s*\.\s*)*env)\s*\.\s*([A-Z][A-Z0-9_]*)\b"]
-
+    # WRITES, DELETES AND SEEDING COME FROM THE PARSER, not from patterns, because
+    # they carry a claim about object identity and ordering that text cannot make.
+    # `ts-env-facts.mjs` resolves every access to the innermost binding that
+    # declares its receiver, so two functions each declaring a local `env` are two
+    # objects; matching on the receiver's text let one vouch for the other.
     names: set[str] = set()
     exposed: set[str] = set()
     on_self: set[str] = set()
     cleared: set[str] = set()
-    write_sites: dict[tuple[str, str, str], list[int]] = {}
-    delete_sites: dict[tuple[str, str, str], list[int]] = {}
-    final_receivers: set[tuple[str, str]] = set()
+    unguarded: list[str] = []
     scanned = src.paths(r"packages/[^/]+/src/.*\.tsx?$")
     src.prefetch(scanned)
+
+    for path, facts in sorted(src.env_facts(scanned).items()):
+        seeded = {object_["id"] for object_ in facts["objects"] if object_["seeded"]}
+        for write in facts["writes"]:
+            if write["object"] == "process":
+                on_self.add(write["name"])
+            else:
+                exposed.add(write["name"])
+        for deletion in facts["deletes"]:
+            if deletion["object"] != "process":
+                cleared.add(deletion["name"])
+
+        # The guarantee: at each SEEDED object, every name set on it was deleted
+        # from THAT object at an earlier offset. An object whose seeding could not
+        # be resolved carries no obligation, and is reported below rather than
+        # silently exempted.
+        for write in facts["writes"]:
+            if write["object"] not in seeded:
+                continue
+            earlier = [d["offset"] for d in facts["deletes"]
+                       if d["object"] == write["object"] and d["name"] == write["name"]
+                       and d["offset"] < write["offset"]]
+            if not earlier:
+                unguarded.append(f"{path}:{write['name']}")
+
+        # An access whose receiver is a property or a parameter cannot be resolved
+        # to a binding, so its host mechanism is unknown. Those are counted as
+        # exposed -- the name is written into some environment -- but they cannot
+        # be checked, and pretending otherwise is the failure this replaced.
+        for access in facts["unresolved"]:
+            if access["kind"] == "write":
+                exposed.add(access["name"])
+            else:
+                cleared.add(access["name"])
+
     for path in scanned:
         view = src.view(path)
         for pattern in reads:
@@ -495,63 +519,6 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
             for value in view.quoted_after(prefix):
                 if re.fullmatch(r"PI_[A-Z0-9_]+", value):
                     names.add(value)
-        # Offsets are kept, not just names: the guarantee is that a delete
-        # precedes the write AT THAT SITE. A global set difference let a delete in
-        # one file vouch for a write in another, which is exactly what happens
-        # here -- two different files write the same five names and only one
-        # clears them.
-        for pattern in child_writes:
-            for match in view.discover(pattern):
-                receiver = re.sub(r"\s+", "", match.group(1))
-                # The receiver pattern allows a dotted path, which lets it match
-                # `process.env` itself -- the lookbehind cannot prevent that, since
-                # the path may legitimately begin with any identifier. A write to
-                # this process is a different role, already collected as `self`.
-                if is_process_env(receiver):
-                    continue
-                exposed.add(match.group(2))
-                write_sites.setdefault((path, receiver, match.group(2)), []).append(match.start())
-        for pattern in self_writes:
-            for match in view.discover(pattern):
-                on_self.add(match.group(1))
-        for pattern in deletes:
-            for match in view.discover(pattern):
-                receiver = re.sub(r"\s+", "", match.group(1))
-                if is_process_env(receiver):
-                    continue
-                cleared.add(match.group(2))
-                delete_sites.setdefault((path, receiver, match.group(2)), []).append(match.start())
-        # A receiver is a FINAL map only where that receiver is bound to an object
-        # seeded from the inherited environment. Scoping by file was too coarse in
-        # both directions.
-        #
-        # Seeding may go through an ALIAS -- `const inherited = getShellEnv();`
-        # then `const env = { ...inherited };` -- so the inherited names are
-        # collected first and the spread test accepts them too. The pass repeats
-        # until nothing new appears, which covers chains of aliases. This is
-        # name-level tracking within one file, not general dataflow: a seed passed
-        # through a function parameter or stored on an object would not be seen,
-        # and that limit is stated rather than implied.
-        inherited_names = {
-            m.group(1) for m in view.discover(
-                r"\b(?:const|let|var)\s+(\w+)\s*=\s*"
-                r"(?:getShellEnv\s*\(|process\s*\.\s*env\b)")
-        }
-        while True:
-            alternatives = "|".join(
-                [r"getShellEnv\s*\(", r"process\s*\.\s*env\b"]
-                + [re.escape(name) + r"\b" for name in sorted(inherited_names)])
-            seeded = {
-                m.group(1) for m in view.discover(
-                    r"\b(?:const|let|var)\s+(\w+)\s*=\s*\{\s*\.\.\.\s*"
-                    r"(?:" + alternatives + r")")
-            }
-            grown = inherited_names | seeded
-            if grown == inherited_names:
-                break
-            inherited_names = grown
-        for name in inherited_names:
-            final_receivers.add((path, name))
 
     # The two derived names, recorded at their default spelling. Read from the
     # declaration rather than hardcoded, so a change to the derivation is an
@@ -585,30 +552,9 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
              f"{len(on_self)} self writes")
         return None
 
-    # The clear-then-set guarantee is per OBJECT and per ORDER, and it applies only
-    # where the object being written IS the child environment. Two mechanisms exist
-    # and conflating them produces a false alarm:
-    #
-    #   * a FINAL map, bound to an object seeded from the inherited environment
-    #     (`const env = { ...getShellEnv() }`). A conditional write leaves an
-    #     inherited value in place, so each name must be deleted from THAT object
-    #     first.
-    #   * an OVERRIDE map, a fresh object merged over the inherited environment
-    #     later (the harness builds `env: {}` and applies it with `inheritEnv`).
-    #     Assignment already wins, so a delete would be redundant.
-    #
-    # Both the receiver and the seeding are read from the source, so neither the
-    # mechanism nor the exemption is maintained by hand.
-    unguarded: list[str] = []
-    for (path, receiver, name), writes in sorted(write_sites.items()):
-        if (path, receiver) not in final_receivers:
-            continue
-        deletes_here = delete_sites.get((path, receiver, name), [])
-        if not any(offset < min(writes) for offset in deletes_here):
-            unguarded.append(f"{path}:{receiver}.{name}")
     if unguarded:
-        fail("a FINAL child environment is written without clearing that name "
-             "first, at: " + ", ".join(unguarded)
+        fail("a seeded child environment is written without clearing that name "
+             "from the same object first, at: " + ", ".join(sorted(set(unguarded)))
              + " - an inherited value would survive a conditional write")
 
     return {"input": sorted(names), "exposed": sorted(exposed),

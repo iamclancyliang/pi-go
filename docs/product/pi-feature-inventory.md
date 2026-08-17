@@ -506,11 +506,19 @@ actions and double-counts the multi-key ones.
 | **Barrel** (`src/index.ts`) | **133** — 69 values + 64 types | Names the package DECLARES as its API. No `export *`, so it is enumerable |
 | **Published surface** | larger | `package.json` has `main` and `files: ["dist/**/*", …]` and **no `exports` map**, so every compiled module is importable by path |
 
-**The barrel is emitted; the wider surface is recorded as a packaging risk, not as members.** A
-consumer *can* deep-import an unnamed module, but that is reachable by an accident of packaging rather
-than by design, and adopting it as the parity denominator would commit a port to reproducing module
-layout as though it were contract. Stating the choice and its reason is the point — it is not settled
-by whichever surface gets counted first.
+⚠️ **WHICH ONE IS THE PARITY DENOMINATOR IS AN OPEN PRODUCT DECISION.** It has not been made, and this
+document does not make it. The barrel is what is currently **emitted**, because a set needs some
+authority to exist at all, and that choice is reversible.
+
+**The recommendation, with its reason, so the decision can be taken rather than defaulted into:** treat
+the barrel as the denominator and record the wider surface as a packaging risk. A consumer *can*
+deep-import an unnamed module, but that is reachable by an accident of packaging rather than by design,
+and adopting it would commit a port to reproducing module layout as though it were contract.
+
+**What follows from the other choice, stated fairly:** if the published surface is the denominator then
+every compiled module's exports are in scope, the port owes API stability for names the package never
+advertised, and the count is not 133. Whoever decides should also decide whether pi-go publishes an
+`exports` map, which is what makes the question disappear.
 
 **Three export forms all count, and missing one costs a member.** `export { X }`,
 `export { type X }`, and `export type { X }`. An extractor handling only the first two returned 132

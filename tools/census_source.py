@@ -40,6 +40,7 @@ class Source:
         self.baseline = baseline
         self._views: dict[str, "SourceView"] = {}
         self._spans = Spans(repo)
+        self._env_facts = EnvFacts(repo)
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
         """Run git in the repo, surviving an unusable working directory.
@@ -130,6 +131,10 @@ class Source:
         for path, spans in self._spans.of(wanted).items():
             self._views[path] = SourceView(path, wanted[path], spans)
 
+    def env_facts(self, paths: list[str]) -> dict[str, dict]:
+        """Scope-resolved environment facts for several files, in one process."""
+        return self._env_facts.of({path: self.read(path) for path in paths})
+
     def paths(self, pattern: str) -> list[str]:
         """Every tracked path at the baseline matching a regex, sorted.
 
@@ -194,6 +199,42 @@ class Spans:
             sys.exit(2)
         if finished.returncode != 0:
             print(f"ERROR: {SPANS_HELPER} failed ({finished.returncode}): "
+                  f"{finished.stderr.strip()}", file=sys.stderr)
+            sys.exit(2)
+        return json.loads(finished.stdout)
+
+
+class EnvFacts:
+    """Environment-object facts with scope identity, from the parser.
+
+    Separate from `Spans` because it answers a different question: not "what is
+    code" but "which object is this access on". Receiver TEXT is not identity --
+    two functions may each declare a local `env` -- so the helper resolves each
+    reference to the innermost binding that declares it and reports accesses it
+    cannot resolve instead of guessing.
+    """
+
+    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-env-facts.mjs")
+
+    def __init__(self, repo: str) -> None:
+        self.repo = repo
+
+    def of(self, files: dict[str, str]) -> dict[str, dict]:
+        if not os.path.exists(self.HELPER):
+            print(f"ERROR: missing {self.HELPER}: environment scope identity requires "
+                  f"it, and a text-level fallback is what it replaced", file=sys.stderr)
+            sys.exit(2)
+        try:
+            finished = subprocess.run(
+                ["node", self.HELPER, self.repo],
+                input=json.dumps(files), capture_output=True, text=True,
+            )
+        except OSError as exc:
+            print(f"ERROR: cannot run node for {self.HELPER}: {exc.strerror}",
+                  file=sys.stderr)
+            sys.exit(2)
+        if finished.returncode != 0:
+            print(f"ERROR: ts-env-facts.mjs failed ({finished.returncode}): "
                   f"{finished.stderr.strip()}", file=sys.stderr)
             sys.exit(2)
         return json.loads(finished.stdout)

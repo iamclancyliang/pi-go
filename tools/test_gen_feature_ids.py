@@ -336,31 +336,71 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert "PI_EXPOSED_ONE" not in roles["self"]
 
 
-def test_exposed_without_being_cleared_is_an_error() -> None:
-    """In a FINAL map the clear-then-set pairing is a guarantee, so losing it fails."""
-    unguarded = dict(ENV_FIXTURE)
-    unguarded["packages/coding-agent/src/child.ts"] = (
-        "const env = { ...getShellEnv() };\nenv.PI_LEAKY = ctx.one;\n")
-    gen.errors.clear()
-    gen.environment_names(EnvFakeSource(unguarded))
-    assert any("clearing that name first" in m for m in gen.errors), gen.errors
-    gen.errors.clear()
+def test_clear_then_set_needs_the_SAME_object_not_the_same_name() -> None:
+    """Two functions may each declare a local `env`; they are different objects.
 
-
-def test_write_before_delete_is_an_error() -> None:
-    """ORDER is part of the guarantee: deleting after writing does not protect it.
-
-    A check that compared name sets passed this, because both names were present
-    in both sets.
+    Pairing by the receiver's text lets a delete in one vouch for a write in the
+    other, which passes a guarantee that does not hold.
     """
-    wrong_order = dict(ENV_FIXTURE)
-    wrong_order["packages/coding-agent/src/child.ts"] = (
-        "const env = { ...getShellEnv() };\n"
-        "env.PI_LATE = ctx.one;\n"
-        "delete env.PI_LATE;\n")
+    cross = dict(ENV_FIXTURE)
+    cross["packages/coding-agent/src/scopes.ts"] = (
+        "function overlay() {\n"
+        "  const env = {};\n"
+        "  delete env.PI_SHARED;\n"
+        "}\n"
+        "function final() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  env.PI_SHARED = value;\n"
+        "}\n")
     gen.errors.clear()
-    gen.environment_names(EnvFakeSource(wrong_order))
+    gen.environment_names(EnvFakeSource(cross))
+    assert any("PI_SHARED" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_delete_on_the_same_object_does_guard() -> None:
+    guarded = dict(ENV_FIXTURE)
+    guarded["packages/coding-agent/src/guarded.ts"] = (
+        "function f() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  delete env.PI_OK;\n"
+        "  env.PI_OK = value;\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(guarded))
+    assert not gen.errors, gen.errors
+    assert "PI_OK" in roles["exposed"] and "PI_OK" in roles["cleared"]
+    gen.errors.clear()
+
+
+def test_a_write_after_its_own_delete_is_ordered_correctly() -> None:
+    """Order is per object: deleting AFTER the write protects nothing."""
+    late = dict(ENV_FIXTURE)
+    late["packages/coding-agent/src/late.ts"] = (
+        "function f() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  env.PI_LATE = value;\n"
+        "  delete env.PI_LATE;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(late))
     assert any("PI_LATE" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_an_unresolvable_receiver_is_counted_but_not_claimed_guarded() -> None:
+    """`execution.env.X` is a property, so its host object cannot be identified.
+
+    The name is still exposed, but no clear-then-set claim is made about it -- the
+    difference between "no obligation" and "could not tell" has to stay visible.
+    """
+    opaque = dict(ENV_FIXTURE)
+    opaque["packages/coding-agent/src/opaque.ts"] = (
+        "function f(execution) {\n  execution.env.PI_OPAQUE = value;\n}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(opaque))
+    assert not gen.errors, gen.errors
+    assert "PI_OPAQUE" in roles["exposed"], roles["exposed"]
     gen.errors.clear()
 
 
@@ -465,41 +505,6 @@ def test_offsets_survive_an_astral_character() -> None:
 def test_astral_character_inside_a_template_keeps_expression_code() -> None:
     view = view_of("const t = `\U0001F680${ process.env.PI_AFTER }`;\n")
     assert "process.env.PI_AFTER" in view.structural, view.structural
-
-
-def test_clear_then_set_is_checked_per_RECEIVER_not_per_file() -> None:
-    """A delete elsewhere in the file must not excuse a write to another object.
-
-    Aggregating by file let an unrelated `delete env.X` vouch for a write to a
-    different object, and flagged a legitimate override that merely shared a file.
-    """
-    mixed = dict(ENV_FIXTURE)
-    mixed["packages/coding-agent/src/mixed.ts"] = (
-        "const env = { ...getShellEnv() };\n"
-        "delete env.PI_GUARDED;\n"
-        "env.PI_GUARDED = a;\n"
-        "env.PI_UNGUARDED = b;\n")
-    gen.errors.clear()
-    gen.environment_names(EnvFakeSource(mixed))
-    joined = " ".join(gen.errors)
-    assert "PI_UNGUARDED" in joined, gen.errors
-    assert "PI_GUARDED" not in joined.replace("PI_UNGUARDED", ""), gen.errors
-    gen.errors.clear()
-
-
-def test_an_override_receiver_in_a_final_map_file_is_not_flagged() -> None:
-    """Same file, two objects: only the seeded one carries the obligation."""
-    both = dict(ENV_FIXTURE)
-    both["packages/coding-agent/src/two.ts"] = (
-        "const env = { ...getShellEnv() };\n"
-        "delete env.PI_FINAL;\n"
-        "env.PI_FINAL = a;\n"
-        "execution.env.PI_OVERLAY = b;\n")
-    gen.errors.clear()
-    roles = gen.environment_names(EnvFakeSource(both))
-    assert not gen.errors, gen.errors
-    assert "PI_OVERLAY" in roles["exposed"], roles["exposed"]
-    gen.errors.clear()
 
 
 def test_a_self_write_is_not_collected_as_a_child_write() -> None:
