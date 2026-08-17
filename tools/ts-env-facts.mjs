@@ -127,8 +127,9 @@ function analyse(path, source) {
 		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node);
 
 	/** Does this object literal spread an inherited environment, possibly via a chain? */
-	const seededFrom = (candidate) => {
-		const initializer = unwrapParens(candidate);
+	const seededFrom = (initializer) => {
+		// The caller unwraps; a second unwrap here would be a defence nothing can
+		// exercise, which reads as protection while proving nothing.
 		if (!initializer || !ts.isObjectLiteralExpression(initializer)) {
 			return { seeded: false };
 		}

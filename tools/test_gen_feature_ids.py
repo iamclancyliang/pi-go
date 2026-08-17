@@ -14,6 +14,7 @@ Run: python3 tools/test_gen_feature_ids.py
 
 import os
 import re
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -69,6 +70,20 @@ def view_of(source: str, path: str = "f.ts") -> "gen.SourceView":
     """Build a view the way the tool does: real spans from the real parser."""
     spans = gen.Spans(TS_REPO).of({path: source})[path]
     return gen.SourceView(path, source, spans)
+
+
+def test_a_failing_helper_stops_the_run() -> None:
+    """A helper that fails must not be read as an empty result.
+
+    Treating a non-zero status as "no facts" turns a broken toolchain into a short
+    member set, which looks exactly like a small family.
+    """
+    finished = subprocess.run(
+        [sys.executable, "-B", str(_TOOLS / "gen-feature-ids.py"),
+         "--pi-repo", "/nonexistent-checkout"],
+        capture_output=True, text=True, cwd=_TOOLS.parent)
+    assert finished.returncode != 0, finished.stdout[-400:]
+    assert "ERROR" in finished.stderr, finished.stderr[-400:]
 
 
 def test_no_tool_defines_the_same_name_twice() -> None:

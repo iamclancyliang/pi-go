@@ -148,9 +148,9 @@ MUTATIONS = [
              "\t\tif (false) hoist(node, isFunctionLevel(node));"),
     Mutation("var not hoisted to the function scope",
              "		if (!functionLevel) return;", "		if (true) return;"),
-    Mutation("block-scoped names collected recursively",
-             "		ts.forEachChild(scopeNode, (child) => {\n			if (ts.isVariableStatement(child)) {",
-             "		ts.forEachChild(scopeNode, function walk(child) {\n			ts.forEachChild(child, walk);\n			if (ts.isVariableStatement(child)) {"),
+    Mutation("case clauses collected recursively",
+             "\t\t\tif (ts.isCaseClause(child) || ts.isDefaultClause(child)) {\n\t\t\t\tfor (const statement of child.statements) scopeStatements.push(statement);\n\t\t\t\treturn;",
+             "\t\t\tif (ts.isCaseClause(child) || ts.isDefaultClause(child)) {\n\t\t\t\tts.forEachChild(child, (n) => scopeStatements.push(n));\n\t\t\t\treturn;"),
     # The compiler-API member facts: each guarantee the checker path rests on.
     Mutation("unresolved alias accepted instead of failing",
              '        fail(f"the checker could not classify',
@@ -190,9 +190,9 @@ MUTATIONS = [
     Mutation("initialiser not unwrapped where identity is decided",
              "\t\t\tconst initializer = unwrapParens(node.initializer);",
              "\t\t\tconst initializer = node.initializer;"),
-    Mutation("seed test not unwrapped",
-             "\t\tconst initializer = unwrapParens(candidate);",
-             "\t\tconst initializer = candidate;"),
+    # NOT tested: "do not unwrap inside the seed test". The caller unwraps first, so
+    # a second unwrap there is unreachable; the load-bearing ones are the declaration
+    # initializer and the spread operand, which have their own mutations.
     Mutation("spread operand not unwrapped",
              "\t\t\tconst spread = unwrapParens(property.expression);",
              "\t\t\tconst spread = property.expression;"),
