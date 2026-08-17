@@ -34,7 +34,7 @@ always get distinct IDs.
 | coding-agent RPC commands | `enumerated` (32, **re-derived from `RpcCommand` union**) · payloads partially typed at `rpc-types.ts:117-210` |
 | coding-agent RPC events | `enumerated` (**24**, source union; 3 are `source-only`) |
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
-| Built-in tools ×2 sets | `enumerated` · input schemas `schema-needed` |
+| Built-in tools ×2 sets | `enumerated`; coding-agent input schemas **closed** (§15); harness schemas `schema-needed` |
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
 | Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
@@ -45,8 +45,12 @@ always get distinct IDs.
 | Evals | `enumerated` (files) · `semantics-needed` |
 | server / client / session-backends | `enumerated` (files) · `semantics-needed` |
 | Resources (skills/prompts/themes/keybindings/context files) | `enumerated` (modules) · `semantics-needed` |
+| Settings keys | `enumerated` (§16) |
+| Environment variables | `enumerated` (§17, **docs-derived — needs source cross-check**) |
+| Tool system-prompt contributions | `enumerated` (§15.1) |
+| SDK embedding surface | `enumerated` via examples (§18) · API `schema-needed` |
 | Install / update | `enumerated` (files) · `semantics-needed` |
-| Examples | not started |
+| Examples | `enumerated` (§18) — 13 SDK + ~80 extension |
 | Session workflows | named via commands · `semantics-needed` |
 
 **No axis is closed for parity purposes while any of its rows is `semantics-needed`,
@@ -420,6 +424,119 @@ test `test/git-update.test.ts`. `semantics-needed`.
 Each is a candidate parity area; none may be closed without its own row.
 
 ---
+
+
+## 15. Tool input schemas — `schema-needed` closed for the coding-agent set
+
+Authority is each tool's `<name>Schema` declaration, not the description text.
+Path prefix `packages/coding-agent/src/core/tools/`.
+
+| Tool | Schema line | Required | Optional |
+| --- | --- | --- | --- |
+| `bash` | `bash.ts:41` | `command` | `timeout` (seconds; **no default timeout**) |
+| `edit` | `edit.ts:45` | `path`, `edits[]` | — |
+| `find` | `find.ts:29` | `pattern` (glob) | `path`, `limit` (default 1000) |
+| `grep` | `grep.ts:24` | `pattern` | `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit` (default 100) |
+| `ls` | `ls.ts:14` | — | `path`, `limit` (default 500) |
+| `read` | `read.ts:21` | `path` | `offset` (1-indexed), `limit` |
+| `write` | `write.ts:15` | `path`, `content` | — |
+
+`edit`'s `edits[]` carries a documented constraint that is behavioural, not cosmetic: **each edit is
+matched against the ORIGINAL file, not incrementally**, and overlapping or nested edits are
+forbidden (`edit.ts:48-51`). A Go port that applies edits sequentially to a mutating buffer would
+pass naive tests and silently diverge here.
+
+`read` truncates to a max line count **or** byte budget, whichever hits first, and instructs
+continuation via `offset` (`read.ts:218`).
+
+### 15.1 Tools contribute to the system prompt — a surface not previously recorded
+
+Every tool exports a `<name>ToolSystemPromptContribution` with a `snippet` and `guidelines`, which
+are assembled into the system prompt (`parameters`/`promptSnippet`/`promptGuidelines` fields on the
+definition, e.g. `read.ts:218-220`).
+
+| Tool | Snippet | Guidelines |
+| --- | --- | --- |
+| `bash` | "Execute bash commands (ls, grep, find, etc.)" | inspect `PI_*` env vars for model/session details |
+| `read` | "Read file contents" | use `read` instead of `cat` or `sed` |
+| `write` | "Create or overwrite files" | only for new files or complete rewrites |
+| `edit` | "Make precise file edits with exact text replacement, including multiple disjoint edits in one call" | — |
+| `find` | "Find files by glob pattern (respects .gitignore)" | — |
+| `ls` | "List directory contents" | — |
+| `grep` | (see `grep.ts`) | — |
+
+**This is a parity surface in its own right:** the prompt a model sees is composed from the
+registered tool set, so tool selection changes the prompt. Any port that hard-codes a system prompt
+loses this coupling.
+
+## 16. Settings — `coding-agent.setting.*`
+
+Authority: `packages/coding-agent/src/core/settings-manager.ts` (the settings type, :13-130).
+Grouped sub-objects: `CompactionSettings`(13) · `BranchSummarySettings`(19) ·
+`ProviderRetrySettings`(24) · `RetrySettings`(30) · `TerminalSettings`(40) · `ImageSettings`(47) ·
+`ThinkingBudgetsSettings`(52) · markdown/rendering(61) · `anthropicExtraUsage`(66) ·
+`PackageSource`(82-87).
+
+Top-level keys (:91-130): `lastChangelogVersion` · `defaultProvider` · `defaultModel` ·
+`defaultThinkingLevel` · `transport` · `steeringMode` · `followUpMode` · `theme` · `compaction` ·
+`branchSummary` · `retry` · `hideThinkingBlock` · `showCacheMissNotices` · `externalEditor` ·
+`shellPath` · `quietStartup` · `defaultProjectTrust` · `shellCommandPrefix` · `npmCommand` ·
+`collapseChangelog` · `enableInstallTelemetry` · `enableAnalytics` · `trackingId` · `packages` ·
+`extensions` · `skills` · `prompts` · `themes` · `enableSkillCommands` · `terminal` · `images` ·
+`enabledModels` · `defaultTools` · `doubleEscapeAction` · `treeFilterMode` · `thinkingBudgets` ·
+`editorPaddingX` · `outputPad` · `autocompleteMaxVisible` · `showHardwareCursor`
+
+Notable defaults that are behaviour, not preference: `steeringMode`/`followUpMode` ∈
+`all | one-at-a-time`; `doubleEscapeAction` default `tree`; `treeFilterMode` ∈
+`default|no-tools|user-only|labeled-only|all`; `enableAnalytics` default **false** (opt-in) while
+`enableInstallTelemetry` default **true**.
+
+## 17. Environment variables — `coding-agent.env.*`
+
+Authority: `packages/coding-agent/docs/environment-variables.md` (**docs-derived — needs a source
+cross-check before being treated as closed**, per the counting discipline above).
+
+**Exported into tool/bash context** (:26-30): `PI_SESSION_ID` · `PI_SESSION_FILE` (unset for
+ephemeral sessions) · `PI_PROVIDER` · `PI_MODEL` · `PI_REASONING_LEVEL`
+
+**Read as configuration** (:81-92): `PI_CODING_AGENT_DIR` · `PI_CODING_AGENT_SESSION_DIR` ·
+`PI_PACKAGE_DIR` · `PI_OFFLINE` · `PI_SKIP_VERSION_CHECK` · `PI_TELEMETRY` · `PI_CACHE_RETENTION` ·
+`PI_SHARE_VIEWER_URL` · `PI_HARDWARE_CURSOR` · `PI_TUI_ESC_TIMEOUT` · `VISUAL`/`EDITOR` ·
+`HTTP_PROXY`/`HTTPS_PROXY`
+
+## 18. Examples — `Kind: engineering-evidence`
+
+`packages/coding-agent/examples/`. These are executable demonstrations of the extension and SDK
+surfaces, so they double as a **capability checklist**: anything demonstrated here is something a
+user can do today.
+
+**SDK examples (13)** — `01-minimal` · `02-custom-model` · `03-custom-prompt` · `04-skills` ·
+`05-tools` · `06-extensions` · `07-context-files` · `08-prompt-templates` ·
+`09-api-keys-and-oauth` · `10-settings` · `11-sessions` · `12-full-control` · `13-session-runtime`
+
+> The SDK is an embedding surface, i.e. a public API for building on Pi. It is a parity axis in its
+> own right and is **not** covered by the CLI or RPC rows.
+
+**Extension examples (~80 files)** covering, among others: auto-commit-on-exit · bash-spawn-hook ·
+bookmark · border-status-editor · built-in-tool-renderer · claude-rules · commands ·
+confirm-destructive · custom-compaction · custom-footer/header · dirty-repo-guard · doom (WASM
+component) · dynamic-tools · entry-renderer · event-bus · file-trigger · git-checkpoint ·
+git-merge-and-resolve · github-issue-autocomplete · handoff · hidden-thinking-label · inline-bash ·
+input-transform(-streaming) · interactive-shell · kimi-deferred-tools · mac-system-theme ·
+message-renderer · minimal-mode · modal-editor · model-status · notify · overlay-qa-tests ·
+permission-gate · pirate · preset · project-trust · prompt-customizer · protected-paths ·
+provider-payload · qna · question(naire) · rainbow-editor · reload-runtime · rpc-demo ·
+send-user-message · session-name · shutdown-command · snake · space-invaders · ssh · status-line ·
+structured-output · subagents (`agents.ts` + planner/reviewer/scout/worker prompts) · summarize ·
+system-prompt-header · tic-tac-toe · timed-confirm · titlebar-spinner · todo · tool-override ·
+tools · trigger-compact · truncated-tool · widget-placement · working-indicator
+
+Plus `examples/rpc-extension-ui.ts` at the top level.
+
+> **Two capabilities visible only here**, not in the hook list: a **subagent** pattern
+> (`agents.ts` with separate planner/reviewer/scout/worker prompt files) and **WASM components**
+> running inside the TUI (the doom example). Both are worth explicit parity rows or explicit
+> exclusions.
 
 ## Counting discipline — learned the hard way
 
