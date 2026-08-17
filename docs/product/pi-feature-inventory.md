@@ -1,234 +1,193 @@
-# Pi feature inventory — raw source enumeration
+# Pi feature inventory — raw source census
 
-**Source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (the approved parity
-denominator). Every row below was read from that exact tree via `git show 086c32e:<path>`.
+**Source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved parity
+denominator). Every row was read from that exact tree via `git show 086c32e:<path>`.
 
-**Owner:** @cc (task #17). **Consumer:** @gpt-codex merges this into `parity-matrix.md` (task #16)
-and owns schema, dedup and omission audit.
-
-**This file records what Pi HAS. It deliberately records no pi-go implementation status** — mixing
-the two is how an inventory silently becomes a progress report.
+**Owner:** @cc (task #17). **Consumer:** @gpt-codex (task #16) owns schema, merge, dedup and the
+omission audit in `parity-matrix.md`. **This file records what Pi HAS and deliberately records no
+pi-go implementation status.**
 
 > ⚠️ **The local `~/Project/github/pi` checkout is 34 commits BEHIND this baseline**
-> (`HEAD=534bcbffb`). All enumeration therefore reads the pinned commit from the object store rather
-> than the working tree. Anyone re-running this must do the same, or they will inventory a different
-> product.
+> (`HEAD=534bcbffb`). Everything here reads the pinned commit from the object store, never the
+> working tree. Re-runners must do the same or they will inventory a different product.
 
-## Coverage status — read this before treating any section as complete
+## Schema
 
-| Axis | Status |
+`Feature ID` = `<area>.<surface>.<slug>` · `Kind` ∈ command/flag/mode/tool/event/hook/ui-api/
+public-api/workflow/data-format/provider/auth/usage/component/engineering-evidence ·
+`Semantics` = observable behaviour, never just the symbol name · `Pi evidence` = `path:line` at
+`086c32e` · `Docs evidence` = `path:line` or `none` · `Coverage state` ∈ `enumerated` /
+`semantics-needed` / `schema-needed` / `source-gap`.
+
+One feature = one ID with multiple evidence rows. Distinct commands/events/hooks/tools/API methods
+always get distinct IDs.
+
+## Coverage ledger
+
+| Axis | State |
 | --- | --- |
-| Workspace packages | ✅ enumerated |
-| CLI flags | ✅ enumerated |
-| CLI modes | ✅ enumerated |
-| Slash commands | ✅ enumerated |
-| RPC-mode commands | ✅ enumerated |
-| RPC-mode events | ✅ enumerated |
-| Wire protocol (`packages/protocol`) | ✅ enumerated |
-| Built-in tools | ✅ enumerated |
-| Providers | ✅ enumerated (count + list) |
-| Extension events/hooks | 🟡 section headings enumerated; per-hook semantics pending |
-| Extension context/API methods | 🟡 headings enumerated; signatures pending |
-| Resources (skills / prompts / themes / keybindings / context files) | ❌ not yet enumerated |
-| Session workflows (fork/clone/tree/import/export/share/compact) | 🟡 named via commands; semantics pending |
-| TUI surfaces | ❌ not yet enumerated |
-| Telemetry | ❌ not yet enumerated |
-| Evals | ❌ not yet enumerated |
-| Install / update | ❌ not yet enumerated |
-| Auth / usage / model registry | ❌ not yet enumerated |
-| Server / client / session-backends | ❌ not yet enumerated |
-| Examples | ❌ not yet enumerated |
+| Workspace packages | `enumerated` |
+| CLI modes | `enumerated` |
+| CLI flags | `enumerated` (40) · semantics per flag `semantics-needed` |
+| Slash commands | `enumerated` (22) · semantics from descriptions |
+| Wire protocol (CBOR) | `enumerated` |
+| coding-agent RPC commands | `enumerated` (32) · per-command payloads `schema-needed` |
+| coding-agent RPC events | `enumerated` (22) |
+| RPC UI-dialog requests | `enumerated` (9) |
+| Built-in tools ×2 sets | `enumerated` · input schemas `schema-needed` |
+| Providers | `enumerated` (44) |
+| **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
+| Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
+| Extension hooks | `enumerated` (names) · `semantics-needed` |
+| Extension context / API | `enumerated` (names) · signatures `schema-needed` |
+| TUI | `enumerated` (components) · `semantics-needed` |
+| Telemetry | `enumerated` (files) · `schema-needed` |
+| Evals | `enumerated` (files) · `semantics-needed` |
+| server / client / session-backends | `enumerated` (files) · `semantics-needed` |
+| Resources (skills/prompts/themes/keybindings/context files) | `enumerated` (modules) · `semantics-needed` |
+| Install / update | `enumerated` (files) · `semantics-needed` |
+| Examples | not started |
+| Session workflows | named via commands · `semantics-needed` |
 
-**Nothing here may be read as "Pi has been fully inventoried" until every row above is ✅.**
+**No axis is closed for parity purposes while any of its rows is `semantics-needed`,
+`schema-needed` or `source-gap`.** Names alone cannot build a parity row.
 
 ---
 
-## 1. Workspace packages
+## 1. Packages — `Kind: engineering-evidence`
 
-`git ls-tree 086c32e packages/` — 10 packages.
-
-| Package | Path |
+| Feature ID | Path |
 | --- | --- |
-| agent | `packages/agent` |
-| ai | `packages/ai` |
-| client | `packages/client` |
-| coding-agent | `packages/coding-agent` |
-| evals | `packages/evals` |
-| protocol | `packages/protocol` |
-| server | `packages/server` |
-| session-backends | `packages/session-backends` |
-| telemetry | `packages/telemetry` |
-| tui | `packages/tui` |
+| `pkg.agent` | `packages/agent` |
+| `pkg.ai` | `packages/ai` |
+| `pkg.client` | `packages/client` |
+| `pkg.coding-agent` | `packages/coding-agent` |
+| `pkg.evals` | `packages/evals` |
+| `pkg.protocol` | `packages/protocol` |
+| `pkg.server` | `packages/server` |
+| `pkg.session-backends` | `packages/session-backends` |
+| `pkg.telemetry` | `packages/telemetry` |
+| `pkg.tui` | `packages/tui` |
 
-Source-file scale at baseline: **1123** `.ts` files under `packages/`.
+Scale: 1123 `.ts` files under `packages/` at baseline.
 
-## 2. CLI
+## 2. CLI modes — `Kind: mode`
 
-### 2.1 Modes
+| Feature ID | Semantics | Pi evidence | Docs |
+| --- | --- | --- | --- |
+| `coding-agent.mode.interactive` | Full TUI session | `packages/coding-agent/src/modes/interactive/` | `docs/tui.md` |
+| `coding-agent.mode.print` | One-shot, non-interactive output | `src/modes/print-mode.ts` | `docs/usage.md` |
+| `coding-agent.mode.json-event` | Emits the event stream as JSON lines | `src/modes/json-event.ts` | `docs/json.md` |
+| `coding-agent.mode.rpc` | Long-lived JSON command/event server | `src/modes/rpc/` | `docs/rpc.md` |
 
-`packages/coding-agent/src/modes/`
+## 3. CLI flags — `Kind: flag`, `coding-agent.flag.*`
 
-| Mode | Path |
-| --- | --- |
-| interactive | `modes/interactive/` |
-| print | `modes/print-mode.ts` |
-| json-event | `modes/json-event.ts` |
-| rpc | `modes/rpc/` |
+All from `packages/coding-agent/src/cli/args.ts`. Coverage `enumerated`; per-flag semantics
+`semantics-needed` except where the name is self-evident.
 
-### 2.2 Flags
+`help`(77,`-h`) · `version`(79,`-v`) · `mode`(81) · `continue`(86,`-c`) · `resume`(88,`-r`) ·
+`provider`(90) · `model`(92) · `api-key`(94) · `system-prompt`(96) · `append-system-prompt`(98) ·
+`name`(101,`-n`) · `no-session`(107) · `session`(109) · `session-id`(111) · `fork`(113) ·
+`session-dir`(115) · `models`(117) · `no-tools`(119,`-nt`) · `no-builtin-tools`(121,`-nbt`) ·
+`tools`(123,`-t`) · `exclude-tools`(128,`-xt`) · `thinking`(133) · `print`(143,`-p`) · `export`(150) ·
+`extension`(152,`-e`) · `no-extensions`(155,`-ne`) · `skill`(157) · `prompt-template`(160) ·
+`theme`(163) · `use-theme`(166) · `no-skills`(174,`-ns`) · `no-prompt-templates`(176,`-np`) ·
+`no-themes`(178) · `no-context-files`(180,`-nc`) · `list-models`(182) · `tui-mode`(189) ·
+`verbose`(203) · `approve`(205,`-a`) · `no-approve`(207,`-na`) · `offline`(209)
 
-`packages/coding-agent/src/cli/args.ts`
+**40 flags.** `--tui-mode` constrained to `regular|fullscreen` (195).
 
-| Flag | Alias | Line |
+## 4. Slash commands — `Kind: command`, `coding-agent.slash.*`
+
+`packages/coding-agent/src/core/slash-commands.ts:20-41`. Semantics are the file's own descriptions.
+
+| ID | Semantics | Line |
 | --- | --- | --- |
-| `--help` | `-h` | 77 |
-| `--version` | `-v` | 79 |
-| `--mode` | | 81 |
-| `--continue` | `-c` | 86 |
-| `--resume` | `-r` | 88 |
-| `--provider` | | 90 |
-| `--model` | | 92 |
-| `--api-key` | | 94 |
-| `--system-prompt` | | 96 |
-| `--append-system-prompt` | | 98 |
-| `--name` | `-n` | 101 |
-| `--no-session` | | 107 |
-| `--session` | | 109 |
-| `--session-id` | | 111 |
-| `--fork` | | 113 |
-| `--session-dir` | | 115 |
-| `--models` | | 117 |
-| `--no-tools` | `-nt` | 119 |
-| `--no-builtin-tools` | `-nbt` | 121 |
-| `--tools` | `-t` | 123 |
-| `--exclude-tools` | `-xt` | 128 |
-| `--thinking` | | 133 |
-| `--print` | `-p` | 143 |
-| `--export` | | 150 |
-| `--extension` | `-e` | 152 |
-| `--no-extensions` | `-ne` | 155 |
-| `--skill` | | 157 |
-| `--prompt-template` | | 160 |
-| `--theme` | | 163 |
-| `--use-theme` | | 166 |
-| `--no-skills` | `-ns` | 174 |
-| `--no-prompt-templates` | `-np` | 176 |
-| `--no-themes` | | 178 |
-| `--no-context-files` | `-nc` | 180 |
-| `--list-models` | | 182 |
-| `--tui-mode` | | 189 |
-| `--verbose` | | 203 |
-| `--approve` | `-a` | 205 |
-| `--no-approve` | `-na` | 207 |
-| `--offline` | | 209 |
+| `settings` | Open settings menu | 20 |
+| `model` | Select model (selector UI); arg `<provider/model>` | 21 |
+| `scoped-models` | Enable/disable models for Ctrl+P cycling | 22 |
+| `export` | Export session (HTML default, or `.html`/`.jsonl` path) | 23 |
+| `import` | Import and resume a session from JSONL | 24 |
+| `share` | Share session as a secret GitHub gist | 25 |
+| `copy` | Copy last agent message to clipboard | 26 |
+| `name` | Set session display name | 27 |
+| `session` | Show session info and stats | 28 |
+| `changelog` | Show changelog entries | 29 |
+| `hotkeys` | Show all keyboard shortcuts | 30 |
+| `fork` | New fork from a previous user message | 31 |
+| `clone` | Duplicate current session at current position | 32 |
+| `tree` | Navigate session tree (switch branches) | 33 |
+| `trust` | Persist project trust decision | 34 |
+| `login` | Configure provider auth; arg `<provider>` | 35 |
+| `logout` | Remove provider auth | 36 |
+| `new` | Start a new session | 37 |
+| `compact` | Manually compact session context | 38 |
+| `resume` | Resume a different session | 39 |
+| `reload` | Reload keybindings, extensions, skills, prompts, themes, context files | 40 |
+| `quit` | Quit | 41 |
 
-**40 flags.**
+## 5. Wire protocol (CBOR) — `wire.protocol.*`
 
-### 2.3 Slash commands
+`packages/protocol/src/schemas.ts`. `PROTOCOL_VERSION = 1` (:3). Framing `src/framing.ts`; codec
+`src/codec.ts`; CBOR encoder/decoder `src/cbor/`.
 
-`packages/coding-agent/src/core/slash-commands.ts` — **22 commands**, lines 20–41.
+**Commands (9)** `Kind: command` — `list`(291) · `create`(293) · `attach`(299) · `detach`(300) ·
+`prompt`(301) · `steer`(302) · `abort`(303) · `set_model`(305) · `set_thinking`(310)
 
-`settings`(20) · `model`(21) · `scoped-models`(22) · `export`(23) · `import`(24) · `share`(25) ·
-`copy`(26) · `name`(27) · `session`(28) · `changelog`(29) · `hotkeys`(30) · `fork`(31) ·
-`clone`(32) · `tree`(33) · `trust`(34) · `login`(35) · `logout`(36) · `new`(37) · `compact`(38) ·
-`resume`(39) · `reload`(40) · `quit`(41)
+**Frames** `Kind: data-format` — `hello`(386) · `request`(392) · `response`(424,430) ·
+`event`(437) · `hello_error`(419)
 
-## 3. Two distinct protocol surfaces
+**Server events** `Kind: event` — `server_snapshot`(401) · `session_snapshot`(402) ·
+`session_progress`(404) · `session_removed`(408)
 
-**These are different products and must not be conflated.** An earlier pi-go note recorded "pi has
-~30 RPC commands"; that is true of the coding-agent RPC mode and false of `packages/protocol`, which
-has 9. Both exist.
-
-### 3.1 `packages/protocol` — CBOR multi-session wire protocol
-
-`packages/protocol/src/schemas.ts`, `PROTOCOL_VERSION = 1` (line 3).
-
-**Commands (9):** `list`(291) · `create`(293) · `attach`(299) · `detach`(300) · `prompt`(301) ·
-`steer`(302) · `abort`(303) · `set_model`(305) · `set_thinking`(310)
-
-**Frame types:** `hello`(386) · `request`(392) · `response`(424,430) · `event`(437) ·
-`hello_error`(419)
-
-**Server events:** `server_snapshot`(401) · `session_snapshot`(402) · `session_progress`(404) ·
-`session_removed`(408)
-
-**Error codes (7):** `version` · `busy` · `session_locked` · `not_found` · `invalid_request` ·
+**Error codes (7)** — `version` · `busy` · `session_locked` · `not_found` · `invalid_request` ·
 `not_implemented` · `internal_error` (270–276)
 
-**Session phases (5):** `idle` · `turn` · `compaction` · `branch_summary` · `retry` (39–43)
+**Session phases (5)** — `idle` · `turn` · `compaction` · `branch_summary` · `retry` (39–43)
 
-**Thinking levels (7):** `off` · `minimal` · `low` · `medium` · `high` · `xhigh` · `max` (27–33)
+**Thinking levels (7)** — `off` · `minimal` · `low` · `medium` · `high` · `xhigh` · `max` (27–33)
 
-**Stream events:** `item_started`(206) · `assistant_delta`(210) · `item_updated`(217) ·
+**Stream events** — `item_started`(206) · `assistant_delta`(210) · `item_updated`(217) ·
 `item_finished`(221)
 
-**Content kinds:** `text`(76) · `thinking`(80) · `image`(85) · `toolCall`(90)
+**Content kinds** — `text`(76) · `thinking`(80) · `image`(85) · `toolCall`(90)
 
-**Stop reasons:** `stop` · `length` · `toolUse`(142) · `error`(147) · `aborted`(153)
+**Stop reasons** — `stop`/`length`/`toolUse`(142) · `error`(147) · `aborted`(153)
 
-### 3.2 coding-agent RPC mode — JSON command surface
+## 6. coding-agent RPC mode — `coding-agent.rpc.*`
 
-`packages/coding-agent/docs/rpc.md`. **32 commands** plus **10 UI-dialog request types**.
+`packages/coding-agent/docs/rpc.md`. **A DIFFERENT SURFACE from §5 — never merge the two.**
+Per-command request/response payloads are `schema-needed`.
 
-| Group | Commands (doc line) |
-| --- | --- |
-| Prompting | `prompt`(43) · `steer`(80) · `follow_up`(102) · `abort`(124) · `new_session`(137) |
-| State | `get_state`(162) · `get_messages`(195) |
-| Model | `set_model`(217) · `cycle_model`(235) · `get_available_models`(259) |
-| Thinking | `set_thinking_level`(281) · `cycle_thinking_level`(298) · `get_available_thinking_levels`(316) |
-| Queue modes | `set_steering_mode`(338) · `set_follow_up_mode`(355) |
-| Compaction | `compact`(374) · `set_auto_compaction`(413) |
-| Retry | `set_auto_retry`(428) · `abort_retry`(441) |
-| Bash | `bash`(456) · `abort_bash`(516) |
-| Session | `get_session_stats`(531) · `export_html`(574) · `switch_session`(597) · `fork`(615) · `clone`(643) · `get_fork_messages`(671) · `get_entries`(694) · `get_tree`(724) · `get_last_assistant_text`(752) · `set_session_name`(772) |
-| Commands | `get_commands`(793) |
+**Commands (32)** `Kind: command` — prompting: `prompt`(43) · `steer`(80) · `follow_up`(102) ·
+`abort`(124) · `new_session`(137) | state: `get_state`(162) · `get_messages`(195) | model:
+`set_model`(217) · `cycle_model`(235) · `get_available_models`(259) | thinking:
+`set_thinking_level`(281) · `cycle_thinking_level`(298) · `get_available_thinking_levels`(316) |
+queue: `set_steering_mode`(338) · `set_follow_up_mode`(355) | compaction: `compact`(374) ·
+`set_auto_compaction`(413) | retry: `set_auto_retry`(428) · `abort_retry`(441) | bash: `bash`(456) ·
+`abort_bash`(516) | session: `get_session_stats`(531) · `export_html`(574) · `switch_session`(597) ·
+`fork`(615) · `clone`(643) · `get_fork_messages`(671) · `get_entries`(694) · `get_tree`(724) ·
+`get_last_assistant_text`(752) · `set_session_name`(772) | commands: `get_commands`(793)
 
-**UI dialog requests (server→client):** `select`(1182) · `confirm`(1199) · `input`(1216) ·
-`editor`(1232) · `notify`(1248) · `setStatus`(1264) · `setWidget`(1280) · `setTitle`(1297) ·
-`set_editor_text`(1310)
+**UI-dialog requests (9)** `Kind: ui-api`, server→client — `select`(1182) · `confirm`(1199) ·
+`input`(1216) · `editor`(1232) · `notify`(1248) · `setStatus`(1264) · `setWidget`(1280) ·
+`setTitle`(1297) · `set_editor_text`(1310)
 
-**Events (22):** `agent_start` · `agent_end` · `agent_settled` · `turn_start` · `turn_end` ·
-`message_start` · `message_update` · `message_end` · `bash_execution_update` ·
-`tool_execution_start` · `tool_execution_update` · `tool_execution_end` · `queue_update` ·
-`compaction_start` · `compaction_end` · `auto_retry_start` · `auto_retry_end` ·
-`summarization_retry_scheduled` · `summarization_retry_attempt_start` ·
-`summarization_retry_finished` · `extension_error` (rpc.md 838+)
+**Events (22)** `Kind: event` — rpc.md:838+
 
-> Note the three-way distinction pi draws and pi-go must preserve: `agent_end` is one low-level run
-> completing, while `agent_settled` means no retry, compaction retry **or** queued continuation
-> remains. Collapsing them loses the only signal a client can wait on.
+`agent_start` · `agent_end` · `agent_settled` · `turn_start` · `turn_end` · `message_start` ·
+`message_update` · `message_end` · `bash_execution_update` · `tool_execution_start` ·
+`tool_execution_update` · `tool_execution_end` · `queue_update` · `compaction_start` ·
+`compaction_end` · `auto_retry_start` · `auto_retry_end` · `summarization_retry_scheduled` ·
+`summarization_retry_attempt_start` · `summarization_retry_finished` · `extension_error`
 
-## 4. Built-in tools
+> **`agent_end` and `agent_settled` are separate features and must not be merged.** `agent_end` is
+> one low-level run finishing; `agent_settled` means no automatic retry, compaction retry **or**
+> queued continuation remains. Only the latter is safe for a client to wait on.
 
-Two separate tool sets exist.
+## 7. Models, providers, auth
 
-### 4.1 coding-agent tools — `packages/coding-agent/src/core/tools/`
-
-| Tool name | File | Line of `name:` |
-| --- | --- | --- |
-| `bash` | `bash.ts` | 331 |
-| `edit` | `edit.ts` | 304 |
-| `find` | `find.ts` | 129 |
-| `grep` | `grep.ts` | 134 |
-| `ls` | `ls.ts` | 106 |
-| `read` | `read.ts` | 216 |
-| `write` | `write.ts` | 193 |
-
-Supporting (not model-facing): `edit-diff.ts` · `file-mutation-queue.ts` · `output-accumulator.ts` ·
-`path-utils.ts` · `render-utils.ts` · `tool-definition-wrapper.ts` · `truncate.ts`
-
-### 4.2 agent harness tools — `packages/agent/src/harness/tools/`
-
-`bash.ts` · `edit.ts` · `edit-diff.ts` · `image.ts` · `read.ts` · `write.ts`
-(+ `file-mutation-queue.ts`, `path-utils.ts`, `tool-context.ts`)
-
-> The harness set includes `image` and excludes `find`/`grep`/`ls`. The two sets are **not** the same
-> product surface and each needs its own parity row.
-
-## 5. Providers
-
-`packages/ai/src/providers/` — **44** provider implementation files (excluding generated model data,
-auth/stream helpers and `images/`).
+### 7.1 Providers — `Kind: provider`, `ai.provider.*` — 44 implementations
 
 `amazon-bedrock` · `ant-ling` · `anthropic` · `azure-openai-responses` · `baseten` · `cerebras` ·
 `cloudflare-ai-gateway` · `cloudflare-workers-ai` · `deepseek` · `faux` · `fireworks` ·
@@ -237,76 +196,172 @@ auth/stream helpers and `images/`).
 `opencode` · `opencode-go` · `openrouter` · `openrouter-images` · `qwen-token-plan` ·
 `qwen-token-plan-cn` · `qwen-token-plan-individual` · `radius` · `together` · `vercel-ai-gateway` ·
 `xai` · `xiaomi` · `xiaomi-token-plan-ams` · `xiaomi-token-plan-cn` · `xiaomi-token-plan-sgp` ·
-`zai` · `zai-coding-cn`
+`zai` · `zai-coding-cn` (`packages/ai/src/providers/`)
 
-> `faux` is a fake provider — relevant to pi-go because v0's deterministic fixture needs an
-> equivalent, and Pi already has a sanctioned one.
+`ai.provider.faux` is Pi's own fake provider — directly relevant to pi-go's deterministic fixture.
 
-## 6. Extension surface — partial
+### 7.2 Model catalogue — **`source-gap`, and this one matters**
 
-`packages/coding-agent/docs/extensions.md`. Headings enumerated; **per-hook semantics still to be
-extracted.**
+| Layer | Feature ID | Evidence |
+| --- | --- | --- |
+| generator | `ai.models.generator` | `packages/ai/scripts/generate-models.ts` |
+| generator input | `ai.models.data-manifest` | `packages/ai/scripts/model-data.ts`, `check-model-data.ts` |
+| generated aggregate | `ai.models.generated-index` | `packages/ai/src/models.generated.ts:1-2` ("auto-generated … do not edit") |
+| generated per provider | `ai.models.catalog.<provider>` | `packages/ai/src/providers/<p>.models.ts` |
+| **catalogue data** | `ai.models.catalog-data` | **ABSENT from the tree** |
 
-**Event hooks by group:**
+`packages/ai/src/providers/<p>.models.ts` imports `./data/<p>.json`, but
+**`packages/ai/src/providers/data/` is gitignored** (`.gitignore:11`) and is not present at
+`086c32e`.
 
-| Group | Hooks (doc line) |
+**Consequence for parity:** the number and identity of models Pi supports **cannot be evidenced from
+the approved baseline**. Any "Pi supports N models" claim needs a separate, dated evidence source
+(a generator run, or an upstream catalogue snapshot) and must be pinned independently of `086c32e`.
+Counting the 44 provider files and calling models inventoried would be exactly the false-completion
+this gate exists to prevent.
+
+Image models are committed and countable: `packages/ai/src/image-models.generated.ts` — **45**
+entries. Registry: `packages/ai/src/images-api-registry.ts`.
+
+### 7.3 Auth — `Kind: auth`, `ai.auth.*`
+
+`context` · `credential-store` · `helpers` · `resolve` (`packages/ai/src/auth/`)
+OAuth flows (`packages/ai/src/auth/oauth/`): `anthropic` · `device-code` · `github-copilot` ·
+`kimi-coding` · `load` · `oauth-page` · `openai-codex` · `openrouter` · `pkce` · `radius` · `xai`
+
+Flow semantics `semantics-needed`. Docs: `docs/custom-provider.md`, `docs/models.md`.
+
+## 8. Built-in tools — TWO SETS
+
+### 8.1 `coding-agent.tool.*` — `packages/coding-agent/src/core/tools/`
+
+| ID | `name:` line |
 | --- | --- |
-| Startup | `project_trust`(352) |
-| Resource | `resources_discover`(371) |
-| Session | `session_start`(392) · `session_info_changed`(404) · `session_before_switch`(415) · `session_before_fork`(434) · `session_before_compact` / `session_compact`(451) · `session_before_tree` / `session_tree`(484) · `session_shutdown`(507) |
-| Agent | `before_agent_start`(521) · `agent_start`/`agent_end`/`agent_settled`(558) · `turn_start`/`turn_end`(574) · `message_start`/`message_update`/`message_end`(588) · `tool_execution_start`/`update`/`end`(624) · `context`(648) · `before_provider_headers`(660) · `before_provider_request`(678) · `after_provider_response`(695) |
-| Model | `model_select`(713) · `thinking_level_select`(734) |
-| Tool | `tool_call`(751) · `tool_result`(815) |
-| User bash | `user_bash`(852) |
-| Input | `input`(884) |
+| `coding-agent.tool.bash` | `bash.ts:331` |
+| `coding-agent.tool.edit` | `edit.ts:304` |
+| `coding-agent.tool.find` | `find.ts:129` |
+| `coding-agent.tool.grep` | `grep.ts:134` |
+| `coding-agent.tool.ls` | `ls.ts:106` |
+| `coding-agent.tool.read` | `read.ts:216` |
+| `coding-agent.tool.write` | `write.ts:193` |
 
-**`ExtensionContext` members:** `ctx.ui`(937) · `ctx.mode`(941) · `ctx.hasUI`(945) · `ctx.cwd`(949) ·
-`ctx.isProjectTrusted()`(967) · `ctx.sessionManager`(973) · `ctx.modelRegistry`/`ctx.model`/
-`ctx.thinkingLevel`/`ctx.scopedModels`(986) · `ctx.signal`(992) · `ctx.isIdle()`/`ctx.abort()`/
-`ctx.hasPendingMessages()`(1017) · `ctx.shutdown()`(1021) · `ctx.getContextUsage()`(1039) ·
-`ctx.compact()`(1050) · `ctx.getSystemPrompt()`(1066)
+Supporting (not model-facing): `edit-diff` · `file-mutation-queue` · `output-accumulator` ·
+`path-utils` · `render-utils` · `tool-definition-wrapper` · `truncate`
 
-**`ExtensionCommandContext`:** `getSystemPromptOptions()`(1086) · `waitForIdle()`(1099) ·
+### 8.2 `agent-harness.tool.*` — `packages/agent/src/harness/tools/`
+
+`bash` · `edit` · `edit-diff` · `image` · `read` · `write`
+(support: `file-mutation-queue`, `path-utils`, `tool-context`)
+
+> **Has `image`; lacks `find`/`grep`/`ls`.** Two distinct product surfaces, two sets of parity rows.
+> Tool input schemas are `schema-needed` for both sets.
+
+## 9. Extension surface — `extension.*`
+
+`packages/coding-agent/docs/extensions.md`. Names `enumerated`; behaviour `semantics-needed`.
+
+**Hooks** `Kind: hook` — startup: `project_trust`(352) | resources: `resources_discover`(371) |
+session: `session_start`(392) · `session_info_changed`(404) · `session_before_switch`(415) ·
+`session_before_fork`(434) · `session_before_compact`/`session_compact`(451) ·
+`session_before_tree`/`session_tree`(484) · `session_shutdown`(507) | agent:
+`before_agent_start`(521) · `agent_start`/`agent_end`/`agent_settled`(558) ·
+`turn_start`/`turn_end`(574) · `message_start`/`message_update`/`message_end`(588) ·
+`tool_execution_start`/`update`/`end`(624) · `context`(648) · `before_provider_headers`(660) ·
+`before_provider_request`(678) · `after_provider_response`(695) | model: `model_select`(713) ·
+`thinking_level_select`(734) | tool: `tool_call`(751) · `tool_result`(815) | bash: `user_bash`(852) |
+input: `input`(884)
+
+**`ExtensionContext`** `Kind: public-api` — `ui`(937) · `mode`(941) · `hasUI`(945) · `cwd`(949) ·
+`isProjectTrusted()`(967) · `sessionManager`(973) · `modelRegistry`/`model`/`thinkingLevel`/
+`scopedModels`(986) · `signal`(992) · `isIdle()`/`abort()`/`hasPendingMessages()`(1017) ·
+`shutdown()`(1021) · `getContextUsage()`(1039) · `compact()`(1050) · `getSystemPrompt()`(1066)
+
+**`ExtensionCommandContext`** — `getSystemPromptOptions()`(1086) · `waitForIdle()`(1099) ·
 `newSession()`(1112) · `fork()`(1145) · `navigateTree()`(1171) · `switchSession()`(1190) ·
 `reload()`(1276)
 
-**`ExtensionAPI` methods:** `pi.on`(1334) · `pi.registerTool`(1338) · `pi.sendMessage`(1389) ·
-`pi.sendUserMessage`(1412) · `pi.appendEntry`(1444) · `pi.setSessionName`(1462) ·
-`pi.getSessionName`(1470) · `pi.setLabel`(1481) · `pi.registerCommand`(1498) · `pi.getCommands`(1533)
-· `pi.registerMessageRenderer`(1566) · `pi.registerMarkdownTransformer`(1570) ·
-`pi.registerEntryRenderer`(1591)
+**`ExtensionAPI`** — `on`(1334) · `registerTool`(1338) · `sendMessage`(1389) ·
+`sendUserMessage`(1412) · `appendEntry`(1444) · `setSessionName`(1462) · `getSessionName`(1470) ·
+`setLabel`(1481) · `registerCommand`(1498) · `getCommands`(1533) · `registerMessageRenderer`(1566) ·
+`registerMarkdownTransformer`(1570) · `registerEntryRenderer`(1591)
 
-> `registerTool` is the reason pi-go's tool-registration seam exists at v0, and
-> `before_provider_request` / `after_provider_response` sit exactly on pi-go's model port.
+## 10. Resources — `coding-agent.resource.*`
 
-## 7. Documentation set (an inventory axis in its own right)
+| ID | Module | Docs |
+| --- | --- | --- |
+| `resource.skills` | `src/core/skills.ts` | `docs/skills.md` |
+| `resource.prompt-templates` | `src/core/prompt-templates.ts` | none found |
+| `resource.themes` | (loader) | `docs/themes.md` |
+| `resource.keybindings` | `src/core/keybindings.ts` | `docs/keybindings.md` |
+| `resource.loader` | `src/core/resource-loader.ts` | — |
+| `resource.system-prompt` | `src/core/system-prompt.ts` | — |
+| `resource.context-files` | via `--no-context-files`(180) | — |
 
-`packages/coding-agent/docs/` — 36 documents, each describing a user-facing capability:
-`compaction` · `containerization` · `custom-provider` · `development` · `environment-variables` ·
-`extensions` · `index` · `json` · `keybindings` · `llama-cpp` · `models` · `packages` · `quickstart` ·
-`rpc` · `sdk` · `security` · `session-format` · `sessions` · `settings` · `shell-aliases` · `skills` ·
-`terminal-setup` · `termux` · `themes` · `tmux` · `tui` · `usage` · `windows`
-(+ `docs.json`, images)
+Discovery is also extension-visible via `resources_discover`(371). Semantics `semantics-needed`.
 
-Plus `packages/agent/docs/`: `harness` · `search` · `telemetry-schema`.
+## 11. TUI — `tui.component.*` — `packages/tui/src/`
 
-**Each of these is a candidate parity area** and none should be closed without its own row.
+Components: `alt-screen-flash` · `box` · `cancellable-loader` · `editor` · `h-stack` · `image` ·
+`input` · `loader` · `markdown` · `scroll-view` · `select-list` · `settings-list` · `spacer` ·
+`stack` · `text` · `truncated-text` · `v-stack`
+
+Subsystems: `alt-screen-search` · `autocomplete` · `editor-component` · `fuzzy` · `keybindings` ·
+`keys` · `kill-ring` · `latex` · `layout`/`layout-node` · `native-modifiers` · `stdin-buffer` ·
+`terminal` · `terminal-colors` · `terminal-image` · `tui-alt-screen` · `tui-main-screen` · `tui` ·
+`undo-stack` · `word-navigation`
+
+Docs: `docs/tui.md`, `docs/themes.md`, `docs/keybindings.md`, `docs/terminal-setup.md`,
+`docs/tmux.md`, `docs/termux.md`, `docs/windows.md`. Semantics `semantics-needed`.
+
+## 12. server / client / session-backends
+
+**`server.*`** — `connection` · `errors` · `listener` · `protocol` · `server` · `sessions` ·
+`snapshots` · `types` · transports `unix/{index,listener,preset,types}` · testing harness
+`testing/{client,server,service}`
+
+**`client.*`** — `client` (`PiClient`) · `connection` · `errors` · `promise` · `session-handle`
+(`PiSessionHandle`, `SessionLease`, `SessionLeaseMode`, `AcquireSessionOptions`) · `state` ·
+`transport` (`ByteTransport`, `ByteTransportFactory`, `ByteTransportHandlers`) · `types` · `unix`
+
+**`session-backends.*`** — only `sqlite-node` exists: `sqlite/{branch-cache,index,migrations,repo,
+search-backend,sql}`, storage `{branch-entries,branch-tips,entries,facts,lanes,records,
+session-sequences,session-stats}`, migration `001_initial.sql`
+
+> Session **persistence schema** is a first-class parity surface (`data-format`), evidenced by
+> `001_initial.sql` and `docs/session-format.md` — `schema-needed`.
+
+## 13. Telemetry / evals / install
+
+**`telemetry.*`** — `index` · `memory` · `noop` · conformance harness `testing/{conformance,types}`.
+Schema doc: `packages/agent/docs/telemetry-schema.md`. `schema-needed`.
+
+**`evals.*`** — `extensions.eval` · `smoke.eval` · `pi-harness` · vitest integration
+`vitest-evals/{artifacts,harness-table,reporter,setup,summary}`. `semantics-needed`.
+
+**`install.*`** — `packages/coding-agent/install-lock/{package.json,package-lock.json}` ·
+generator `scripts/generate-coding-agent-install-lock.mjs` · `src/utils/windows-self-update.ts` ·
+test `test/git-update.test.ts`. `semantics-needed`.
+
+## 14. Documentation set — `Kind: engineering-evidence`
+
+`packages/coding-agent/docs/` (36 files): `compaction` · `containerization` · `custom-provider` ·
+`development` · `environment-variables` · `extensions` · `index` · `json` · `keybindings` ·
+`llama-cpp` · `models` · `packages` · `quickstart` · `rpc` · `sdk` · `security` · `session-format` ·
+`sessions` · `settings` · `shell-aliases` · `skills` · `terminal-setup` · `termux` · `themes` ·
+`tmux` · `tui` · `usage` · `windows`
+
+`packages/agent/docs/`: `harness` · `search` · `telemetry-schema`
+
+Each is a candidate parity area; none may be closed without its own row.
 
 ---
 
-## Method
+## Method and limits
 
-- Every fact above was extracted with `git show 086c32e:<path>` or `git ls-tree 086c32e`, never from
-  the working tree.
-- Line numbers are from the baseline file, so any reviewer can re-derive a row.
-- Counts are stated only where the enumeration is mechanical (grep over a definition list); where a
-  count would require judgement about what counts as a "feature", the list is given without one.
+- Extraction used `git show 086c32e:<path>` / `git ls-tree 086c32e` exclusively.
+- Counts are given only where enumeration is mechanical. Where "feature" would require judgement,
+  the list is given without a count.
+- Generated surfaces record generator, generated artefact and data separately (§7.2).
 
-## Known gaps in this document
-
-1. The ❌ axes in the coverage table are **not started**.
-2. Extension hooks have headings but not semantics; a hook name alone is not enough to build a
-   parity row.
-3. Per-tool input schemas and options are not extracted.
-4. `packages/server`, `packages/client`, `packages/session-backends`, `packages/tui`,
-   `packages/telemetry`, `packages/evals` have had **no** enumeration beyond existing.
+**Not yet started:** `packages/coding-agent/examples/` (extension and SDK examples), per-command RPC
+payload schemas, per-tool input schemas, per-hook semantics, settings/environment-variable keys.
