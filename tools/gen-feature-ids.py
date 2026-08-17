@@ -180,24 +180,206 @@ def emit(family: str, membership_authority: str, name_authority: str,
 
 # A `/` is division when a value could already have ended, and starts a regex
 # otherwise. These are the character classes that can END a value in this
-# codebase's TypeScript: an identifier or numeric character, a closing bracket
-# of any kind, or an identifier character that `isalnum` does not cover.
-_CLOSES_A_VALUE = frozenset(")]}")
-_IDENTIFIER_TAIL = frozenset("_$")
+# A `/` after one of these keywords starts a REGEX, not a division, even though
+# the keyword ends in a letter. Testing only "is the previous character
+# alphanumeric" classifies `return /.../` as division, leaves the regex unblanked
+# and lets whatever it matches on become a member -- a real false positive this
+# list exists to prevent. `case`/`in`/`of`/`instanceof`/`typeof`/`void`/`delete`/
+# `await`/`yield`/`new`/`do`/`else`/`return`/`throw` can all be followed by an
+# expression; any other identifier is a value, so `/` after it divides.
+_KEYWORDS_BEFORE_EXPRESSION = frozenset({
+    "return", "throw", "case", "in", "of", "instanceof", "typeof", "void",
+    "delete", "await", "yield", "new", "do", "else", "default",
+})
 
 
-def _value_may_have_ended(previous: str) -> bool:
-    """Whether the previous significant character could end a value.
+class _Lexer:
+    """A TypeScript lexer that classifies every offset, keeping the text length.
 
-    Naming this test is the point: at the call site the bare set membership read
-    as an arbitrary punctuation list, which hid the one rule that decides
-    division from regex.
+    It exists because a character-level heuristic got two things wrong in both
+    directions:
+
+      * **regex vs division** was decided from the previous CHARACTER, so
+        `return /output(...)/;` read as division, the regex stayed unblanked, and
+        the code inside it became discoverable. The decision needs the previous
+        TOKEN: an identifier or closing bracket ends a value (division), a
+        keyword such as `return` does not (regex).
+      * **template expressions** were treated as string text, so real code inside
+        `${...}` was blanked -- `` `dir=${process.env.PI_REAL_READ}` `` hid a
+        genuine read -- while the surrounding literal text was, correctly, not
+        code. A template is therefore lexed as alternating text and CODE regions,
+        with nesting, since a template can appear inside its own expression.
+
+    The output is two aligned views; `text_regions` are the spans that are string
+    or template TEXT, which is the only difference between them.
     """
-    if not previous:
-        return False
-    return (previous.isalnum()
-            or previous in _CLOSES_A_VALUE
-            or previous in _IDENTIFIER_TAIL)
+
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.length = len(source)
+        # Spans to blank in both views: comments and regex literals.
+        self.dead: list[tuple[int, int]] = []
+        # Spans that are string/template text: blanked in the structural view.
+        self.text: list[tuple[int, int]] = []
+        self._previous_token = ""
+        self._run()
+
+    # -- token-level state -------------------------------------------------
+
+    def _value_ended(self) -> bool:
+        """Whether the last token could end a value, making `/` a division."""
+        token = self._previous_token
+        if not token:
+            return False
+        if token in _KEYWORDS_BEFORE_EXPRESSION:
+            return False
+        if token[-1].isalnum() or token[-1] in "_$":
+            return True
+        # `)` and `]` end a value; `}` is ambiguous in real TypeScript (block vs
+        # object literal) and is treated as ending one, matching this codebase.
+        return token in (")", "]", "}")
+
+    # -- scanning ----------------------------------------------------------
+
+    def _run(self) -> None:
+        index = 0
+        # Each entry is the brace depth at which the enclosing template's
+        # expression started, so `}` can be recognised as resuming template text.
+        templates: list[int] = []
+        brace_depth = 0
+
+        while index < self.length:
+            char = self.source[index]
+            pair = self.source[index: index + 2]
+
+            if pair == "//":
+                stop = self.source.find("\n", index)
+                stop = self.length if stop == -1 else stop
+                self.dead.append((index, stop))
+                index = stop
+                continue
+
+            if pair == "/*":
+                close = self.source.find("*/", index + 2)
+                stop = self.length if close == -1 else close + 2
+                self.dead.append((index, stop))
+                index = stop
+                continue
+
+            if char in "\"'":
+                index = self._scan_quoted(index, char)
+                self._previous_token = "''"
+                continue
+
+            if char == "`":
+                index = self._scan_template_text(index + 1)
+                if index < self.length and self.source[index] == "`":
+                    index += 1
+                    self._previous_token = "``"
+                else:
+                    # An expression opened: `${` was reached.
+                    templates.append(brace_depth)
+                    brace_depth += 1
+                    index += 2
+                    self._previous_token = "${"
+                continue
+
+            if char == "}" and templates and brace_depth - 1 == templates[-1]:
+                # Closes a template expression: template TEXT resumes here.
+                brace_depth -= 1
+                templates.pop()
+                index = self._scan_template_text(index + 1)
+                if index < self.length and self.source[index] == "`":
+                    index += 1
+                    self._previous_token = "``"
+                else:
+                    templates.append(brace_depth)
+                    brace_depth += 1
+                    index += 2
+                    self._previous_token = "${"
+                continue
+
+            if char == "{":
+                brace_depth += 1
+                self._previous_token = "{"
+                index += 1
+                continue
+
+            if char == "}":
+                brace_depth -= 1
+                self._previous_token = "}"
+                index += 1
+                continue
+
+            if char == "/" and not self._value_ended():
+                index = self._scan_regex(index)
+                self._previous_token = "//re"
+                continue
+
+            if char.isalnum() or char in "_$":
+                start = index
+                while index < self.length and (self.source[index].isalnum()
+                                               or self.source[index] in "_$"):
+                    index += 1
+                self._previous_token = self.source[start:index]
+                continue
+
+            if char in " \t\n\r":
+                index += 1
+                continue
+
+            self._previous_token = char
+            index += 1
+
+    def _scan_quoted(self, index: int, quote: str) -> int:
+        scan = index + 1
+        while scan < self.length:
+            if self.source[scan] == "\\":
+                scan += 2
+                continue
+            if self.source[scan] == quote or self.source[scan] == "\n":
+                break
+            scan += 1
+        self.text.append((index + 1, scan))
+        return min(scan + 1, self.length)
+
+    def _scan_template_text(self, index: int) -> int:
+        """Consume template TEXT, stopping at the closing backtick or at `${`."""
+        scan = index
+        while scan < self.length:
+            if self.source[scan] == "\\":
+                scan += 2
+                continue
+            if self.source[scan] == "`":
+                break
+            if self.source[scan: scan + 2] == "${":
+                break
+            scan += 1
+        self.text.append((index, min(scan, self.length)))
+        return min(scan, self.length)
+
+    def _scan_regex(self, index: int) -> int:
+        scan = index + 1
+        in_class = False
+        while scan < self.length:
+            char = self.source[scan]
+            if char == "\\":
+                scan += 2
+                continue
+            if char == "[":
+                in_class = True
+            elif char == "]":
+                in_class = False
+            elif char == "/" and not in_class:
+                scan += 1
+                break
+            elif char == "\n":
+                break
+            scan += 1
+        while scan < self.length and self.source[scan].isalpha():
+            scan += 1
+        self.dead.append((index, scan))
+        return scan
 
 
 def _scan(source: str, blank_string_contents: bool) -> str:
@@ -206,86 +388,18 @@ def _scan(source: str, blank_string_contents: bool) -> str:
     `SourceView` derives both views from this and documents which job each one
     does; see that class. Both preserve length and newlines, so an offset found
     in one view addresses the same character in the other.
-
-    A `/` begins a regex only where a value cannot already have ended, which is
-    the standard test applied to the previous significant character.
     """
+    lexed = _Lexer(source)
     result = list(source)
-    length = len(source)
-    index = 0
 
-    def blank(begin: int, finish: int) -> None:
-        for position in range(begin, min(finish, length)):
+    spans = list(lexed.dead)
+    if blank_string_contents:
+        spans += lexed.text
+
+    for begin, finish in spans:
+        for position in range(max(begin, 0), min(finish, len(source))):
             if result[position] != "\n":
                 result[position] = " "
-
-    def previous_significant(before: int) -> str:
-        scan = before - 1
-        while scan >= 0 and source[scan] in " \t\n\r":
-            scan -= 1
-        return source[scan] if scan >= 0 else ""
-
-    while index < length:
-        char = source[index]
-        pair = source[index: index + 2]
-
-        if pair == "//":
-            newline = source.find("\n", index)
-            stop = length if newline == -1 else newline
-            blank(index, stop)
-            index = stop
-            continue
-
-        if pair == "/*":
-            close = source.find("*/", index + 2)
-            stop = length if close == -1 else close + 2
-            blank(index, stop)
-            index = stop
-            continue
-
-        if char in "\"'`":
-            quote = char
-            scan = index + 1
-            while scan < length:
-                if source[scan] == "\\":
-                    scan += 2
-                    continue
-                if source[scan] == quote:
-                    break
-                if source[scan] == "\n" and quote != "`":
-                    break
-                scan += 1
-            if blank_string_contents:
-                blank(index + 1, scan)
-            index = min(scan + 1, length)
-            continue
-
-        previous = previous_significant(index)
-        if char == "/" and not _value_may_have_ended(previous):
-            scan = index + 1
-            in_class = False
-            while scan < length:
-                if source[scan] == "\\":
-                    scan += 2
-                    continue
-                if source[scan] == "[":
-                    in_class = True
-                elif source[scan] == "]":
-                    in_class = False
-                elif source[scan] == "/" and not in_class:
-                    scan += 1
-                    break
-                elif source[scan] == "\n":
-                    break
-                scan += 1
-            while scan < length and source[scan].isalpha():
-                scan += 1
-            blank(index, scan)
-            index = scan
-            continue
-
-        index += 1
-
     return "".join(result)
 
 
@@ -580,6 +694,104 @@ def setting_keys(src: Source) -> list[str] | None:
     return keys
 
 
+def extension_hook_names(src: Source) -> list[str] | None:
+    """Hook names an extension can subscribe to: the `on()` overload set.
+
+    **The payload union is NOT the authority.** `ExtensionEvent` lists 25 payload
+    types, but one payload serves several hook names -- `SessionEvent` covers the
+    whole session family -- so counting the union undercounts the hooks a port has
+    to implement.
+
+    **Nor is a line-anchored pattern.** Several overloads are wrapped across lines
+    because their handler type is long, so matching `on(event: "..."` at the start
+    of a line silently drops exactly those, and the ones it drops are the
+    interesting ones: the cancellable session hooks. Each `on(` is therefore
+    discovered structurally and its argument list read as a balanced span.
+    """
+    view = src.view("packages/coding-agent/src/core/extensions/types.ts")
+    interface = re.search(r"^export interface ExtensionAPI \{$", view.structural, re.M)
+    if not interface:
+        fail("cannot locate the ExtensionAPI interface")
+        return None
+
+    # The interface ends at the first line that closes it at column zero.
+    end = view.structural.find("\n}", interface.end())
+    if end == -1:
+        fail("the ExtensionAPI interface has no closing brace")
+        return None
+
+    names: list[str] = []
+    for call in re.finditer(r"\bon\(", view.structural[interface.end():end]):
+        open_paren = interface.end() + call.end() - 1
+        argument = view.balanced_argument(open_paren)
+        if argument is None:
+            fail("an on( overload in ExtensionAPI has unbalanced parentheses")
+            continue
+        literal = view.quoted_after(r"event:\s*", open_paren,
+                                   open_paren + 1 + len(argument))
+        if not literal:
+            fail(f"an on( overload has no readable event literal: "
+                 f"{' '.join(argument[:60].split())!r}")
+            continue
+        names.append(literal[0])
+
+    if not names:
+        fail("ExtensionAPI yielded no on() overloads - its shape probably changed")
+        return None
+    return names
+
+
+def thinking_levels(src: Source) -> list[str] | None:
+    """The thinking-level set, cross-checked across THREE declarations.
+
+    `ThinkingLevel` is declared three times with two different memberships, so
+    naming one of them as the authority would be a coin toss:
+
+      * `agent/src/types.ts` -- 7 members, `off` included;
+      * `ai/src/types.ts` -- 6 members, because there `off` is the ABSENCE of a
+        level; `off` is added back by `ModelThinkingLevel`;
+      * `protocol/src/schemas.ts` -- 7 `Type.Literal` members, the wire form.
+
+    The user-visible set is the 7. All three spellings must agree on it, so the
+    agreement is verified and a divergence fails rather than being resolved by
+    preferring whichever file was read first.
+    """
+    agent = src.view("packages/agent/src/types.ts")
+    declared = type_alias_span(agent, "ThinkingLevel")
+    if declared is None:
+        return None
+    from_agent = agent.quoted_in(*declared)
+
+    ai = src.view("packages/ai/src/types.ts")
+    ai_span = type_alias_span(ai, "ThinkingLevel")
+    model_span = type_alias_span(ai, "ModelThinkingLevel")
+    if ai_span is None or model_span is None:
+        return None
+    # `ModelThinkingLevel = "off" | ThinkingLevel` contributes only its own
+    # literals; the referenced union is read separately and unioned here.
+    from_ai = ai.quoted_in(*ai_span) + ai.quoted_in(*model_span)
+
+    protocol = src.view("packages/protocol/src/schemas.ts")
+    schema = re.search(r"export const ThinkingLevelSchema = Type\.Union\(\[",
+                       protocol.structural)
+    if not schema:
+        fail("cannot locate ThinkingLevelSchema in protocol/schemas.ts")
+        return None
+    closing = protocol.balanced_argument(schema.end() - 2)
+    if closing is None:
+        fail("ThinkingLevelSchema has unbalanced parentheses")
+        return None
+    from_protocol = protocol.quoted_after(
+        r"Type\.Literal\(\s*", schema.end(), schema.end() + len(closing))
+
+    if not (sorted(set(from_agent)) == sorted(set(from_ai)) == sorted(set(from_protocol))):
+        fail(f"thinking levels disagree across declarations: "
+             f"agent={sorted(set(from_agent))}, ai+model={sorted(set(from_ai))}, "
+             f"protocol={sorted(set(from_protocol))}")
+        return None
+    return from_agent
+
+
 def type_alias_span(view: SourceView, name: str) -> tuple[int, int] | None:
     """The span of one `export type NAME = ...;` declaration.
 
@@ -626,41 +838,67 @@ def auth_literals(src: Source, name: str, keyed: bool) -> list[str] | None:
     return members
 
 
-def environment_names(src: Source) -> list[str] | None:
-    """Every `PI_*` environment variable the product READS.
+def environment_names(src: Source) -> dict[str, list[str]] | None:
+    """`PI_*` environment variables, separated BY ROLE.
 
-    Three facts make a naive scan wrong, and each one cost a wrong count first:
+    One set covering "environment variables" was wrong, and wrong in a way that
+    produced a confident set and a false explanation. `delete env.PI_SESSION_ID`
+    matched the read pattern, so the five session variables entered the set as
+    reads and were then DOCUMENTED as reads -- when in fact the product writes
+    them for child processes and clears them first. Three roles, three
+    authorities, stated separately:
+
+      * `input`   -- read as configuration: `process.env.X`, `process.env["X"]`,
+                     a member of an injected `env` object, or via
+                     `getProviderEnvValue("X", env)`.
+      * `exposed` -- assigned into a FRESHLY BUILT environment object handed to a
+                     child process (`env.X = ...`).
+      * `self`    -- assigned into `process.env`, which mutates THIS process and
+                     is inherited by everything it spawns. A different mechanism
+                     with different blast radius, so a different role: `--offline`
+                     sets two variables this way, and the entry points set a
+                     marker.
+      * `cleared` -- DELETED from a child environment object, which upstream
+                     always precedes the assignment so a parent's stale value
+                     cannot leak into a tool call.
+
+    A name may hold more than one role, and several do: `PI_MODEL` and
+    `PI_PROVIDER` are exposed to tools AND read by the eval entry point;
+    `PI_OFFLINE` is read in six places and also set on this process. Reporting
+    each name under one role would hide the others.
+
+    Two further facts each cost a wrong count before this:
 
     1. Not every name is a literal. `config.ts` builds two of them from the
        configurable app name (`${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`), so
        grepping for `PI_` misses them entirely and a fork named `tau` reads
        `TAU_*`. They are recorded under their default `pi` spelling, with the
        derivation as their authority.
-    2. There are three read FORMS, not one: `process.env.X`, `process.env["X"]`
-       and a member of an injected `env` object -- including through the
-       `getProviderEnvValue("X", env)` helper. Scanning only `process.env.X`
-       missed `PI_TUI_ESC_TIMEOUT` and `PI_CACHE_RETENTION`, both documented.
-    3. A name that is only ASSIGNED is not a read, and an assignment matches a
-       naive read pattern. `PI_CODING_AGENT` is set for child processes and never
-       read back, so it is not a configuration input. The `(?!\\s*=[^=])`
-       lookahead in each read pattern is what excludes it -- comparison (`===`)
-       still counts, assignment does not. A name-specific exclusion list was
-       tried first and turned out to be dead code behind this lookahead.
-
-    Membership is every read across the pinned source tree, so a variable added
-    in any package is picked up without this list being edited.
+    2. There are four read FORMS, not one. Scanning only `process.env.X` missed
+       `PI_TUI_ESC_TIMEOUT` and `PI_CACHE_RETENTION`, both documented.
     """
+    # `(?!\s*=[^=])` keeps comparisons (`=== "1"`) and rejects assignment;
+    # `(?<!delete\s)` keeps a deletion out of the read set.
     reads = [
-        r"process\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
-        r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
+        r"(?<!delete )process\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
+        r"(?<!delete )(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])",
     ]
     quoted_reads = [
         r"process\s*\.\s*env\s*\[\s*",
         r"(?<!process\.)\benv\s*\[\s*",
         r"getProviderEnvValue\s*\(\s*",
     ]
+    # The two write forms are deliberately distinguished by whether `process.`
+    # precedes them: `process.env.X = ` mutates this process, `env.X = ` fills an
+    # object built for a child.
+    self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]
+    child_writes = [r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]
+    deletes = [r"\bdelete\s+(?<!process\.)env\s*\.\s*(PI_[A-Z0-9_]+)\b"]
 
     names: set[str] = set()
+    exposed: set[str] = set()
+    on_self: set[str] = set()
+    cleared: set[str] = set()
     for path in src.paths(r"packages/[^/]+/src/.*\.tsx?$"):
         view = src.view(path)
         for pattern in reads:
@@ -670,6 +908,15 @@ def environment_names(src: Source) -> list[str] | None:
             for value in view.quoted_after(prefix):
                 if re.fullmatch(r"PI_[A-Z0-9_]+", value):
                     names.add(value)
+        for pattern in child_writes:
+            for match in view.discover(pattern):
+                exposed.add(match.group(1))
+        for pattern in self_writes:
+            for match in view.discover(pattern):
+                on_self.add(match.group(1))
+        for pattern in deletes:
+            for match in view.discover(pattern):
+                cleared.add(match.group(1))
 
     # The two derived names, recorded at their default spelling. Read from the
     # declaration rather than hardcoded, so a change to the derivation is an
@@ -698,8 +945,22 @@ def environment_names(src: Source) -> list[str] | None:
     if not names:
         fail("no PI_* environment reads found - the scan patterns are stale")
         return None
+    if not exposed or not on_self:
+        fail(f"environment write patterns are stale: {len(exposed)} child writes, "
+             f"{len(on_self)} self writes")
+        return None
 
-    return sorted(names)
+    # Upstream clears each child-exposed name before setting it. If that stops
+    # being true the guarantee "a parent's stale value cannot leak into a tool
+    # call" no longer holds, so a divergence is an error rather than a quiet
+    # result. No exception list: needing one meant the roles were still mixed.
+    unguarded = exposed - cleared
+    if unguarded:
+        fail(f"exposed to a child without being cleared first: {sorted(unguarded)} "
+             f"- a stale value from the parent environment could leak into a tool call")
+
+    return {"input": sorted(names), "exposed": sorted(exposed),
+            "self": sorted(on_self), "cleared": sorted(cleared)}
 
 
 def rpc_event_ids(src: Source) -> list[str] | None:
@@ -988,6 +1249,23 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              f"which map onto these rather than being members",
              modes)
 
+    hooks = extension_hook_names(src)
+    if hooks is not None:
+        emit("extension.hook",
+             "`core/extensions/types.ts` `ExtensionAPI`'s `on()` overload set — "
+             "NOT the `ExtensionEvent` payload union, which is smaller because one "
+             "payload type serves several hooks",
+             "the `event` string literal",
+             hooks)
+
+    levels = thinking_levels(src)
+    if levels is not None:
+        emit("agent.thinking-level",
+             "`agent/src/types.ts` `ThinkingLevel`, verified to agree with "
+             "`ai`'s `ModelThinkingLevel` and the protocol schema",
+             "the level literal",
+             levels)
+
     for family, name, keyed in (
         ("ai.auth.type", "AuthType", False),
         ("ai.auth.prompt", "AuthPrompt", True),
@@ -1002,12 +1280,31 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
 
     environment = environment_names(src)
     if environment is not None:
-        emit("coding-agent.environment",
-             "every `PI_*` read across `packages/*/src` at the baseline, in all "
-             "three read forms, plus the two names derived from `APP_NAME`",
+        # Three families, not one: a name's ROLE is part of what it is, and the
+        # earlier single set silently filed writes and deletions as reads.
+        emit("coding-agent.environment.input",
+             "every `PI_*` READ across `packages/*/src` at the baseline, in all "
+             "four read forms, plus the two names derived from `APP_NAME`; "
+             "assignments and deletions are excluded",
              "the variable name, at its default `pi` spelling for the two "
-             "derived ones; assignment-only markers are excluded",
-             environment)
+             "derived ones",
+             environment["input"])
+        emit("coding-agent.environment.exposed",
+             "every `PI_*` ASSIGNED into an environment object built for a child "
+             "process (`env.X =`) across `packages/*/src`",
+             "the variable name",
+             environment["exposed"])
+        emit("coding-agent.environment.self",
+             "every `PI_*` ASSIGNED onto this process (`process.env.X =`) across "
+             "`packages/*/src` — a different mechanism from the above, inherited "
+             "by everything spawned afterwards",
+             "the variable name",
+             environment["self"])
+        emit("coding-agent.environment.cleared",
+             "every `PI_*` DELETED from an environment object across "
+             "`packages/*/src`; upstream this always precedes the assignment",
+             "the variable name",
+             environment["cleared"])
 
     settings = setting_keys(src)
     if settings is not None:

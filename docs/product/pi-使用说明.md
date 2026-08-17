@@ -218,7 +218,7 @@ pi --mode rpc [--provider anthropic] [--model sonnet] [--no-session]
 **49 个设置项**，覆盖压缩、分支摘要、重试、终端与图像、思考预算、Markdown 渲染、默认模型与厂商、
 队列模式、主题、外部编辑器、shell 路径与前缀、扩展与技能与主题来源、遥测与分析开关等。
 
-**环境变量（源码里读的一共 24 个）**
+**环境变量（一共 25 个名字；下表是你会主动设置的那些）**
 
 | 想做什么 | 变量 |
 | --- | --- |
@@ -234,9 +234,10 @@ pi --mode rpc [--provider anthropic] [--model sonnet] [--no-session]
 | 延长 Anthropic/Bedrock/OpenAI 的缓存保留 | `PI_CACHE_RETENTION=long` |
 | 调终端 ESC 判定超时 | `PI_TUI_ESC_TIMEOUT` |
 
-**工具里能读到的会话信息**：`bash` 执行命令时，Pi 会注入 `PI_SESSION_ID`、`PI_SESSION_FILE`、
-`PI_PROVIDER`、`PI_MODEL`、`PI_REASONING_LEVEL`。注入前会先删掉同名的旧值，所以不会串到上一次的会话；
-设置 `exposeSessionEnvironment: false` 可以关掉。
+**工具里能读到的会话信息**：`bash` 执行命令时，Pi 会往子进程环境里写 5 个变量——
+`PI_SESSION_ID`、`PI_SESSION_FILE`、`PI_PROVIDER`、`PI_MODEL`、`PI_REASONING_LEVEL`。
+**写之前会先把同名的旧值删掉**，所以不会串到上一次会话的值；`exposeSessionEnvironment: false` 可关掉。
+注意这 5 个是 Pi **写给你**的，不是你设置给 Pi 的。
 
 **限制与降级**
 - 项目级设置需要项目被信任才生效（`/trust` 可持久保存决定）。
@@ -257,12 +258,13 @@ cd pi-go
 python3 tools/gen-feature-ids.py --pi-repo /path/to/pi \
         --check-providers tools/expected-providers.txt
 python3 tools/test_gen_feature_ids.py     # 抽取器自身的负向控制
+python3 tools/mutation-sweep.py           # 故意改坏抽取器，测试必须变红
 ```
 
 **退出码 0 只说明**：固定版本可读、抽取器没触发自身守卫（无法归类的调用 / ID 撞车 / 成员数不符）、
 **厂商那一类**与一份独立期望清单集合相等。
 
-**它不说明**：其余 14 类**没有**与另一份独立权威清单做集合比对，所以退出码 0 的意思是
+**它不说明**：其余 19 类**没有**与另一份独立权威清单做集合比对，所以退出码 0 的意思是
 「**没有发现不一致**」，而不是「**已证明完整**」；它也不替代逐文件独立遗漏审计。
 
 标 🟡 的小节表示**我们还没查完**，不表示「查完了只有这些」。

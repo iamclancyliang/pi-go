@@ -43,6 +43,56 @@ class FakeSource(gen.Source):
         return self._files[path]
 
 
+def test_regex_after_a_keyword_is_blanked() -> None:
+    """`return /.../` is a REGEX, not a division.
+
+    Deciding from the previous CHARACTER classifies it as division, leaves the
+    regex unblanked, and lets the code inside it become a member. The pinned
+    source has 18 such sites, so this is not hypothetical.
+    """
+    for keyword in ("return", "throw", "typeof", "case", "in", "of", "new",
+                    "delete", "await", "yield", "void", "instanceof", "default"):
+        source = f'x = {keyword} /output({{ type: "phantom" }})/;\n'
+        view = gen.SourceView("f.ts", source)
+        assert "output(" not in view.structural, (
+            f"regex after `{keyword}` was not blanked: {view.structural!r}")
+        assert "phantom" not in view.structural
+
+
+def test_division_is_still_division() -> None:
+    """The mirror case: `/` after a value divides and must not blank the rest."""
+    for expression in ("const r = total / count;",
+                       "const r = arr[0] / 2;",
+                       "const r = f() / 2;",
+                       "const r = x.y / 2;"):
+        view = gen.SourceView("f.ts", expression + "\n")
+        assert view.structural == expression + "\n", (
+            f"division was treated as a regex: {view.structural!r}")
+
+
+def test_template_expression_is_code_and_template_text_is_not() -> None:
+    """`${...}` holds CODE; the text around it does not.
+
+    Blanking a whole template hides real reads inside its expressions -- a false
+    negative -- while keeping the text would let pseudo-code in the literal part
+    become a member. Both halves are asserted here.
+    """
+    view = gen.SourceView("f.ts", 'const s = `dir=${process.env.PI_REAL}/x`;\n')
+    assert "process.env.PI_REAL" in view.structural, "code inside ${} was blanked"
+    assert "dir=" not in view.structural, "template TEXT was not blanked"
+
+    phantom = gen.SourceView("f.ts", 'const s = `export const createFakeTool = 1`;\n')
+    assert "createFakeTool" not in phantom.structural
+
+
+def test_nested_template_expression() -> None:
+    """A template inside its own expression must not end the outer one early."""
+    view = gen.SourceView("f.ts", 'const s = `a${ `b${ process.env.PI_DEEP }c` }d`;\n')
+    assert "process.env.PI_DEEP" in view.structural
+    for text in ("a", "b", "c", "d"):
+        assert f"`{text}" not in view.structural.replace("PI_DEEP", "")
+
+
 HARNESS_PATH = "packages/agent/src/harness/tools/index.ts"
 
 # Three real exports, and three things that must NOT become members:
@@ -162,8 +212,18 @@ const offline = process.env.PI_OFFLINE;
 const bracket = process.env["PI_TELEMETRY"];
 const injected = env.PI_TUI_ESC_TIMEOUT;
 const helper = getProviderEnvValue("PI_CACHE_RETENTION", env);
-process.env.PI_ASSIGNED_ONLY = "true";
+process.env.PI_SELF_SET = "true";
 const on = process.env.PI_COMPARED === "1";
+''',
+    # A child environment built the way bash.ts builds one: cleared, then set.
+    # The deletion must NOT read as a read, which is the defect that filed all
+    # five session variables as reads and then documented them as such.
+    "packages/coding-agent/src/child.ts": '''
+const env = { ...getShellEnv() };
+delete env.PI_EXPOSED_ONE;
+delete env.PI_EXPOSED_TWO;
+env.PI_EXPOSED_ONE = ctx.one;
+env.PI_EXPOSED_TWO = ctx.two;
 ''',
 }
 
@@ -175,7 +235,8 @@ class EnvFakeSource(FakeSource):
 
 
 def test_environment_names_cover_every_read_form() -> None:
-    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    roles = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    names = roles["input"]
     assert "PI_OFFLINE" in names, names            # process.env.X
     assert "PI_TELEMETRY" in names, names          # process.env["X"]
     assert "PI_TUI_ESC_TIMEOUT" in names, names    # injected env.X
@@ -183,15 +244,46 @@ def test_environment_names_cover_every_read_form() -> None:
 
 
 def test_environment_includes_the_derived_names_at_their_default_spelling() -> None:
-    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))["input"]
     assert "PI_CODING_AGENT_DIR" in names, names
     assert "PI_CODING_AGENT_SESSION_DIR" in names, names
 
 
 def test_no_environment_name_from_a_comment_string_or_template() -> None:
-    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))["input"]
     for phantom in ("PI_FROM_A_COMMENT", "PI_FROM_A_STRING", "PI_FROM_A_TEMPLATE"):
         assert phantom not in names, f"{phantom} must not be a member: {names}"
+
+
+def test_a_deletion_is_not_a_read() -> None:
+    """`delete env.X` must not file X as configuration input.
+
+    This is the defect that put all five session variables in the read set and
+    then described them, in prose, as reads.
+    """
+    roles = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    assert "PI_EXPOSED_ONE" not in roles["input"], roles["input"]
+    assert "PI_EXPOSED_ONE" in roles["cleared"], roles["cleared"]
+
+
+def test_child_write_and_self_write_are_different_roles() -> None:
+    """`env.X =` builds a child's environment; `process.env.X =` mutates ours."""
+    roles = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    assert roles["exposed"] == ["PI_EXPOSED_ONE", "PI_EXPOSED_TWO"], roles["exposed"]
+    assert roles["self"] == ["PI_SELF_SET"], roles["self"]
+    assert "PI_SELF_SET" not in roles["exposed"]
+    assert "PI_EXPOSED_ONE" not in roles["self"]
+
+
+def test_exposed_without_being_cleared_is_an_error() -> None:
+    """The clear-then-set pairing is a guarantee, so losing it must fail loudly."""
+    unguarded = dict(ENV_FIXTURE)
+    unguarded["packages/coding-agent/src/child.ts"] = (
+        "const env = { ...getShellEnv() };\nenv.PI_LEAKY = ctx.one;\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(unguarded))
+    assert any("cleared first" in message for message in gen.errors), gen.errors
+    gen.errors.clear()
 
 
 def test_environment_fixture_really_is_adversarial() -> None:
@@ -211,16 +303,17 @@ def test_environment_fixture_really_is_adversarial() -> None:
     assert "PI_FROM_A_TEMPLATE" not in on_structural
 
 
-def test_environment_excludes_an_assignment_but_keeps_a_comparison() -> None:
-    """A variable that is only written is not a configuration input.
+def test_a_self_assignment_is_not_an_input_but_a_comparison_is() -> None:
+    """Both halves matter.
 
-    Both halves matter: dropping the assignment lookahead lets the write-only
-    marker in, and writing the lookahead too broadly (`=` instead of `=[^=]`)
-    would silently drop every `=== "..."` comparison, which IS a read.
+    Dropping the assignment lookahead files the write-only name as configuration
+    input; writing it too broadly (`=` instead of `=[^=]`) silently drops every
+    `=== "..."` comparison, which IS a read.
     """
-    names = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
-    assert "PI_ASSIGNED_ONLY" not in names, names
-    assert "PI_COMPARED" in names, names
+    roles = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
+    assert "PI_SELF_SET" not in roles["input"], roles["input"]
+    assert "PI_SELF_SET" in roles["self"], roles["self"]
+    assert "PI_COMPARED" in roles["input"], roles["input"]
 
 
 def test_environment_fails_when_the_derivation_rule_changes() -> None:
@@ -231,6 +324,97 @@ def test_environment_fails_when_the_derivation_rule_changes() -> None:
     result = gen.environment_names(EnvFakeSource(broken))
     assert result is None, result
     assert any("derivation rule changed" in message for message in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+EXT_PATH = "packages/coding-agent/src/core/extensions/types.ts"
+
+# Two real traps from the source, plus a phantom:
+#   - one overload is WRAPPED across lines because its handler type is long, and
+#     a line-anchored pattern drops exactly those (upstream, the three it drops
+#     are the cancellable hooks);
+#   - the payload union is smaller than the hook set and must not be the source;
+#   - an `on(` inside a template must contribute nothing.
+EXT_FIXTURE = {
+    EXT_PATH: '''
+export type ExtensionEvent =
+\t| SessionEvent
+\t| ContextEvent;
+
+const docs = `api.on({ event: "phantom_hook" })`;
+
+export interface ExtensionAPI {
+\ton(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
+\ton(
+\t\tevent: "session_before_switch",
+\t\thandler: ExtensionHandler<SessionBeforeSwitchEvent, SessionBeforeSwitchResult>,
+\t): void;
+\ton(event: "context", handler: ExtensionHandler<ContextEvent, ContextEventResult>): void;
+}
+'''
+}
+
+
+def test_hook_names_include_a_wrapped_overload() -> None:
+    names = gen.extension_hook_names(FakeSource(EXT_FIXTURE))
+    assert names == ["session_start", "session_before_switch", "context"], names
+
+
+def test_hook_names_are_not_the_payload_union() -> None:
+    """The union has 2 members and the hook set has 3; they must not be confused."""
+    names = gen.extension_hook_names(FakeSource(EXT_FIXTURE))
+    assert len(names) == 3, names
+    assert "SessionEvent" not in names and "ContextEvent" not in names, names
+
+
+def test_no_hook_name_from_a_template() -> None:
+    names = gen.extension_hook_names(FakeSource(EXT_FIXTURE))
+    assert "phantom_hook" not in names, names
+
+
+def test_hook_fixture_really_is_adversarial() -> None:
+    """The wrapped overload is invisible to a line-anchored pattern, and the
+    phantom IS matchable on the extraction view."""
+    source = EXT_FIXTURE[EXT_PATH]
+    line_anchored = re.findall(r'^\ton\(event: "([a-z_]+)"', source, re.M)
+    assert "session_before_switch" not in line_anchored, (
+        "fixture's wrapped overload is not actually wrapped")
+    assert len(line_anchored) == 2, line_anchored
+    view = gen.SourceView(EXT_PATH, source)
+    assert 'event: "phantom_hook"' in view.extraction
+    assert 'phantom_hook' not in view.structural
+
+
+THINKING = {
+    "packages/agent/src/types.ts":
+        'export type ThinkingLevel = "off" | "low" | "high";\n',
+    "packages/ai/src/types.ts":
+        'export type ThinkingLevel = "low" | "high";\n'
+        'export type ModelThinkingLevel = "off" | ThinkingLevel;\n',
+    "packages/protocol/src/schemas.ts":
+        "export const ThinkingLevelSchema = Type.Union([\n"
+        '\tType.Literal("off"),\n\tType.Literal("low"),\n\tType.Literal("high"),\n]);\n',
+}
+
+
+def test_thinking_levels_agree_across_three_declarations() -> None:
+    assert gen.thinking_levels(FakeSource(THINKING)) == ["off", "low", "high"]
+
+
+def test_thinking_levels_fail_when_declarations_diverge() -> None:
+    """A divergence must be an error, not silently resolved by read order.
+
+    The three spellings live in three packages; preferring whichever was read
+    first would publish one package's view as the product's.
+    """
+    diverged = dict(THINKING)
+    diverged["packages/protocol/src/schemas.ts"] = (
+        "export const ThinkingLevelSchema = Type.Union([\n"
+        '\tType.Literal("off"),\n\tType.Literal("low"),\n]);\n')
+    gen.errors.clear()
+    result = gen.thinking_levels(FakeSource(diverged))
+    assert result is None, result
+    assert any("disagree" in message for message in gen.errors), gen.errors
     gen.errors.clear()
 
 
