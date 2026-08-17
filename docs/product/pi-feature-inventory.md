@@ -38,7 +38,7 @@ always get distinct IDs.
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
 | Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
-| Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25. Remaining: tree `preparation` type, branch summarization |
+| Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
 | TUI | `enumerated` (components) · `semantics-needed` |
 | Telemetry | `enumerated` (files) · `schema-needed` |
@@ -1568,6 +1568,67 @@ work is **charged to the session**, and extension-provided summaries store it to
 
 Branch summarization (`BranchSummaryEntry`, cumulative file tracking) is documented at :148-214 and
 **not yet read into this census**. The summary *format* sections (:215-240) are also unread.
+
+
+## 26. Branch summarization and the shared summary format
+
+Closes the gap §25.5 left open. Evidence: `docs/compaction.md:148-240`.
+
+### 26.1 Branch summarization is a second summarizer, on the session TREE
+
+Triggered by `/tree` navigation away from a branch: Pi offers to summarize the work being abandoned
+and injects that context into the branch being entered (:152).
+
+Mechanism (:154-160): find the **deepest common ancestor** of old and new positions · walk from the
+old leaf back to it · include messages newest-first up to a token budget · summarize · append a
+`BranchSummaryEntry` **at the navigation point**.
+
+So the abandoned branch is left intact and the summary lands on the *target* branch as its new leaf.
+Like compaction, this is additive — nothing on the old branch is rewritten.
+
+### 26.2 `BranchSummaryEntry`
+
+| Field | Meaning |
+| --- | --- |
+| `type` | `"branch_summary"` |
+| `id` / `parentId` / `timestamp` | entry identity and position |
+| `summary` | the summary text |
+| `fromId` | the entry navigated **from** |
+| `usage?` | LLM usage that produced it — counted into session totals |
+| `fromHook?` | true when an extension supplied it (documented as a legacy field name) |
+| `details?` | implementation-specific; built-in stores `readFiles`, `modifiedFiles` |
+
+Structurally parallel to `CompactionEntry`, differing in `fromId` (a tree position) where compaction
+has `firstKeptEntryId` (a linear boundary) — the two summarizers answer different questions.
+
+### 26.3 File tracking ACCUMULATES across summaries
+
+Both summarizers extract file operations from the messages being summarized **and from the previous
+compaction or branch-summary `details`** (:179-186).
+
+**This is the part a port would most plausibly get wrong.** The naive implementation derives
+`readFiles`/`modifiedFiles` from the current window only, which looks correct on a first compaction
+and then silently loses history on the second — and across nested branch summaries. The field is
+cumulative by design, so that the full record of what has been read and modified survives repeated
+summarization.
+
+### 26.4 One shared summary format, and it is prescriptive
+
+Both summarizers emit the **same** structured Markdown (:215-240): `## Goal` ·
+`## Constraints & Preferences` · `## Progress` with `### Done` / `### In Progress` / `### Blocked` ·
+`## Key Decisions` (decision in bold, then rationale) · `## Next Steps` (numbered).
+
+This is a contract, not a style suggestion: it is what a later summarization consumes as its
+"previous summary" input, and what a user reads after a compaction. A port emitting free-form prose
+would still function while degrading iterative summarization, since each round would have less
+structure to build on than the original guarantees.
+
+### 26.5 Compaction axis status
+
+Closed for both summarizers: triggers, mechanism, cut/ancestor rules, entry schemas, cumulative
+tracking and the shared output format. Remaining `schema-needed`: the `preparation` and
+`branchEntries` payload types named in the session hooks (§23.3), and the `Usage` type referenced by
+both entries.
 
 ## Counting discipline — learned the hard way
 
