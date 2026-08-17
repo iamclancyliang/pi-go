@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import pathlib, shutil, subprocess, sys
 
-TARGETS = [pathlib.Path("tools/census_source.py"),
+TARGETS = [pathlib.Path("tools/ts-spans.mjs"),
+           pathlib.Path("tools/census_source.py"),
            pathlib.Path("tools/census_families.py"),
            pathlib.Path("tools/gen-feature-ids.py")]
 
@@ -63,8 +64,8 @@ MUTATIONS = [
      r'r"(?<!delete )(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"',
      r'r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"'),
     ("child write and self write merged",
-     r'child_writes = [r"(?<!process\.)\benv\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
-     r'child_writes = [r"(?:process\s*\.\s*)?\benv\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]'),
+     "def is_process_env(receiver: str) -> bool:\n    \"\"\"Whether a captured receiver denotes this process's own environment.\"\"\"",
+     "def is_process_env(receiver: str) -> bool:\n    return False\n    \"\"\"Whether a captured receiver denotes this process's own environment.\"\"\""),
     ("clear-then-set guard removed entirely",
      "    if unguarded:\n        fail(\"a FINAL child environment is written",
      "    if False:\n        fail(\"a FINAL child environment is written"),
@@ -83,8 +84,8 @@ MUTATIONS = [
     ("clear-then-set order not required",
      "if not any(offset < min(writes) for offset in deletes_here):",
      "if not deletes_here:"),
-    ("final-map scoping dropped, every site must clear",
-     "        if path not in final_map_files:\n            continue",
+    ("final-map scoping dropped, every receiver must clear",
+     "        if (path, receiver) not in final_receivers:\n            continue",
      "        if False:\n            continue"),
     ("writes limited to the PI_ namespace",
      r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
@@ -102,6 +103,16 @@ MUTATIONS = [
     ("keybinding authorities not compared",
      "if sorted(set(from_interface)) != sorted(set(from_table)):",
      "if False:"),
+    # The offset conversion and the per-receiver pairing.
+    ("utf16 offsets emitted unconverted",
+     "\t\tif (!/[\\uD800-\\uDBFF]/.test(source)) return spans; // BMP only: identical",
+     "\t\treturn spans;"),
+    ("clear-then-set pairs by file, not receiver",
+     "        if (path, receiver) not in final_receivers:",
+     "        if not any(p == path for p, _ in final_receivers):"),
+    ("process.env accepted as a child receiver",
+     "                if is_process_env(receiver):\n                    continue\n                exposed.add(match.group(2))",
+     "                exposed.add(match.group(2))"),
 ]
 
 def run() -> str:

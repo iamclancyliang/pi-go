@@ -1087,6 +1087,13 @@ returns spans; `census_source.py` blanks them. Two consequences worth stating:
 It also forces the tests to be honest: a fixture must now be real TypeScript, and one earlier fixture
 (`x = return /re/;`) was not valid code at all, so it had been proving nothing.
 
+⚠️ **Offsets are converted from UTF-16 code UNITS to code POINTS.** TypeScript counts code units and
+Python indexes code points, so a single astral character — one emoji anywhere in a file — shifted every
+later span by one per such character. The views kept the right LENGTH, so nothing looked broken; only
+the content was wrong, with string delimiters blanked and following spans displaced. Emitting the
+parser's offsets unchanged is a correctness bug rather than a portability detail, and the claim that
+the two indexings agree was simply false.
+
 **There is deliberately no fallback.** If Node or the checkout's TypeScript is missing the tool exits
 rather than reverting to a heuristic, because the heuristic is what this replaced.
 
@@ -1950,9 +1957,12 @@ exist, and demanding the same discipline of both produces a false alarm:
 | **Override map** — a fresh `{}` merged over the inherited environment afterwards, via `inheritEnv` | `server/create-harness.ts:114-118`, applied by `harness/env/nodejs.ts:245-247` | **No.** Assignment already wins |
 
 Comparing name sets globally cannot express either claim: a delete in one file vouched for a write in
-another, and a write-then-delete ordering passed. The check now requires, for every write in a file
-that seeds a final map, a delete of that same name earlier in that same file. Whether a file seeds a
-final map is read from the file.
+another, and a write-then-delete ordering passed. **Aggregating per FILE is also wrong**, in both
+directions — an unrelated delete elsewhere in the file excuses a write, and a legitimate override that
+merely shares a file gets flagged. The obligation belongs to an OBJECT, so the check pairs writes and
+deletes by **receiver** (`env` versus `execution.env`) and requires the delete to come earlier on that
+same receiver. Which receivers are final maps is read from their binding
+(`const env = { ...getShellEnv() }`), so neither the mechanism nor the exemption is maintained by hand.
 
 **Why a literal grep could never close it — three separate reasons, each of which produced a wrong
 figure first.**

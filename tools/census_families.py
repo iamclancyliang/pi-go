@@ -407,6 +407,12 @@ def auth_literals(src: Source, name: str, keyed: bool) -> list[str] | None:
     return members
 
 
+def is_process_env(receiver: str) -> bool:
+    """Whether a captured receiver denotes this process's own environment."""
+    segments = receiver.split(".")
+    return len(segments) >= 2 and segments[-2] == "process" and segments[-1] == "env"
+
+
 def environment_names(src: Source) -> dict[str, list[str]] | None:
     """`PI_*` environment variables, separated BY ROLE.
 
@@ -464,15 +470,20 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
     # `AI_AGENT=pi`, which a prefix-limited scan missed entirely while the census
     # prose listed it -- source and documentation could not close.
     self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]
-    child_writes = [r"(?<!process\.)\benv\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]
-    deletes = [r"\bdelete\s+(?<!process\.)env\s*\.\s*([A-Z][A-Z0-9_]*)\b"]
+    # The RECEIVER is captured, not just the name: `env.X` and `execution.env.X`
+    # are different objects, and the clear-then-set guarantee belongs to an object.
+    # Aggregating by file instead let an unrelated delete elsewhere in the file
+    # excuse a write, and flagged a legitimate override that merely shared a file.
+    child_writes = [r"(?<!process\.)\b((?:\w+\s*\.\s*)*env)\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]
+    deletes = [r"\bdelete\s+(?<!process\.)\b((?:\w+\s*\.\s*)*env)\s*\.\s*([A-Z][A-Z0-9_]*)\b"]
 
     names: set[str] = set()
     exposed: set[str] = set()
     on_self: set[str] = set()
     cleared: set[str] = set()
-    write_sites: dict[tuple[str, str], list[int]] = {}
-    delete_sites: dict[tuple[str, str], list[int]] = {}
+    write_sites: dict[tuple[str, str, str], list[int]] = {}
+    delete_sites: dict[tuple[str, str, str], list[int]] = {}
+    final_receivers: set[tuple[str, str]] = set()
     scanned = src.paths(r"packages/[^/]+/src/.*\.tsx?$")
     src.prefetch(scanned)
     for path in scanned:
@@ -491,15 +502,32 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         # clears them.
         for pattern in child_writes:
             for match in view.discover(pattern):
-                exposed.add(match.group(1))
-                write_sites.setdefault((path, match.group(1)), []).append(match.start())
+                receiver = re.sub(r"\s+", "", match.group(1))
+                # The receiver pattern allows a dotted path, which lets it match
+                # `process.env` itself -- the lookbehind cannot prevent that, since
+                # the path may legitimately begin with any identifier. A write to
+                # this process is a different role, already collected as `self`.
+                if is_process_env(receiver):
+                    continue
+                exposed.add(match.group(2))
+                write_sites.setdefault((path, receiver, match.group(2)), []).append(match.start())
         for pattern in self_writes:
             for match in view.discover(pattern):
                 on_self.add(match.group(1))
         for pattern in deletes:
             for match in view.discover(pattern):
-                cleared.add(match.group(1))
-                delete_sites.setdefault((path, match.group(1)), []).append(match.start())
+                receiver = re.sub(r"\s+", "", match.group(1))
+                if is_process_env(receiver):
+                    continue
+                cleared.add(match.group(2))
+                delete_sites.setdefault((path, receiver, match.group(2)), []).append(match.start())
+        # A receiver is a FINAL map only where that receiver is bound to an object
+        # seeded from the inherited environment. Scoping by file was too coarse in
+        # both directions.
+        for seed in view.discover(
+                r"\b(?:const|let|var)\s+(\w+)\s*=\s*\{\s*\.\.\.\s*"
+                r"(?:getShellEnv\(\)|process\s*\.\s*env)"):
+            final_receivers.add((path, seed.group(1)))
 
     # The two derived names, recorded at their default spelling. Read from the
     # declaration rather than hardcoded, so a change to the derivation is an
@@ -533,30 +561,27 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
              f"{len(on_self)} self writes")
         return None
 
-    # The clear-then-set guarantee is per SITE and per ORDER, and it applies only
-    # where the object being written IS the final environment. Two mechanisms
-    # exist and conflating them produces a false alarm:
+    # The clear-then-set guarantee is per OBJECT and per ORDER, and it applies only
+    # where the object being written IS the child environment. Two mechanisms exist
+    # and conflating them produces a false alarm:
     #
-    #   * a FINAL map, seeded from the inherited environment in that same file
-    #     (`{ ...getShellEnv() }`). A conditional write leaves an inherited value
-    #     in place, so each name must be deleted first.
+    #   * a FINAL map, bound to an object seeded from the inherited environment
+    #     (`const env = { ...getShellEnv() }`). A conditional write leaves an
+    #     inherited value in place, so each name must be deleted from THAT object
+    #     first.
     #   * an OVERRIDE map, a fresh object merged over the inherited environment
     #     later (the harness builds `env: {}` and applies it with `inheritEnv`).
     #     Assignment already wins, so a delete would be redundant.
     #
-    # Whether a file seeds a final map is read from the file, not from a list.
-    final_map_files = {
-        path for path in scanned
-        if re.search(r"\.\.\.\s*(?:getShellEnv\(\)|process\s*\.\s*env)",
-                     src.view(path).structural)
-    }
+    # Both the receiver and the seeding are read from the source, so neither the
+    # mechanism nor the exemption is maintained by hand.
     unguarded: list[str] = []
-    for (path, name), writes in sorted(write_sites.items()):
-        if path not in final_map_files:
+    for (path, receiver, name), writes in sorted(write_sites.items()):
+        if (path, receiver) not in final_receivers:
             continue
-        deletes_here = delete_sites.get((path, name), [])
+        deletes_here = delete_sites.get((path, receiver, name), [])
         if not any(offset < min(writes) for offset in deletes_here):
-            unguarded.append(f"{path}:{name}")
+            unguarded.append(f"{path}:{receiver}.{name}")
     if unguarded:
         fail("a FINAL child environment is written without clearing that name "
              "first, at: " + ", ".join(unguarded)

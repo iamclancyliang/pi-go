@@ -25,8 +25,12 @@
  *          which the parser exposes as ordinary expressions and so is absent
  *          from this list by construction rather than by a rule of ours).
  *
- * Offsets are UTF-16 code-unit indices, which is what both TypeScript and the
- * caller's Python string indexing use for the same text.
+ * Offsets are converted from TypeScript's UTF-16 code-UNIT indices to code-POINT
+ * indices, because the caller indexes Python strings, which count code points. The
+ * two agree only while every character is in the BMP: one emoji in a file shifts
+ * every later span by one per astral character, which silently blanked string
+ * delimiters and moved every following span. Emitting raw UTF-16 offsets is a
+ * correctness bug, not a portability detail.
  */
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -154,7 +158,32 @@ for (const [path, contents] of Object.entries(input)) {
 			return true;
 		});
 	};
-	result[path] = { dead: unique(dead), text: unique(text) };
+	// UTF-16 code units -> code points. Built once per file: `adjust[i]` is the
+	// number of surrogate pairs that start before UTF-16 index `i`.
+	const toCodePoints = (spans) => {
+		if (!/[\uD800-\uDBFF]/.test(source)) return spans; // BMP only: identical
+		const adjust = new Int32Array(source.length + 1);
+		let pairs = 0;
+		for (let index = 0; index < source.length; index += 1) {
+			adjust[index] = pairs;
+			const code = source.charCodeAt(index);
+			if (code >= 0xd800 && code <= 0xdbff && index + 1 < source.length) {
+				const next = source.charCodeAt(index + 1);
+				if (next >= 0xdc00 && next <= 0xdfff) {
+					index += 1;
+					adjust[index] = pairs;
+					pairs += 1;
+				}
+			}
+		}
+		adjust[source.length] = pairs;
+		return spans.map(([begin, finish]) => [begin - adjust[begin], finish - adjust[finish]]);
+	};
+
+	result[path] = {
+		dead: toCodePoints(unique(dead)),
+		text: toCodePoints(unique(text)),
+	};
 }
 
 process.stdout.write(JSON.stringify(result));

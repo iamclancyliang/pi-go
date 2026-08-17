@@ -419,6 +419,76 @@ def test_environment_fixture_really_is_adversarial() -> None:
     assert "PI_FROM_A_TEMPLATE" not in on_structural
 
 
+def test_offsets_survive_an_astral_character() -> None:
+    """TypeScript reports UTF-16 code UNITS; Python indexes code POINTS.
+
+    One emoji shifts every later span by one per astral character, which blanked
+    string delimiters and moved every following span. The views stayed the right
+    LENGTH, so nothing looked broken -- only the content was wrong.
+    """
+    source = 'const emoji = "\U0001F680\U0001F680";\nconst s = "export const createGhostTool = 1";\n'
+    view = view_of(source)
+    assert len(view.structural) == len(source)
+    # Both string bodies blanked, both pairs of quotes intact.
+    assert view.structural.count('"') == 4, view.structural
+    assert "createGhostTool" not in view.structural, view.structural
+    assert view.quoted_in(0, len(view.structural)) == ["\U0001F680\U0001F680",
+                                                       "export const createGhostTool = 1"]
+
+
+def test_astral_character_inside_a_template_keeps_expression_code() -> None:
+    view = view_of("const t = `\U0001F680${ process.env.PI_AFTER }`;\n")
+    assert "process.env.PI_AFTER" in view.structural, view.structural
+
+
+def test_clear_then_set_is_checked_per_RECEIVER_not_per_file() -> None:
+    """A delete elsewhere in the file must not excuse a write to another object.
+
+    Aggregating by file let an unrelated `delete env.X` vouch for a write to a
+    different object, and flagged a legitimate override that merely shared a file.
+    """
+    mixed = dict(ENV_FIXTURE)
+    mixed["packages/coding-agent/src/mixed.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_GUARDED;\n"
+        "env.PI_GUARDED = a;\n"
+        "env.PI_UNGUARDED = b;\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(mixed))
+    joined = " ".join(gen.errors)
+    assert "PI_UNGUARDED" in joined, gen.errors
+    assert "PI_GUARDED" not in joined.replace("PI_UNGUARDED", ""), gen.errors
+    gen.errors.clear()
+
+
+def test_an_override_receiver_in_a_final_map_file_is_not_flagged() -> None:
+    """Same file, two objects: only the seeded one carries the obligation."""
+    both = dict(ENV_FIXTURE)
+    both["packages/coding-agent/src/two.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_FINAL;\n"
+        "env.PI_FINAL = a;\n"
+        "execution.env.PI_OVERLAY = b;\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(both))
+    assert not gen.errors, gen.errors
+    assert "PI_OVERLAY" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_a_self_write_is_not_collected_as_a_child_write() -> None:
+    """`process.env.X =` must not be read as filling a child's environment.
+
+    The receiver pattern accepts a dotted path, so it can match `process.env`
+    itself; the lookbehind cannot prevent that.
+    """
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/selfonly.ts"] = 'process.env.PI_ONLY_SELF = "1";\n'
+    roles = gen.environment_names(EnvFakeSource(fixture))
+    assert "PI_ONLY_SELF" in roles["self"], roles["self"]
+    assert "PI_ONLY_SELF" not in roles["exposed"], roles["exposed"]
+
+
 def test_a_self_assignment_is_not_an_input_but_a_comparison_is() -> None:
     """Both halves matter.
 
