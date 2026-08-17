@@ -170,12 +170,35 @@ func (r *Run) Follow(text string) error {
 // containing only the system and steering messages, and every completed tool
 // result is gone.
 func (r *Run) Steer(text string) error {
-	ok, _ := r.loop.Push(
+	ok, resolved := r.loop.Push(
 		schema.UserMessage(text),
 		adk.WithPreempt[*schema.Message, *schema.Message](adk.AfterToolCalls),
 	)
 	if !ok {
 		return errors.New("runtime: loop rejected the steering message")
+	}
+
+	// Wait until the preempt request has actually been resolved.
+	//
+	// Accepting the push only means the message was buffered; the preempt
+	// signal may not have been observed yet. Returning at that point races the
+	// turn: if the tool finishes first, the turn completes normally and the
+	// steering silently becomes an ordinary follow-up — the user asked to
+	// redirect work in flight and instead got a queued message, with nothing
+	// reporting the difference.
+	//
+	// The original enqueues a steering message synchronously before its call
+	// returns, so a caller that has been told the steer was accepted can rely
+	// on it applying at the next safe point. Waiting here reproduces that
+	// guarantee rather than inventing a stronger or weaker one: it does not
+	// wait for the steering to be *delivered to the model*, only for the
+	// interruption to be registered.
+	if resolved != nil {
+		select {
+		case <-resolved:
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		}
 	}
 	return nil
 }
