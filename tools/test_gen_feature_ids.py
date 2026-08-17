@@ -419,6 +419,41 @@ def test_environment_fixture_really_is_adversarial() -> None:
     assert "PI_FROM_A_TEMPLATE" not in on_structural
 
 
+def test_seeding_through_an_alias_is_still_a_final_map() -> None:
+    """`const inherited = getShellEnv(); const env = { ...inherited };` inherits.
+
+    Matching only a direct spread of the call exempted this shape, so an unclear-ed
+    write would have passed. Chains of aliases are covered by repeating the pass.
+    """
+    for body in (
+        "const inherited = getShellEnv();\nconst env = { ...inherited };\nenv.PI_ALIASED = v;\n",
+        "const a = getShellEnv();\nconst b = { ...a };\nconst env = { ...b };\nenv.PI_ALIASED = v;\n",
+    ):
+        fixture = dict(ENV_FIXTURE)
+        fixture["packages/coding-agent/src/alias.ts"] = body
+        gen.errors.clear()
+        gen.environment_names(EnvFakeSource(fixture))
+        assert any("PI_ALIASED" in m for m in gen.errors), (body, gen.errors)
+        gen.errors.clear()
+
+
+def test_a_fresh_object_is_not_promoted_by_an_alias_elsewhere() -> None:
+    """The alias tracking must not turn every receiver in the file into a final map."""
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/mixed2.ts"] = (
+        "const inherited = getShellEnv();\n"
+        "const env = { ...inherited };\n"
+        "delete env.PI_SEEDED;\n"
+        "env.PI_SEEDED = a;\n"
+        "const execution = { env: {} };\n"
+        "execution.env.PI_FRESH = b;\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(fixture))
+    assert not gen.errors, gen.errors
+    assert "PI_FRESH" in roles["exposed"] and "PI_SEEDED" in roles["exposed"]
+    gen.errors.clear()
+
+
 def test_offsets_survive_an_astral_character() -> None:
     """TypeScript reports UTF-16 code UNITS; Python indexes code POINTS.
 

@@ -524,10 +524,34 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         # A receiver is a FINAL map only where that receiver is bound to an object
         # seeded from the inherited environment. Scoping by file was too coarse in
         # both directions.
-        for seed in view.discover(
-                r"\b(?:const|let|var)\s+(\w+)\s*=\s*\{\s*\.\.\.\s*"
-                r"(?:getShellEnv\(\)|process\s*\.\s*env)"):
-            final_receivers.add((path, seed.group(1)))
+        #
+        # Seeding may go through an ALIAS -- `const inherited = getShellEnv();`
+        # then `const env = { ...inherited };` -- so the inherited names are
+        # collected first and the spread test accepts them too. The pass repeats
+        # until nothing new appears, which covers chains of aliases. This is
+        # name-level tracking within one file, not general dataflow: a seed passed
+        # through a function parameter or stored on an object would not be seen,
+        # and that limit is stated rather than implied.
+        inherited_names = {
+            m.group(1) for m in view.discover(
+                r"\b(?:const|let|var)\s+(\w+)\s*=\s*"
+                r"(?:getShellEnv\s*\(|process\s*\.\s*env\b)")
+        }
+        while True:
+            alternatives = "|".join(
+                [r"getShellEnv\s*\(", r"process\s*\.\s*env\b"]
+                + [re.escape(name) + r"\b" for name in sorted(inherited_names)])
+            seeded = {
+                m.group(1) for m in view.discover(
+                    r"\b(?:const|let|var)\s+(\w+)\s*=\s*\{\s*\.\.\.\s*"
+                    r"(?:" + alternatives + r")")
+            }
+            grown = inherited_names | seeded
+            if grown == inherited_names:
+                break
+            inherited_names = grown
+        for name in inherited_names:
+            final_receivers.add((path, name))
 
     # The two derived names, recorded at their default spelling. Read from the
     # declaration rather than hardcoded, so a change to the derivation is an

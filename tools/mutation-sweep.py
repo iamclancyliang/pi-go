@@ -113,6 +113,9 @@ MUTATIONS = [
     ("process.env accepted as a child receiver",
      "                if is_process_env(receiver):\n                    continue\n                exposed.add(match.group(2))",
      "                exposed.add(match.group(2))"),
+    ("seeding through an alias not tracked",
+     '+ [re.escape(name) + r"\\b" for name in sorted(inherited_names)])',
+     '+ [])'),
 ]
 
 def run() -> str:
@@ -140,6 +143,12 @@ def restore() -> None:
         if path.read_text() != text:
             path.write_text(text)
 
+
+import atexit
+
+# A crash mid-run must not leave a mutated tool on disk. Registered before the
+# first mutation so it holds however the process exits.
+atexit.register(restore)
 
 BASELINE = run()
 print(f"  {'BASELINE (must be green)':<40} -> {BASELINE}")

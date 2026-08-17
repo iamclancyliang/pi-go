@@ -1097,6 +1097,22 @@ the two indexings agree was simply false.
 **There is deliberately no fallback.** If Node or the checkout's TypeScript is missing the tool exits
 rather than reverting to a heuristic, because the heuristic is what this replaced.
 
+### 22.3b Published counts are checked, not maintained by hand
+
+Every figure in these documents was being kept in step manually, and three drifted
+at once: a §22.7 heading said 34 memberships over 25 names while its own body said
+35 over 26, the Chinese feature list still said 350 members, and the usage document
+still said 25 environment names. A reader cannot tell which number is newer.
+
+`tools/check-doc-counts.py` derives the figures from the generator and fails on any
+disagreement — the summary row, every embedded block, the four environment role
+counts with their name and membership totals, the same totals as stated in both
+Chinese documents, and the test total those documents quote. It found two stale
+figures on its first run, which is the argument for having it.
+
+The mutation total is behind `--with-sweep` because verifying it re-runs the whole
+suite once per mutation. A gate slow enough to be skipped protects nothing.
+
 ### 22.4 The extractor exits non-zero rather than guessing
 
 Each row exercised, not assumed:
@@ -1924,7 +1940,7 @@ Doing that exhaustively revealed **three** kinds of payload on the one stdout st
 Helpers and variables are classified **by name**, so a new emission form is an error rather than a
 silent omission.
 
-### 22.7 Environment variables — four role-separated sets, **34 memberships over 25 names**
+### 22.7 Environment variables — four role-separated sets, **35 memberships over 26 names**
 
 Previously left open, then closed WRONGLY as a single 24-member set of "reads". That set filed
 writes and deletions as reads and the prose then described them as reads. A name's ROLE is part of
@@ -1948,7 +1964,7 @@ still scoped to the product's own namespace — the same files read some forty t
 variables (`TERM`, `HOME`, `WSL_DISTRO_NAME`, …) which are inputs Pi consumes rather than features it
 owns; that boundary is a decision, stated here rather than left implicit.
 
-**Clear-then-set is checked per SITE and per ORDER, and only where it applies.** Two mechanisms
+**Clear-then-set is checked per RECEIVER and per ORDER, and only where it applies.** Two mechanisms
 exist, and demanding the same discipline of both produces a false alarm:
 
 | Mechanism | Where | Must clear first? |

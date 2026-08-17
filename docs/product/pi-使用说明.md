@@ -218,7 +218,7 @@ pi --mode rpc [--provider anthropic] [--model sonnet] [--no-session]
 **49 个设置项**，覆盖压缩、分支摘要、重试、终端与图像、思考预算、Markdown 渲染、默认模型与厂商、
 队列模式、主题、外部编辑器、shell 路径与前缀、扩展与技能与主题来源、遥测与分析开关等。
 
-**环境变量（一共 25 个名字；下表是你会主动设置的那些）**
+**环境变量（一共 26 个名字；下表是你会主动设置的那些）**
 
 | 想做什么 | 变量 |
 | --- | --- |
@@ -258,7 +258,8 @@ cd pi-go
 python3 tools/gen-feature-ids.py --pi-repo /path/to/pi \
         --check-providers tools/expected-providers.txt
 python3 tools/test_gen_feature_ids.py     # 抽取器自身的负向控制
-python3 tools/mutation-sweep.py           # 故意改坏抽取器，测试必须变红
+python3 tools/check-doc-counts.py --pi-repo /path/to/pi   # 文档里的数字必须和生成器一致
+python3 tools/mutation-sweep.py           # 故意改坏抽取器，测试必须变红（较慢）
 ```
 
 **退出码 0 只说明**：固定版本可读、抽取器没触发自身守卫（无法归类的调用 / ID 撞车 / 成员数不符）、
