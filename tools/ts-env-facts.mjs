@@ -174,32 +174,45 @@ function analyse(path, source) {
 		// make it visible after the block closes. `var` belongs to the nearest
 		// function-level scope, so it IS collected recursively, stopping at nested
 		// functions, which own their own `var`s.
+		// A declaration list appears bare in a `for` header; only a statement wraps
+		// one elsewhere. Matching only the statement form leaves `for (let env = ...)`
+		// and `for (const env of ...)` unregistered, so writes inside the loop resolve
+		// outward to whatever else is named `env`.
+		const declarationLists = (node) => {
+			if (ts.isVariableStatement(node)) return [node.declarationList];
+			if ((ts.isForStatement(node) || ts.isForOfStatement(node) ||
+				ts.isForInStatement(node)) && node.initializer &&
+				ts.isVariableDeclarationList(node.initializer)) {
+				return [node.initializer];
+			}
+			return [];
+		};
+
 		ts.forEachChild(scopeNode, (child) => {
-			if (ts.isVariableStatement(child)) {
-				const blockScoped = Boolean(child.declarationList.flags &
+			for (const list of declarationLists(child)) {
+				const blockScoped = Boolean(list.flags &
 					(ts.NodeFlags.Let | ts.NodeFlags.Const));
-				if (!blockScoped) return;
-				for (const declaration of child.declarationList.declarations) {
+				if (!blockScoped) continue;
+				for (const declaration of list.declarations) {
 					declarePattern(declaration.name, declaration);
 					if (ts.isIdentifier(declaration.name)) noteObject(declaration);
 				}
-				return;
 			}
+			if (declarationLists(child).length) return;
 			if (ts.isFunctionDeclaration(child) && child.name) declare(child.name.text, child);
 			if (ts.isClassDeclaration(child) && child.name) declare(child.name.text, child);
 		});
 
 		if (!functionLevel) return;
 		const collectVars = (node) => {
-			if (ts.isVariableStatement(node)) {
-				const blockScoped = Boolean(node.declarationList.flags &
+			for (const list of declarationLists(node)) {
+				const blockScoped = Boolean(list.flags &
 					(ts.NodeFlags.Let | ts.NodeFlags.Const));
-				if (!blockScoped) {
-					for (const declaration of node.declarationList.declarations) {
-						if (ts.isIdentifier(declaration.name)) {
-							declareVar(declaration.name.text, declaration);
-							noteObject(declaration);
-						}
+				if (blockScoped) continue;
+				for (const declaration of list.declarations) {
+					if (ts.isIdentifier(declaration.name)) {
+						declareVar(declaration.name.text, declaration);
+						noteObject(declaration);
 					}
 				}
 			}

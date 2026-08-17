@@ -173,6 +173,65 @@ def test_nested_template_expression() -> None:
         assert f"`{text}" not in view.structural.replace("PI_DEEP", "")
 
 
+THINK_AGENT = "packages/agent/src/types.ts"
+THINK_AI = "packages/ai/src/types.ts"
+THINK_PROTOCOL = "packages/protocol/src/schemas.ts"
+
+# Three declarations, two memberships, and three different SHAPES: a flat union, a
+# union plus a reference, and members carried as call arguments.
+THINKING_FIXTURE = {
+    THINK_AGENT: 'export type ThinkingLevel = "off" | "low" | "high";\n',
+    THINK_AI: ('export type ThinkingLevel = "low" | "high";\n'
+               'export type ModelThinkingLevel = "off" | ThinkingLevel;\n'),
+    THINK_PROTOCOL: "\n".join([
+        "export const ThinkingLevelSchema = Type.Union([",
+        '\tType.Literal("off"),',
+        '\tType.Literal("low"),',
+        '\tType.Literal("high"),',
+        "]);",
+        "export const OtherSchema = Type.Union([",
+        '\tType.Literal("unrelated"),',
+        "]);",
+        "",
+    ]),
+}
+
+
+def test_thinking_levels_agree_across_three_shapes() -> None:
+    assert gen.thinking_levels(FakeSource(THINKING_FIXTURE)) == ["off", "low", "high"]
+
+
+def test_the_protocol_schema_is_scoped_to_its_own_binding() -> None:
+    """Another schema's literals in the same file must not join the set.
+
+    The members are call arguments, so a file-wide view of `Type.Literal(...)` merges
+    every schema in the file.
+    """
+    levels = gen.thinking_levels(FakeSource(THINKING_FIXTURE))
+    assert "unrelated" not in levels, levels
+
+
+def test_a_protocol_divergence_fails() -> None:
+    diverged = dict(THINKING_FIXTURE)
+    diverged[THINK_PROTOCOL] = THINKING_FIXTURE[THINK_PROTOCOL].replace(
+        '\tType.Literal("high"),\n', "")
+    gen.errors.clear()
+    assert gen.thinking_levels(FakeSource(diverged)) is None
+    assert any("disagree" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_changed_model_level_derivation_fails() -> None:
+    """`ModelThinkingLevel` must still be built from `ThinkingLevel`."""
+    changed = dict(THINKING_FIXTURE)
+    changed[THINK_AI] = ('export type ThinkingLevel = "low" | "high";\n'
+                         'export type ModelThinkingLevel = "off" | "low" | "high";\n')
+    gen.errors.clear()
+    assert gen.thinking_levels(FakeSource(changed)) is None
+    assert any("no longer references" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 MODE_TRUST = "packages/coding-agent/src/core/project-trust.ts"
 MODE_ARGS = "packages/coding-agent/src/cli/args.ts"
 
@@ -421,6 +480,61 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert roles["self"] == ["PI_SELF_SET"], roles["self"]
     assert "PI_SELF_SET" not in roles["exposed"]
     assert "PI_EXPOSED_ONE" not in roles["self"]
+
+
+def test_a_for_header_declaration_is_a_binding() -> None:
+    """`for (let env = ...)` declares in the scope the loop opens.
+
+    A declaration list appears bare in a `for` header, while elsewhere a statement
+    wraps one. Matching only the statement form leaves the loop's binding
+    unregistered, so writes inside resolve outward to whatever else is named `env`
+    and an unrelated delete appears to guard them.
+    """
+    loops = dict(ENV_FIXTURE)
+    loops["packages/coding-agent/src/forlet.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_LOOP;\n"
+        "function f() {\n"
+        "  for (let env = { ...getShellEnv() }; ; ) { env.PI_LOOP = value; }\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(loops))
+    # The loop's own object is seeded and never cleared, so the guard must fire --
+    # attributing the write to the outer, cleared object would silence it.
+    assert any("PI_LOOP" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_for_of_binding_shadows_an_outer_object() -> None:
+    """`for (const env of list)` binds `env` to an element, not to the outer object."""
+    loops = dict(ENV_FIXTURE)
+    loops["packages/coding-agent/src/forof.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_ELEMENT;\n"
+        "function g(list) {\n"
+        "  for (const env of list) { env.PI_ELEMENT = value; }\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(loops))
+    # Unresolvable to an object literal, so counted without a claim -- and NOT
+    # credited to the outer delete.
+    assert not any("PI_ELEMENT" in m for m in gen.errors), gen.errors
+    assert "PI_ELEMENT" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_a_for_var_binding_is_function_scoped() -> None:
+    """`for (var env = ...)` is visible after the loop, like any other `var`."""
+    loops = dict(ENV_FIXTURE)
+    loops["packages/coding-agent/src/forvar.ts"] = (
+        "function h() {\n"
+        "  for (var env = { ...getShellEnv() }; ; ) { }\n"
+        "  env.PI_AFTER_LOOP = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(loops))
+    assert any("PI_AFTER_LOOP" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
 
 
 def test_a_binding_shadows_its_whole_scope_not_just_below_itself() -> None:
@@ -868,27 +982,6 @@ THINKING = {
         "export const ThinkingLevelSchema = Type.Union([\n"
         '\tType.Literal("off"),\n\tType.Literal("low"),\n\tType.Literal("high"),\n]);\n',
 }
-
-
-def test_thinking_levels_agree_across_three_declarations() -> None:
-    assert gen.thinking_levels(FakeSource(THINKING)) == ["off", "low", "high"]
-
-
-def test_thinking_levels_fail_when_declarations_diverge() -> None:
-    """A divergence must be an error, not silently resolved by read order.
-
-    The three spellings live in three packages; preferring whichever was read
-    first would publish one package's view as the product's.
-    """
-    diverged = dict(THINKING)
-    diverged["packages/protocol/src/schemas.ts"] = (
-        "export const ThinkingLevelSchema = Type.Union([\n"
-        '\tType.Literal("off"),\n\tType.Literal("low"),\n]);\n')
-    gen.errors.clear()
-    result = gen.thinking_levels(FakeSource(diverged))
-    assert result is None, result
-    assert any("disagree" in message for message in gen.errors), gen.errors
-    gen.errors.clear()
 
 
 ENTRY_PATH = "packages/coding-agent/src/core/session-manager.ts"

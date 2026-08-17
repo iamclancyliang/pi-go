@@ -335,39 +335,44 @@ def thinking_levels(src: Source) -> list[str] | None:
       * `agent/src/types.ts` -- 7 members, `off` included;
       * `ai/src/types.ts` -- 6 members, because there `off` is the ABSENCE of a
         level; `off` is added back by `ModelThinkingLevel`;
-      * `protocol/src/schemas.ts` -- 7 `Type.Literal` members, the wire form.
+      * `protocol/src/schemas.ts` -- 7 members carried as `Type.Literal(...)` call
+        arguments, which is the wire form.
 
     The user-visible set is the 7. All three spellings must agree on it, so the
     agreement is verified and a divergence fails rather than being resolved by
     preferring whichever file was read first.
+
+    All three come from the compiler API. The protocol form is why a literal or type
+    view is not enough on its own: its members are call arguments, reachable by
+    neither.
     """
-    agent = src.view("packages/agent/src/types.ts")
-    declared = type_alias_span(agent, "ThinkingLevel")
-    if declared is None:
+    agent = src.members("packages/agent/src/types.ts")["typeAliasUnions"].get("ThinkingLevel")
+    if agent is None:
+        fail("cannot locate ThinkingLevel in agent/src/types.ts")
         return None
-    from_agent = agent.quoted_in(*declared)
+    from_agent = agent["literals"]
 
-    ai = src.view("packages/ai/src/types.ts")
-    ai_span = type_alias_span(ai, "ThinkingLevel")
-    model_span = type_alias_span(ai, "ModelThinkingLevel")
-    if ai_span is None or model_span is None:
+    ai = src.members("packages/ai/src/types.ts")["typeAliasUnions"]
+    level = ai.get("ThinkingLevel")
+    model = ai.get("ModelThinkingLevel")
+    if level is None or model is None:
+        fail("cannot locate ThinkingLevel/ModelThinkingLevel in ai/src/types.ts")
         return None
-    # `ModelThinkingLevel = "off" | ThinkingLevel` contributes only its own
-    # literals; the referenced union is read separately and unioned here.
-    from_ai = ai.quoted_in(*ai_span) + ai.quoted_in(*model_span)
+    # `ModelThinkingLevel = "off" | ThinkingLevel` contributes its own literal and a
+    # reference; the referenced union is read separately and unioned here.
+    if "ThinkingLevel" not in model["members"]:
+        fail(f"ModelThinkingLevel no longer references ThinkingLevel "
+             f"(references {model['members']}) - the derivation changed")
+        return None
+    from_ai = level["literals"] + model["literals"]
 
-    protocol = src.view("packages/protocol/src/schemas.ts")
-    schema = re.search(r"export const ThinkingLevelSchema = Type\.Union\(\[",
-                       protocol.structural)
-    if not schema:
-        fail("cannot locate ThinkingLevelSchema in protocol/schemas.ts")
+    protocol = src.members("packages/protocol/src/schemas.ts")
+    from_protocol = [call["value"] for call in protocol["callLiterals"]
+                     if call["enclosing"] == "ThinkingLevelSchema"
+                     and call["callee"].endswith("Literal")]
+    if not from_protocol:
+        fail("ThinkingLevelSchema yielded no literals - its shape probably changed")
         return None
-    closing = protocol.balanced_argument(schema.end() - 2)
-    if closing is None:
-        fail("ThinkingLevelSchema has unbalanced parentheses")
-        return None
-    from_protocol = protocol.quoted_after(
-        r"Type\.Literal\(\s*", schema.end(), schema.end() + len(closing))
 
     if not (sorted(set(from_agent)) == sorted(set(from_ai)) == sorted(set(from_protocol))):
         fail(f"thinking levels disagree across declarations: "

@@ -182,6 +182,17 @@ MUTATIONS = [
     Mutation("alias not followed to its target",
              "\t\t\t\t\ttarget = checker.getAliasedSymbol(symbol);",
              "\t\t\t\t\ttarget = symbol;"),
+    Mutation("protocol literals taken file-wide, not per schema",
+             '                     if call["enclosing"] == "ThinkingLevelSchema"',
+             "                     if True"),
+    Mutation("ModelThinkingLevel derivation not verified",
+             '    if "ThinkingLevel" not in model["members"]:',
+             "    if False:"),
+    Mutation("call arguments not collected",
+             "\t\t\t\t\t\tcallLiterals.push({", "\t\t\t\t\t\t[].push({"),
+    Mutation("for-header declarations not hoisted",
+             "\t\t\tif ((ts.isForStatement(node) || ts.isForOfStatement(node) ||",
+             "\t\t\tif (false && (ts.isForStatement(node) || ts.isForOfStatement(node) ||"),
 ]
 
 

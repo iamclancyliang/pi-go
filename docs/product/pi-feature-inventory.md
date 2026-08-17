@@ -2047,7 +2047,10 @@ misattributes writes if it does not:
   `const env = …` in the same function refers to that binding, so names are hoisted before the body is
   walked rather than registered as traversal reaches them;
 * **`var` is function-scoped**, so one declared inside a block is still visible after the block closes,
-  while `let`/`const` are not.
+  while `let`/`const` are not;
+* **a `for` header declares a binding too**, in a bare declaration list rather than a statement — a
+  scan that matches only statements leaves `for (let env = …)` and `for (const env of …)`
+  unregistered, and their writes then resolve outward to whatever else carries the name.
 
 A write is checked against deletes on **that same object** at an **earlier offset**. Whether an object is seeded from the inherited
 environment is read from its initialiser, following chains of local bindings.

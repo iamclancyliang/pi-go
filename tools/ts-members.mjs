@@ -20,6 +20,7 @@
  *       "keyedLiterals": [ { "path", "key", "value" } ],
  *       "objectKeys": { "<const name>": [ "<top-level key>", ... ] },
  *       "comparisons": [ { "left", "operator", "value", "leftBinding" } ],
+ *       "callLiterals": [ { "callee", "value", "enclosing" } ],
  *       "bindings": { "<declaration offset>": { "name", "initializer" } }
  *   } }
  *
@@ -45,6 +46,10 @@
  *                     comparisons merges them
  *   bindings        - declared name and initialiser text per declaration offset, so
  *                     a family can say WHICH variable it means
+ *   callLiterals    - string arguments of a named call, with the top-level binding
+ *                     they sit inside. A schema built from `Type.Literal("x")` calls
+ *                     has its members in call arguments, which no key/value or type
+ *                     view reaches
  *
  * Offsets are not reported: a family that needs a position needs a span, and spans
  * come from `ts-spans.mjs`.
@@ -117,6 +122,7 @@ function analyse(path, program, checker) {
 	const objectKeys = {};
 	const comparisons = [];
 	const bindings = {};
+	const callLiterals = [];
 
 	/** Look through `satisfies T` and `as const`, which wrap the literal. */
 	const unwrap = (node) => {
@@ -296,6 +302,8 @@ function analyse(path, program, checker) {
 	// family reading it would publish the wrong keys.
 	const topLevel = new Set(file.statements);
 
+	let enclosingBinding = null;
+
 	const visit = (node) => {
 		const scoped = opensScope(node);
 		if (scoped) scopes.push(new Map());
@@ -313,6 +321,25 @@ function analyse(path, program, checker) {
 				name: node.name.text,
 				initializer: node.initializer ? node.initializer.getText(file) : null,
 			};
+		}
+
+		// `Type.Literal("x")` and friends: members carried in call arguments.
+		if (ts.isCallExpression(node)) {
+			const callee = ts.isIdentifier(node.expression) ? node.expression.text
+				: ts.isPropertyAccessExpression(node.expression)
+					? `${node.expression.expression.getText(file)}.${node.expression.name.text}`
+					: undefined;
+			if (callee) {
+				for (const argument of node.arguments) {
+					if (ts.isStringLiteral(argument)) {
+						callLiterals.push({
+							callee,
+							value: argument.text,
+							enclosing: enclosingBinding,
+						});
+					}
+				}
+			}
 		}
 
 		// `expr === "literal"`: some sets are defined by what a parser ACCEPTS
@@ -339,6 +366,7 @@ function analyse(path, program, checker) {
 		if (ts.isVariableStatement(node) && topLevel.has(node)) {
 			for (const declaration of node.declarationList.declarations) {
 				const name = nameOf(declaration.name);
+				if (name) enclosingBinding = name;
 				if (declaration.initializer) {
 					const initializer = unwrap(declaration.initializer);
 					recordKeyedLiterals(initializer, name ? [name] : []);
@@ -363,7 +391,7 @@ function analyse(path, program, checker) {
 	recordExports();
 	visit(file);
 	return { exports: exports_, typeAliasUnions, interfaceKeys, keyedLiterals,
-		objectKeys, comparisons, bindings };
+		objectKeys, comparisons, bindings, callLiterals };
 }
 
 const input = JSON.parse(readFileSync(0, "utf8"));
