@@ -126,14 +126,18 @@ def app_modes(src: Source) -> list[str] | None:
     `AppMode`, because that is the product surface; the CLI literals are its
     input mapping and are recorded as evidence rather than as members.
     """
-    view = src.view("packages/coding-agent/src/core/project-trust.ts")
-    declared = re.search(r"export type AppMode = ([^;]+);", view.structural)
-    if not declared:
+    union = src.members("packages/coding-agent/src/core/project-trust.ts")[
+        "typeAliasUnions"].get("AppMode")
+    if union is None:
         fail("cannot locate the AppMode type in core/project-trust.ts")
         return None
-    modes = view.quoted_in(*declared.span(1))
+    modes = union["literals"]
     if not modes:
         fail("AppMode yielded no literals - its shape probably changed")
+        return None
+    if union["members"]:
+        fail(f"AppMode references other types {union['members']} - membership is no "
+             f"longer this declaration alone")
         return None
     return modes
 
@@ -144,19 +148,31 @@ def cli_mode_literals(src: Source) -> list[str]:
     The type and the parser must agree; if they diverge the parser is what a
     user experiences, so a mismatch is an error rather than a silent choice.
     """
-    view = src.view("packages/coding-agent/src/cli/args.ts")
-    declared = re.search(r'export type Mode = ([^;]+);', view.structural)
-    if not declared:
+    facts = src.members("packages/coding-agent/src/cli/args.ts")
+    declared = facts["typeAliasUnions"].get("Mode")
+    if declared is None:
         fail("cannot locate the Mode type in cli/args.ts")
         return []
-    from_type = view.quoted_in(*declared.span(1))
+    from_type = declared["literals"]
 
-    guard = re.search(r'const mode = args\[\+\+i\];\s*if \(([^)]+)\)', view.structural)
-    if not guard:
-        fail("cannot locate the --mode acceptance test in cli/args.ts")
+    # The parser's accepted values are comparisons, and this file holds TWO
+    # variables named `mode`: the one taken from the `--mode` argument, and one
+    # belonging to a different flag whose values are `fullscreen`/`regular`. A
+    # file-wide view of `mode === "..."` merges them, so the comparisons are
+    # selected by the BINDING they resolve to, identified by its initialiser.
+    wanted = [offset for offset, binding in facts["bindings"].items()
+              if binding["name"] == "mode" and binding["initializer"] == "args[++i]"]
+    if len(wanted) != 1:
+        fail(f"expected exactly one `mode` bound from `args[++i]` in cli/args.ts, "
+             f"found {len(wanted)}")
         return []
-    from_parser = view.quoted_after(r"mode\s*===\s*", *guard.span(1))
+    binding = int(wanted[0])
+    from_parser = sorted({comparison["value"] for comparison in facts["comparisons"]
+                          if comparison.get("leftBinding") == binding})
 
+    if not from_parser:
+        fail("the --mode acceptance test yielded no literals")
+        return []
     if sorted(from_type) != sorted(from_parser):
         fail(f"Mode type {sorted(from_type)} disagrees with the parser's accepted "
              f"values {sorted(from_parser)}")
@@ -743,6 +759,55 @@ def provider_ids(src: Source) -> list[str]:
 
 
 
+def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
+    """The TUI package's exports, split by DECLARATION SPACE as the checker sees it.
+
+    This is the smaller of two defensible denominators, and the difference matters
+    for parity:
+
+      * the **barrel** (`tui/src/index.ts`) names each export explicitly. There are
+        no `export *` statements, so the list is enumerable rather than implied.
+      * the **published surface** is larger. `package.json` has `main` and
+        `files: ["dist/**/*", ...]` and **no `exports` map**, so every compiled
+        module is importable by path whether or not the barrel names it.
+
+    Which one is the parity denominator is an open product decision; the barrel is
+    emitted because a set needs some authority to exist at all.
+
+    **The declaration space comes from the checker, not from the export syntax.**
+    Syntax cannot answer it: `interface Foo {}; export { Foo }` exports a TYPE
+    through a clause shaped exactly like a value export. Reading the syntax also
+    mis-states this barrel, which re-exports the NAMESPACE `Tokens` from `marked`
+    as `type Tokens`; a namespace is neither space, so it is reported as its own.
+
+    Classifying re-exports requires the modules they come from, so the whole
+    package's sources are parsed together. An alias that still cannot be resolved is
+    reported as `unknown` and fails here rather than being folded into a space.
+    """
+    graph = src.paths(r"packages/tui/src/.*\.tsx?$")
+    barrel = "packages/tui/src/index.ts"
+    if barrel not in graph:
+        fail(f"{barrel} is not present at the baseline")
+        return None
+    facts = src.members_graph(graph, barrel)
+
+    spaces: dict[str, list[str]] = {"value": [], "type": [], "namespace": []}
+    unknown: list[str] = []
+    for export in facts["exports"]:
+        if export["kind"] in spaces:
+            spaces[export["kind"]].append(export["name"])
+        else:
+            unknown.append(export["name"])
+    if unknown:
+        fail(f"the checker could not classify {sorted(unknown)} in the TUI barrel - "
+             f"an unclassified export must not be folded into a declaration space")
+        return None
+    if not spaces["value"] and not spaces["type"]:
+        fail("the TUI barrel yielded no exported names")
+        return None
+    return spaces
+
+
 def keybinding_actions(src: Source) -> list[str] | None:
     """TUI keybinding action IDs, from the registry interface AND the default table.
 
@@ -783,63 +848,3 @@ def keybinding_actions(src: Source) -> list[str] | None:
              f"absent from the table {missing}, absent from the interface {extra}")
         return None
     return from_interface
-
-
-def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
-    """Names the TUI package's barrel exports, split by DECLARATION SPACE.
-
-    This is the smaller of two defensible denominators, and the difference matters
-    for parity:
-
-      * the **barrel** (`tui/src/index.ts`) names each export explicitly. There
-        are no `export *` statements, so the list is enumerable rather than
-        implied.
-      * the **published surface** is larger. `package.json` has `main` and
-        `files: ["dist/**/*", ...]` and **no `exports` map**, so every compiled
-        module is importable by path whether or not the barrel names it.
-
-    The barrel is emitted because it is what the package declares as its API. The
-    wider surface is reachable by an accident of packaging rather than by design,
-    and treating it as the parity denominator would commit a port to reproducing
-    module layout as though it were contract. That is a decision, recorded with
-    its reason rather than settled by whoever counts first.
-
-    **Values and types are separate sets because TypeScript has two declaration
-    spaces.** `fuzzyMatch` and `FuzzyMatch` both exist and differ only in leading
-    case, which one flat set cannot represent: they normalise to the same ID, and
-    the collision guard rejected the run rather than silently dropping one. The
-    split is not a workaround for the naming scheme, it is what the language says.
-
-    Three export FORMS all count: `export { X }`, `export { type X }`, and
-    `export type { X }`. The last is a whole-clause type export; a pattern that
-    requires the brace immediately after `export` silently omits every member
-    declared that way, yielding 132 against a barrel that names 133.
-    """
-    view = src.view("packages/tui/src/index.ts")
-
-    if re.search(r"^export \*", view.structural, re.M):
-        fail("the TUI barrel has an `export *` statement; the name list is no "
-             "longer enumerable from this file alone")
-        return None
-
-    alias = re.compile(r"\bas\s+([A-Za-z_$][\w$]*)\s*$", re.S)
-    values: list[str] = []
-    types: list[str] = []
-    for block in view.discover(re.compile(r"\bexport\s+(type\s+)?\{([^}]*)\}", re.S)):
-        whole_clause_is_type = block.group(1) is not None
-        for clause in view.value(*block.span(2)).split(","):
-            stripped = clause.strip()
-            if not stripped:
-                continue
-            per_clause_type = bool(re.match(r"^type\s+", stripped))
-            aliased = alias.search(clause)
-            exported = (aliased.group(1) if aliased
-                        else re.sub(r"^type\s+", "", stripped))
-            if not re.fullmatch(r"[A-Za-z_$][\w$]*", exported):
-                continue
-            (types if (whole_clause_is_type or per_clause_type) else values).append(exported)
-
-    if not values and not types:
-        fail("the TUI barrel yielded no exported names")
-        return None
-    return {"value": values, "type": types}

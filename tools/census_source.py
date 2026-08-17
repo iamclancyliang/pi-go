@@ -41,6 +41,8 @@ class Source:
         self._views: dict[str, "SourceView"] = {}
         self._spans = Spans(repo)
         self._env_facts = EnvFacts(repo)
+        self._member_facts = MemberFacts(repo)
+        self._members: dict[str, dict] = {}
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
         """Run git in the repo, surviving an unusable working directory.
@@ -131,6 +133,25 @@ class Source:
         for path, spans in self._spans.of(wanted).items():
             self._views[path] = SourceView(path, wanted[path], spans)
 
+    def members(self, path: str) -> dict:
+        """Compiler-API facts for one file, fetched at most once."""
+        if path not in self._members:
+            self._members.update(self._member_facts.of({path: self.read(path)}))
+        return self._members[path]
+
+    def members_graph(self, paths: list[str], wanted: str) -> dict:
+        """Facts for one file, parsed together with a graph it depends on.
+
+        A re-export can only be classified if the module it comes from is in the
+        program; without it the alias resolves to a synthetic symbol and every
+        export collapses into one kind. The caller supplies the graph because it
+        knows which one is relevant.
+        """
+        if wanted not in self._members:
+            self._members.update(
+                self._member_facts.of({path: self.read(path) for path in paths}))
+        return self._members[wanted]
+
     def env_facts(self, paths: list[str]) -> dict[str, dict]:
         """Scope-resolved environment facts for several files, in one process."""
         return self._env_facts.of({path: self.read(path) for path in paths})
@@ -199,6 +220,40 @@ class Spans:
             sys.exit(2)
         if finished.returncode != 0:
             print(f"ERROR: {SPANS_HELPER} failed ({finished.returncode}): "
+                  f"{finished.stderr.strip()}", file=sys.stderr)
+            sys.exit(2)
+        return json.loads(finished.stdout)
+
+
+class MemberFacts:
+    """Compiler-API member facts for a batch of files.
+
+    Separate helper from the span and environment ones because it answers a third
+    question: not "what is code" or "which object", but "what does this declaration
+    declare". A family's membership authority stays in its own extractor; this only
+    supplies the facts it reads.
+    """
+
+    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-members.mjs")
+
+    def __init__(self, repo: str) -> None:
+        self.repo = repo
+
+    def of(self, files: dict[str, str]) -> dict[str, dict]:
+        if not os.path.exists(self.HELPER):
+            print(f"ERROR: missing {self.HELPER}: member extraction requires it, and "
+                  f"a pattern fallback is what it replaced", file=sys.stderr)
+            sys.exit(2)
+        try:
+            finished = subprocess.run(
+                ["node", self.HELPER, self.repo],
+                input=json.dumps(files), capture_output=True, text=True,
+            )
+        except OSError as exc:
+            print(f"ERROR: cannot run node for {self.HELPER}: {exc.strerror}", file=sys.stderr)
+            sys.exit(2)
+        if finished.returncode != 0:
+            print(f"ERROR: ts-members.mjs failed ({finished.returncode}): "
                   f"{finished.stderr.strip()}", file=sys.stderr)
             sys.exit(2)
         return json.loads(finished.stdout)

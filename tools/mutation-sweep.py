@@ -136,6 +136,54 @@ MUTATIONS = [
     Mutation("deletion counted as an input read",
              r'r"(?<!delete )process\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"',
              r'r"process\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"'),
+    # The first AST-migrated family: mode.
+    Mutation("mode comparisons taken file-wide, not per binding",
+             '                          if comparison.get("leftBinding") == binding}',
+             "                          }"),
+    Mutation("mode binding selected without checking its initialiser",
+             '              if binding["name"] == "mode" and binding["initializer"] == "args[++i]"]',
+             '              if binding["name"] == "mode"]'),
+    Mutation("AppMode type-reference guard removed",
+             '    if union["members"]:',
+             "    if False:"),
+    Mutation("type and parser agreement not required",
+             "    if sorted(from_type) != sorted(from_parser):",
+             "    if False:"),
+    Mutation("comparison binding resolution disabled",
+             "\t\t\tconst leftBinding = ts.isIdentifier(node.left)",
+             "\t\t\tconst leftBinding = false && ts.isIdentifier(node.left)"),
+    Mutation("names registered on traversal, not hoisted",
+             "\t\tif (scoped) hoist(node, isFunctionLevel(node));",
+             "\t\tif (false) hoist(node, isFunctionLevel(node));"),
+    Mutation("var not hoisted to the function scope",
+             "		if (!functionLevel) return;", "		if (true) return;"),
+    Mutation("block-scoped names collected recursively",
+             "		ts.forEachChild(scopeNode, (child) => {\n			if (ts.isVariableStatement(child)) {",
+             "		ts.forEachChild(scopeNode, function walk(child) {\n			ts.forEachChild(child, walk);\n			if (ts.isVariableStatement(child)) {"),
+    # The compiler-API member facts: each guarantee the checker path rests on.
+    Mutation("export kind taken from syntax, not the checker",
+             "\t\t\tconst kind = !resolved ? \"unknown\"",
+             "\t\t\tconst kind = !resolved ? \"value\""),
+    Mutation("namespace folded into another space",
+             "\t\t\tconst isNamespace = Boolean(flags & ts.SymbolFlags.Namespace) &&",
+             "\t\t\tconst isNamespace = false && Boolean(flags & ts.SymbolFlags.Namespace) &&"),
+    Mutation("unresolved alias accepted instead of failing",
+             '        fail(f"the checker could not classify',
+             '        pass  # fail(f"the checker could not classify'),
+    Mutation("synthetic alias target treated as resolved",
+             "\t\t\t\t\t!(target.declarations ?? []).length) {",
+             "\t\t\t\t\tfalse) {"),
+    Mutation("nested declarations overwrite the top-level authority",
+             "		if (ts.isInterfaceDeclaration(node) && topLevel.has(node)) recordInterfaceKeys(node);",
+             "		if (ts.isInterfaceDeclaration(node)) recordInterfaceKeys(node);"),
+    Mutation("nested object literal overwrites a top-level registry",
+             "		if (ts.isVariableStatement(node) && topLevel.has(node)) {",
+             "		if (ts.isVariableStatement(node)) {"),
+    Mutation("ts extension imports disallowed, aliases collapse",
+             "\t\tallowImportingTsExtensions: true,", "\t\tallowImportingTsExtensions: false,"),
+    Mutation("in-memory files keyed relatively, resolution misses them",
+             "\t\tObject.entries(files).map(([path, text]) => [`${repoRoot}/${path}`, text]));",
+             "\t\tObject.entries(files).map(([path, text]) => [path, text]));"),
 ]
 
 
@@ -147,7 +195,8 @@ MUTATIONS = [
 # than by cleanup.
 TOOLS = pathlib.Path("tools")
 COPIES = ["census_source.py", "census_families.py", "gen-feature-ids.py",
-          "ts-spans.mjs", "ts-env-facts.mjs", "test_gen_feature_ids.py"]
+          "ts-spans.mjs", "ts-env-facts.mjs", "ts-members.mjs", "ts-shared.mjs",
+          "test_gen_feature_ids.py"]
 
 workspace = pathlib.Path(tempfile.mkdtemp(prefix="census-mutation-")) / "tools"
 workspace.mkdir(parents=True)

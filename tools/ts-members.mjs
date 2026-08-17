@@ -18,7 +18,9 @@
  *       "typeAliasUnions": { "<alias name>": { "literals", "members" } },
  *       "interfaceKeys": { "<interface name>": [ "<key>", ... ] },
  *       "keyedLiterals": [ { "path", "key", "value" } ],
- *       "objectKeys": { "<const name>": [ "<top-level key>", ... ] }
+ *       "objectKeys": { "<const name>": [ "<top-level key>", ... ] },
+ *       "comparisons": [ { "left", "operator", "value", "leftBinding" } ],
+ *       "bindings": { "<declaration offset>": { "name", "initializer" } }
  *   } }
  *
  *   exports.kind    - "value" or "type": TypeScript's two declaration spaces, in
@@ -34,40 +36,87 @@
  *   objectKeys      - top-level keys of an exported object literal. A registry
  *                     whose VALUES are objects has its members in the keys, so a
  *                     literal-only view of it reports nothing
+ *   comparisons     - `expr === "literal"` with the left side's text and, when that
+ *                     side is a plain identifier, the declaration it resolves to.
+ *                     Some sets are defined by what a parser ACCEPTS rather than by
+ *                     a type, and that acceptance lives in comparisons. The binding
+ *                     matters because one file can hold two variables of the same
+ *                     name meaning different things, and a file-wide view of the
+ *                     comparisons merges them
+ *   bindings        - declared name and initialiser text per declaration offset, so
+ *                     a family can say WHICH variable it means
  *
  * Offsets are not reported: a family that needs a position needs a span, and spans
  * come from `ts-spans.mjs`.
  */
-import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { codePointMapper, loadTypeScript, requireParsed, scriptKindFor } from "./ts-shared.mjs";
 
-const require = createRequire(process.argv[2] + "/");
-let ts;
-try {
-	ts = require("typescript");
-} catch (error) {
-	process.stderr.write(`cannot load typescript from ${process.argv[2]}: ${error.message}\n`);
-	process.exit(3);
+const ts = loadTypeScript(process.argv[2]);
+
+/**
+ * A Program over the supplied files, so exports come from the CHECKER.
+ *
+ * Syntax cannot answer what a module exports. `interface Foo {}; export { Foo }`
+ * exports a TYPE through a clause that looks identical to a value export, and
+ * `namespace N { export const Hidden = 1 }` exports nothing from the module at all.
+ * Both were reported wrongly while the classification was syntactic.
+ *
+ * Files the caller did not supply are not invented: an alias that cannot be
+ * resolved is reported with kind `"unknown"`, so a family that needs kinds can
+ * refuse to use the result rather than accept a guess.
+ */
+function buildProgram(files, repoRoot) {
+	const options = {
+		target: ts.ScriptTarget.Latest,
+		module: ts.ModuleKind.ESNext,
+		moduleResolution: ts.ModuleResolutionKind.Bundler,
+		// This codebase imports with explicit `.ts` extensions, which resolution
+		// rejects unless allowed. Without it every re-export's alias resolves to a
+		// synthetic symbol and the value/type classification silently collapses to
+		// one kind.
+		allowImportingTsExtensions: true,
+		allowJs: false,
+		noEmit: true,
+		skipLibCheck: true,
+		noResolve: false,
+	};
+	const host = ts.createCompilerHost(options, true);
+	const original = host.getSourceFile.bind(host);
+	// Keyed by ABSOLUTE path rooted at the checkout: module resolution normalises to
+	// absolute paths, so a relatively-keyed map is never consulted and every alias
+	// resolves to a synthetic symbol.
+	const supplied = new Map(
+		Object.entries(files).map(([path, text]) => [`${repoRoot}/${path}`, text]));
+	host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+		const text = supplied.get(fileName);
+		if (text !== undefined) {
+			const kind = scriptKindFor(ts, fileName);
+			return ts.createSourceFile(fileName, text, languageVersion, true, kind);
+		}
+		return original(fileName, languageVersion, onError, shouldCreate);
+	};
+	host.fileExists = (fileName) => supplied.has(fileName) || ts.sys.fileExists(fileName);
+	host.readFile = (fileName) => supplied.get(fileName) ?? ts.sys.readFile(fileName);
+	const program = ts.createProgram([...supplied.keys()], options, host);
+	return { program, checker: program.getTypeChecker() };
 }
 
-function analyse(path, source) {
-	const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
-	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, kind);
-	const diagnostics = file.parseDiagnostics ?? [];
-	if (diagnostics.length > 0) {
-		const first = diagnostics[0];
-		process.stderr.write(
-			`parse error in ${path} at offset ${first.start}: ` +
-			`${ts.flattenDiagnosticMessageText(first.messageText, " ")}\n`,
-		);
+function analyse(path, program, checker) {
+	const file = program.getSourceFile(path);
+	if (!file) {
+		process.stderr.write(`the program has no source file for ${path}\n`);
 		process.exit(4);
 	}
+	requireParsed(ts, file, path);
 
 	const exports_ = [];
 	const typeAliasUnions = {};
 	const interfaceKeys = {};
 	const keyedLiterals = [];
 	const objectKeys = {};
+	const comparisons = [];
+	const bindings = {};
 
 	/** Look through `satisfies T` and `as const`, which wrap the literal. */
 	const unwrap = (node) => {
@@ -82,50 +131,59 @@ function analyse(path, source) {
 	const nameOf = (node) =>
 		node && (ts.isIdentifier(node) || ts.isStringLiteral(node)) ? node.text : undefined;
 
-	/** `export { a, type b, c as d } from "..."` and `export type { e }`. */
-	function recordExportClause(statement) {
-		const clause = statement.exportClause;
-		if (!clause || !ts.isNamedExports(clause)) return;
-		const wholeClauseIsType = Boolean(statement.isTypeOnly);
-		for (const element of clause.elements) {
-			const exported = element.name.text;
-			const local = element.propertyName ? element.propertyName.text : undefined;
-			const isType = wholeClauseIsType || Boolean(element.isTypeOnly);
-			exports_.push({
-				name: exported,
-				kind: isType ? "type" : "value",
-				form: wholeClauseIsType ? "export-type-clause" : "export-clause",
-				...(local && local !== exported ? { local } : {}),
-				...(statement.moduleSpecifier
-					? { module: statement.moduleSpecifier.text }
-					: {}),
-			});
-		}
-	}
-
-	/** `export const x`, `export function y`, `export type Z`, `export default`. */
-	function recordDeclaredExport(node) {
-		const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) ?? [] : [];
-		if (!modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return;
-		const isDefault = modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
-		const typeSpace =
-			ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node);
-		const collect = (name, form) =>
-			exports_.push({
-				name,
-				kind: typeSpace ? "type" : "value",
-				form: isDefault ? `${form}-default` : form,
-			});
-
-		if (ts.isVariableStatement(node)) {
-			for (const declaration of node.declarationList.declarations) {
-				const name = nameOf(declaration.name);
-				if (name) collect(name, "declaration");
+	/**
+	 * The module's exports, as the CHECKER sees them.
+	 *
+	 * Syntax cannot answer what a module exports. `interface Foo {}; export { Foo }`
+	 * exports a TYPE through a clause identical in shape to a value export, and
+	 * `namespace N { export const Hidden = 1 }` exports nothing from the module.
+	 * Aliases are followed to classify the target; if the target's module was not
+	 * supplied, the kind is `"unknown"` rather than assumed, so a family that needs
+	 * kinds can refuse the result instead of accepting a guess.
+	 */
+	function recordExports() {
+		const moduleSymbol = checker.getSymbolAtLocation(file);
+		if (!moduleSymbol) return;
+		for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
+			let target = symbol;
+			let resolved = true;
+			if (symbol.flags & ts.SymbolFlags.Alias) {
+				try {
+					target = checker.getAliasedSymbol(symbol);
+				} catch {
+					resolved = false;
+				}
+				// A failed resolution yields a synthetic symbol rather than an error, and
+				// it carries no declaration. Treating that as resolved is how every
+				// export came back as one kind.
+				if (!target || target === symbol ||
+					(target.flags & ts.SymbolFlags.Unknown) ||
+					!(target.declarations ?? []).length) {
+					resolved = false;
+				}
 			}
-			return;
+			const flags = resolved ? target.flags : 0;
+			// A namespace is neither a plain value nor a plain type, and this barrel
+			// re-exports one (`Tokens` from `marked`, declared `export declare
+			// namespace`). Folding it into either space would misstate the surface.
+			const isNamespace = Boolean(flags & ts.SymbolFlags.Namespace) &&
+				!(flags & ts.SymbolFlags.Variable);
+			const isValue = Boolean(flags & ts.SymbolFlags.Value);
+			const isType = Boolean(flags & (ts.SymbolFlags.Type | ts.SymbolFlags.TypeAlias |
+				ts.SymbolFlags.Interface));
+			const kind = !resolved ? "unknown"
+				: isNamespace ? "namespace"
+				: isValue ? "value"
+				: isType ? "type"
+				: "unknown";
+			const declaration = (symbol.declarations ?? [])[0];
+			exports_.push({
+				name: symbol.getName(),
+				kind,
+				form: declaration ? ts.SyntaxKind[declaration.kind] : "unknown",
+				...(resolved && target !== symbol ? { local: target.getName() } : {}),
+			});
 		}
-		const name = nameOf(node.name);
-		if (name) collect(name, "declaration");
 	}
 
 	function recordTypeAliasUnion(node) {
@@ -217,14 +275,68 @@ function analyse(path, source) {
 		}
 	}
 
+	const scopes = [new Map()];
+	const declare = (name, offset) => scopes[scopes.length - 1].set(name, offset);
+	const resolve = (name) => {
+		for (let index = scopes.length - 1; index >= 0; index -= 1) {
+			const found = scopes[index].get(name);
+			if (found !== undefined) return found;
+		}
+		return undefined;
+	};
+	const opensScope = (node) =>
+		ts.isSourceFile(node) || ts.isBlock(node) || ts.isFunctionDeclaration(node) ||
+		ts.isFunctionExpression(node) || ts.isArrowFunction(node) ||
+		ts.isMethodDeclaration(node) || ts.isForStatement(node) ||
+		ts.isForOfStatement(node) || ts.isForInStatement(node) ||
+		ts.isCaseBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node);
+
+	// A nested declaration must not overwrite the module-level authority: a
+	// same-named interface inside a function would replace the exported one, and the
+	// family reading it would publish the wrong keys.
+	const topLevel = new Set(file.statements);
+
 	const visit = (node) => {
-		if (ts.isExportDeclaration(node)) recordExportClause(node);
-		else recordDeclaredExport(node);
+		const scoped = opensScope(node);
+		if (scoped) scopes.push(new Map());
+		if (scoped && node.parameters) {
+			for (const parameter of node.parameters) {
+				if (ts.isIdentifier(parameter.name)) {
+					declare(parameter.name.text, parameter.getStart(file));
+				}
+			}
+		}
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+			const offset = node.name.getStart(file);
+			declare(node.name.text, offset);
+			bindings[offset] = {
+				name: node.name.text,
+				initializer: node.initializer ? node.initializer.getText(file) : null,
+			};
+		}
 
-		if (ts.isTypeAliasDeclaration(node)) recordTypeAliasUnion(node);
-		if (ts.isInterfaceDeclaration(node)) recordInterfaceKeys(node);
+		// `expr === "literal"`: some sets are defined by what a parser ACCEPTS
+		// rather than by a type, and that acceptance lives in comparisons.
+		if (ts.isBinaryExpression(node) &&
+			(node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+				node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken) &&
+			ts.isStringLiteral(node.right)) {
+			const leftBinding = ts.isIdentifier(node.left)
+				? resolve(node.left.text)
+				: undefined;
+			comparisons.push({
+				left: node.left.getText(file),
+				operator: node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+					? "===" : "==",
+				value: node.right.text,
+				...(leftBinding !== undefined ? { leftBinding } : {}),
+			});
+		}
 
-		if (ts.isVariableStatement(node)) {
+		if (ts.isTypeAliasDeclaration(node) && topLevel.has(node)) recordTypeAliasUnion(node);
+		if (ts.isInterfaceDeclaration(node) && topLevel.has(node)) recordInterfaceKeys(node);
+
+		if (ts.isVariableStatement(node) && topLevel.has(node)) {
 			for (const declaration of node.declarationList.declarations) {
 				const name = nameOf(declaration.name);
 				if (declaration.initializer) {
@@ -245,15 +357,20 @@ function analyse(path, source) {
 		}
 
 		ts.forEachChild(node, visit);
+		if (scoped) scopes.pop();
 	};
 
+	recordExports();
 	visit(file);
-	return { exports: exports_, typeAliasUnions, interfaceKeys, keyedLiterals, objectKeys };
+	return { exports: exports_, typeAliasUnions, interfaceKeys, keyedLiterals,
+		objectKeys, comparisons, bindings };
 }
 
 const input = JSON.parse(readFileSync(0, "utf8"));
+const repoRoot = process.argv[2].replace(/\/+$/, "");
+const { program, checker } = buildProgram(input, repoRoot);
 const result = {};
-for (const [path, contents] of Object.entries(input)) {
-	result[path] = analyse(path, contents);
+for (const path of Object.keys(input)) {
+	result[path] = analyse(`${repoRoot}/${path}`, program, checker);
 }
 process.stdout.write(JSON.stringify(result));

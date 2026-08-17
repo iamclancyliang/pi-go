@@ -33,19 +33,10 @@
  * delimiters and moved every following span. Emitting raw UTF-16 offsets is a
  * correctness bug, not a portability detail.
  */
-import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { codePointMapper, loadTypeScript, requireParsed, scriptKindFor } from "./ts-shared.mjs";
 
-const require = createRequire(process.argv[2] + "/");
-let ts;
-try {
-	ts = require("typescript");
-} catch (error) {
-	process.stderr.write(
-		`cannot load typescript from ${process.argv[2]}: ${error.message}\n`,
-	);
-	process.exit(3);
-}
+const ts = loadTypeScript(process.argv[2]);
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const result = {};
@@ -112,7 +103,7 @@ for (const [path, contents] of Object.entries(input)) {
 	source = contents;
 	// The script kind must follow the extension: parsing a `.ts` file as TSX
 	// makes `<T>` look like a JSX tag and the file fails to parse.
-	const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+	const kind = scriptKindFor(ts, path);
 	file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, kind);
 	dead = [];
 	text = [];
@@ -138,14 +129,7 @@ for (const [path, contents] of Object.entries(input)) {
 
 	// A syntax error would make the spans unreliable, and silently returning
 	// partial spans is exactly the failure this file exists to remove.
-	const diagnostics = file.parseDiagnostics ?? [];
-	if (diagnostics.length > 0) {
-		const first = diagnostics[0];
-		process.stderr.write(
-			`parse error in ${path} at offset ${first.start}: ${ts.flattenDiagnosticMessageText(first.messageText, " ")}\n`,
-		);
-		process.exit(4);
-	}
+	requireParsed(ts, file, path);
 
 	// A comment is leading trivia of every node that starts at the same offset,
 	// so the same span arrives several times; blanking is idempotent but the

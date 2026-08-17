@@ -50,6 +50,11 @@ def _tui_types(facts):
     return [e["name"] for e in facts["exports"] if e["kind"] == "type"]
 
 
+@derive("tui.export.namespace", "packages/tui/src/index.ts")
+def _tui_namespaces(facts):
+    return [e["name"] for e in facts["exports"] if e["kind"] == "namespace"]
+
+
 @derive("tui.keybinding", "packages/tui/src/keybindings.ts")
 def _keybindings(facts):
     interface = facts["interfaceKeys"].get("Keybindings", [])
@@ -57,6 +62,11 @@ def _keybindings(facts):
     if sorted(interface) != sorted(table):
         raise ValueError("the interface and the default table disagree")
     return interface
+
+
+@derive("coding-agent.mode", "packages/coding-agent/src/core/project-trust.ts")
+def _app_modes(facts):
+    return facts["typeAliasUnions"]["AppMode"]["literals"]
 
 
 @derive("ai.stop-reason", "packages/ai/src/types.ts")
@@ -99,7 +109,6 @@ def _thinking_levels(facts):
 NOT_YET_DERIVED = {
     "coding-agent.tool": "members are bare strings in `new Set([...])`; needs an array-literal fact",
     "agent-harness.tool": "membership is the set of exported creator symbols, filtered by name shape",
-    "coding-agent.mode": "cross-checks two declarations in different files",
     "coding-agent.rpc.command": "discriminants of a union spanning a file region",
     "coding-agent.rpc.ui": "keyed literals inside a request union",
     "coding-agent.rpc.event": "union of three sources plus emission-site classification",
@@ -144,6 +153,15 @@ def main() -> int:
         current[family] = set(members)
 
     wanted = sorted({path for path, _ in AST_DERIVED.values()})
+    # A re-export can only be classified when its module is in the program, so the
+    # TUI package's sources travel with the barrel. Without them every alias resolves
+    # to a synthetic symbol and the declaration spaces collapse into one.
+    listed = subprocess.run(["git", "ls-tree", "-r", "--name-only", args.baseline,
+                             "--", "packages/tui/src"],
+                            cwd=args.pi_repo, capture_output=True, text=True)
+    if listed.returncode == 0:
+        wanted = sorted(set(wanted) | {p for p in listed.stdout.split()
+                                       if p.endswith((".ts", ".tsx"))})
     sources = {}
     for path in wanted:
         shown = subprocess.run(["git", "show", f"{args.baseline}:{path}"],

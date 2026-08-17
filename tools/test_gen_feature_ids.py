@@ -59,11 +59,30 @@ class FakeSource(gen.Source):
             raise gen.SourceUnavailable(f"fixture has no {path}")
         return self._files[path]
 
+    def paths(self, pattern: str) -> list[str]:
+        """List the fixture rather than a commit, for extractors that scan a graph."""
+        matcher = re.compile(pattern)
+        return sorted(path for path in self._files if matcher.match(path))
+
 
 def view_of(source: str, path: str = "f.ts") -> "gen.SourceView":
     """Build a view the way the tool does: real spans from the real parser."""
     spans = gen.Spans(TS_REPO).of({path: source})[path]
     return gen.SourceView(path, source, spans)
+
+
+def test_no_tool_defines_the_same_name_twice() -> None:
+    """A duplicate definition silently wins, and the earlier one becomes dead.
+
+    Editing by slicing a file can leave two copies of a function; Python uses the
+    last, so a corrected version can sit above a stale one that is what actually
+    runs. Nothing else in this suite would notice.
+    """
+    for name in ("census_source.py", "census_families.py", "gen-feature-ids.py"):
+        text = (_TOOLS / name).read_text()
+        defined = re.findall(r"^def (\w+)\(", text, re.M)
+        duplicates = {n for n in defined if defined.count(n) > 1}
+        assert not duplicates, f"{name} defines {sorted(duplicates)} more than once"
 
 
 def test_regex_in_expression_position_is_blanked() -> None:
@@ -154,6 +173,76 @@ def test_nested_template_expression() -> None:
         assert f"`{text}" not in view.structural.replace("PI_DEEP", "")
 
 
+MODE_TRUST = "packages/coding-agent/src/core/project-trust.ts"
+MODE_ARGS = "packages/coding-agent/src/cli/args.ts"
+
+# Two variables named `mode` in one file: the one taken from `--mode`, and another
+# flag's whose values are unrelated. A file-wide view of `mode === "..."` merges
+# them, so the accepted set must be selected by the binding.
+MODE_FIXTURE = {
+    MODE_TRUST: 'export type AppMode = "interactive" | "print" | "json" | "rpc";\n',
+    MODE_ARGS: "\n".join([
+        'export type Mode = "text" | "json" | "rpc";',
+        "function parse(args) {",
+        "  if (arg === '--mode') {",
+        "    const mode = args[++i];",
+        '    if (mode === "text" || mode === "json" || mode === "rpc") { use(mode); }',
+        "  }",
+        "  if (arg === '--screen') {",
+        "    const mode = args[i + 1];",
+        '    if (mode === "fullscreen" || mode === "regular") { use(mode); }',
+        "  }",
+        "}",
+        "",
+    ]),
+}
+
+
+def test_app_modes_come_from_the_type_union() -> None:
+    assert gen.app_modes(FakeSource(MODE_FIXTURE)) == \
+        ["interactive", "print", "json", "rpc"]
+
+
+def test_cli_mode_literals_select_the_right_binding() -> None:
+    """Another `mode` in the same file must not contribute its values.
+
+    A file-wide scan of `mode === "..."` returns five literals here; only three
+    belong to `--mode`.
+    """
+    assert gen.cli_mode_literals(FakeSource(MODE_FIXTURE)) == ["text", "json", "rpc"]
+
+
+def test_cli_mode_fixture_really_is_adversarial() -> None:
+    """Proof the control has teeth: the unrelated values ARE in the file."""
+    source = MODE_FIXTURE[MODE_ARGS]
+    assert '"fullscreen"' in source and '"regular"' in source
+    facts = gen.MemberFacts(TS_REPO).of({MODE_ARGS: source})[MODE_ARGS]
+    all_values = {c["value"] for c in facts["comparisons"] if c["left"] == "mode"}
+    assert {"fullscreen", "regular"} <= all_values, all_values
+
+
+def test_a_type_and_parser_disagreement_fails() -> None:
+    """The type and what the parser accepts must agree, or the run fails."""
+    diverged = dict(MODE_FIXTURE)
+    diverged[MODE_ARGS] = MODE_FIXTURE[MODE_ARGS].replace(
+        'export type Mode = "text" | "json" | "rpc";',
+        'export type Mode = "text" | "json";')
+    gen.errors.clear()
+    assert gen.cli_mode_literals(FakeSource(diverged)) == []
+    assert any("disagrees with the parser" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_an_app_mode_referencing_another_type_fails() -> None:
+    """If AppMode stops being a union of literals, membership is no longer here."""
+    indirect = dict(MODE_FIXTURE)
+    indirect[MODE_TRUST] = 'export type AppMode = "interactive" | SomeOtherModes;\n'
+    gen.errors.clear()
+    assert gen.app_modes(FakeSource(indirect)) is None
+    assert any("references other types" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 HARNESS_PATH = "packages/agent/src/harness/tools/index.ts"
 
 # Three real exports, and three things that must NOT become members:
@@ -161,7 +250,7 @@ HARNESS_PATH = "packages/agent/src/harness/tools/index.ts"
 #   - a phantom export inside a template literal
 #   - a non-exported internal alias
 # The `as` alias is split across lines and indented with a tab, which the
-# previous implementation dropped because it required the exact substring
+# a pattern requiring the exact substring drops because it required the exact substring
 # " as ".
 HARNESS_FIXTURE = '''
 export { createBashTool } from "./bash.ts";
@@ -290,9 +379,7 @@ env.PI_EXPOSED_TWO = ctx.two;
 
 
 class EnvFakeSource(FakeSource):
-    def paths(self, pattern: str) -> list[str]:
-        matcher = re.compile(pattern)
-        return sorted(p for p in self._files if matcher.match(p))
+    """Kept as a distinct name so the environment fixtures read explicitly."""
 
 
 def test_environment_names_cover_every_read_form() -> None:
@@ -334,6 +421,85 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert roles["self"] == ["PI_SELF_SET"], roles["self"]
     assert "PI_SELF_SET" not in roles["exposed"]
     assert "PI_EXPOSED_ONE" not in roles["self"]
+
+
+def test_a_binding_shadows_its_whole_scope_not_just_below_itself() -> None:
+    """`env.X` above `const env = ...` in the same scope refers to THAT binding.
+
+    A lexical binding shadows its entire scope. Registering names as traversal
+    reaches them attributes earlier references to an outer object, so the outer
+    object's delete appears to guard them.
+    """
+    hoisted = dict(ENV_FIXTURE)
+    hoisted["packages/coding-agent/src/hoisted.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_EARLY;\n"
+        "function f() {\n"
+        "  env.PI_EARLY = value;\n"
+        "  const env = {};\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(hoisted))
+    # The write belongs to the inner, unseeded object, so no obligation applies and
+    # the OUTER delete must not be credited to it.
+    assert not gen.errors, gen.errors
+    assert "PI_EARLY" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_var_is_function_scoped_not_block_scoped() -> None:
+    """A `var` declared in a block is visible after the block closes.
+
+    Popping the block's scope loses it, and the later access becomes unresolved
+    rather than being attributed to the object it actually names.
+    """
+    hoisted = dict(ENV_FIXTURE)
+    hoisted["packages/coding-agent/src/varscope.ts"] = (
+        "function g() {\n"
+        "  { var env = { ...getShellEnv() }; }\n"
+        "  env.PI_VAR = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(hoisted))
+    # Seeded object, written without a prior delete on it: the guard must fire,
+    # which it can only do if the access resolved to that object at all.
+    assert any("PI_VAR" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_block_scoped_binding_does_not_escape_its_block() -> None:
+    """`let` in a block is NOT visible after it closes, unlike `var`.
+
+    Collecting block-scoped names recursively leaks them into the enclosing
+    function, which makes a later access resolve to an object it cannot name.
+    """
+    leaked = dict(ENV_FIXTURE)
+    leaked["packages/coding-agent/src/letblock.ts"] = (
+        "function h() {\n"
+        "  { let env = { ...getShellEnv() }; }\n"
+        "  env.PI_LET = value;\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(leaked))
+    # Unresolvable, so counted without a claim -- and NOT attributed to the block's
+    # seeded object, which would otherwise raise a spurious guard failure.
+    assert not any("PI_LET" in m for m in gen.errors), gen.errors
+    assert "PI_LET" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_a_nested_function_owns_its_own_var() -> None:
+    """A `var` inside a nested function does not hoist into the outer one."""
+    nested = dict(ENV_FIXTURE)
+    nested["packages/coding-agent/src/nestedvar.ts"] = (
+        "function outer() {\n"
+        "  function inner() { var env = { ...getShellEnv() }; }\n"
+        "  env.PI_NESTED = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(nested))
+    assert not any("PI_NESTED" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
 
 
 def test_a_delete_on_this_process_is_not_a_child_clear() -> None:
@@ -777,44 +943,60 @@ BARREL_PATH = "packages/tui/src/index.ts"
 BARREL_FIXTURE = {
     BARREL_PATH: "\n".join([
         'export { Box, type BoxOptions } from "./box.ts";',
-        'export type { EditorComponent } from "./editor-component.ts";',
+        'export type { EditorComponent } from "./editor.ts";',
         'export { fuzzyMatch, type FuzzyMatch } from "./fuzzy.ts";',
         'export { internalName as publicName } from "./alias.ts";',
-        'const notExported = 1;',
+        # An interface exported through a plain clause: syntax says value, the
+        # checker says type.
+        "interface Foo {}",
+        "export { Foo };",
+        # A namespace's own exports are not this module's exports.
+        "namespace N { export const Hidden = 1; }",
+        "export const Visible = 2;",
+        # A re-exported namespace belongs to neither declaration space.
+        "export namespace Space { export const inner = 1; }",
         "",
     ]),
+    "packages/tui/src/box.ts": "export class Box {}\nexport interface BoxOptions { x: number }\n",
+    "packages/tui/src/editor.ts": "export interface EditorComponent { y: number }\n",
+    "packages/tui/src/fuzzy.ts": "export function fuzzyMatch() {}\nexport type FuzzyMatch = string;\n",
+    "packages/tui/src/alias.ts": "export const internalName = 1;\n",
 }
 
 
-def test_barrel_counts_all_three_export_forms() -> None:
-    """`export type { X }` is a form of its own; missing it lost a real member.
+def test_barrel_classifies_by_declaration_space_not_by_syntax() -> None:
+    """`interface Foo {}; export { Foo }` exports a TYPE.
 
-    The set was 132 against a barrel naming 133 until whole-clause type exports
-    were handled.
+    The clause is shaped exactly like a value export, so reading the syntax puts it
+    in the wrong space. Only the checker can answer this.
     """
     barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
-    assert barrel["value"] == ["Box", "fuzzyMatch", "publicName"], barrel["value"]
-    assert barrel["type"] == ["BoxOptions", "EditorComponent", "FuzzyMatch"], barrel["type"]
+    assert "Foo" in barrel["type"], barrel
+    assert "Foo" not in barrel["value"], barrel
 
 
-def test_barrel_separates_the_two_declaration_spaces() -> None:
-    """A value and a type differing only in leading case must both survive.
-
-    In one flat set they normalise to the same ID and the collision guard rejects
-    the run rather than dropping one silently.
-    """
+def test_barrel_excludes_a_namespace_member_export() -> None:
+    """A namespace's exports are not the module's exports."""
     barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
-    assert "fuzzyMatch" in barrel["value"] and "FuzzyMatch" in barrel["type"]
-    assert gen.normalize("fuzzyMatch") == gen.normalize("FuzzyMatch")
+    every = barrel["value"] + barrel["type"] + barrel["namespace"]
+    assert "Hidden" not in every, every
+    assert "Visible" in barrel["value"], barrel["value"]
 
 
-def test_barrel_refuses_a_wildcard_reexport() -> None:
-    """`export *` makes the list non-enumerable from this file, so it must fail."""
-    wild = {BARREL_PATH: 'export * from "./everything.ts";\n'}
+def test_barrel_reports_a_namespace_as_its_own_space() -> None:
+    """A re-exported namespace belongs to neither space."""
+    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
+    assert barrel["namespace"] == ["Space"], barrel["namespace"]
+
+
+def test_barrel_fails_on_an_export_it_cannot_classify() -> None:
+    """An unresolvable alias must not be folded into a declaration space."""
+    unresolvable = dict(BARREL_FIXTURE)
+    unresolvable["packages/tui/src/index.ts"] += \
+        'export { Missing } from "./nowhere.ts";\n'
     gen.errors.clear()
-    result = gen.tui_barrel_names(FakeSource(wild))
-    assert result is None, result
-    assert any("export *" in m for m in gen.errors), gen.errors
+    assert gen.tui_barrel_names(FakeSource(unresolvable)) is None
+    assert any("could not classify" in m for m in gen.errors), gen.errors
     gen.errors.clear()
 
 

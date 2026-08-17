@@ -153,13 +153,22 @@ def main() -> int:
     expect("feature list test count",
            first_int(r"这 (\d+) 个测试都做过", feature_list), passed or -1)
 
+    # The DEFINED mutation count is checkable instantly; only proving each one is
+    # caught needs the slow run. Leaving both to the slow gate meant a stale
+    # published figure could sit there indefinitely, because the fast gate reported
+    # the total as unchecked.
+    defined = len(re.findall(r"^    Mutation\(",
+                             (TOOLS / "mutation-sweep.py").read_text(), re.M))
+    expect("feature list mutation count",
+           first_int(r"(\d+) 种改法全部被抓到", feature_list), defined)
+
     caught = None
     if args.with_sweep:
         sweep = subprocess.run([sys.executable, "-B", str(TOOLS / "mutation-sweep.py")],
                                capture_output=True, text=True, cwd=ROOT)
         caught = first_int(r"(\d+)/\d+ mutations caught", sweep.stdout)
-        expect("feature list mutation count",
-               first_int(r"(\d+) 种改法全部被抓到", feature_list), caught or -1)
+        if caught != defined:
+            complain(f"the sweep caught {caught} of {defined} defined mutations")
 
     if problems:
         print(f"\n{len(problems)} published count(s) disagree; the documents are not "

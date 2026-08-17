@@ -33,38 +33,11 @@
  *
  * Offsets are code-POINT indices, matching Python string indexing.
  */
-import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { codePointMapper, loadTypeScript, requireParsed, scriptKindFor } from "./ts-shared.mjs";
 
-const require = createRequire(process.argv[2] + "/");
-let ts;
-try {
-	ts = require("typescript");
-} catch (error) {
-	process.stderr.write(`cannot load typescript from ${process.argv[2]}: ${error.message}\n`);
-	process.exit(3);
-}
+const ts = loadTypeScript(process.argv[2]);
 
-/** UTF-16 code units -> code points, so offsets match Python indexing. */
-function codePointMapper(source) {
-	if (!/[\uD800-\uDBFF]/.test(source)) return (index) => index;
-	const adjust = new Int32Array(source.length + 1);
-	let pairs = 0;
-	for (let index = 0; index < source.length; index += 1) {
-		adjust[index] = pairs;
-		const code = source.charCodeAt(index);
-		if (code >= 0xd800 && code <= 0xdbff && index + 1 < source.length) {
-			const next = source.charCodeAt(index + 1);
-			if (next >= 0xdc00 && next <= 0xdfff) {
-				index += 1;
-				adjust[index] = pairs;
-				pairs += 1;
-			}
-		}
-	}
-	adjust[source.length] = pairs;
-	return (index) => index - adjust[Math.min(index, source.length)];
-}
 
 /** Whether an expression reads an inherited environment. */
 function readsInheritedEnv(node) {
@@ -95,17 +68,9 @@ function receiverOf(node) {
 }
 
 function analyse(path, source) {
-	const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+	const kind = scriptKindFor(ts, path);
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, kind);
-	const diagnostics = file.parseDiagnostics ?? [];
-	if (diagnostics.length > 0) {
-		const first = diagnostics[0];
-		process.stderr.write(
-			`parse error in ${path} at offset ${first.start}: ` +
-			`${ts.flattenDiagnosticMessageText(first.messageText, " ")}\n`,
-		);
-		process.exit(4);
-	}
+	requireParsed(ts, file, path);
 
 	const toCodePoint = codePointMapper(source);
 	const objects = new Map();       // declaration offset -> record
@@ -115,15 +80,32 @@ function analyse(path, source) {
 
 	// A scope is a map from declared name to the declaration node. Scopes nest, and
 	// a reference resolves in the innermost one that declares it.
-	const scopes = [new Map()];
-	const declare = (name, node) => scopes[scopes.length - 1].set(name, node);
+	// Each scope records whether it is function-level, because `var` is
+	// function-scoped and everything else is block-scoped.
+	const scopes = [{ names: new Map(), functionLevel: true }];
+	const declare = (name, node) => scopes[scopes.length - 1].names.set(name, node);
+	const declareVar = (name, node) => {
+		for (let index = scopes.length - 1; index >= 0; index -= 1) {
+			if (scopes[index].functionLevel) {
+				scopes[index].names.set(name, node);
+				return;
+			}
+		}
+		scopes[0].names.set(name, node);
+	};
 	const resolve = (name) => {
 		for (let index = scopes.length - 1; index >= 0; index -= 1) {
-			const found = scopes[index].get(name);
+			const found = scopes[index].names.get(name);
 			if (found) return found;
 		}
 		return undefined;
 	};
+
+	const isFunctionLevel = (node) =>
+		ts.isSourceFile(node) || ts.isFunctionDeclaration(node) ||
+		ts.isFunctionExpression(node) || ts.isArrowFunction(node) ||
+		ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) ||
+		ts.isGetAccessor(node) || ts.isSetAccessor(node) || ts.isModuleBlock(node);
 
 	const opensScope = (node) =>
 		ts.isSourceFile(node) || ts.isBlock(node) || ts.isFunctionDeclaration(node) ||
@@ -176,9 +158,80 @@ function analyse(path, source) {
 		}
 	};
 
+	/**
+	 * Register the names a scope introduces BEFORE walking its body.
+	 *
+	 * A lexical binding shadows its whole scope, so `env.X` written above
+	 * `const env = ...` in the same function still refers to that binding, not to an
+	 * outer one. Registering names as traversal reaches them attributes those earlier
+	 * references to the wrong object. `var` is hoisted to the nearest function-level
+	 * scope, so a `var` inside a block is visible after the block closes.
+	 */
+	const hoist = (scopeNode, functionLevel) => {
+		// TWO different rules, so two passes. `let`/`const`/`class`/`function` belong
+		// to the scope that lexically contains them, so only DIRECT children count --
+		// collecting them recursively would leak a block's `let` into the function and
+		// make it visible after the block closes. `var` belongs to the nearest
+		// function-level scope, so it IS collected recursively, stopping at nested
+		// functions, which own their own `var`s.
+		ts.forEachChild(scopeNode, (child) => {
+			if (ts.isVariableStatement(child)) {
+				const blockScoped = Boolean(child.declarationList.flags &
+					(ts.NodeFlags.Let | ts.NodeFlags.Const));
+				if (!blockScoped) return;
+				for (const declaration of child.declarationList.declarations) {
+					declarePattern(declaration.name, declaration);
+					if (ts.isIdentifier(declaration.name)) noteObject(declaration);
+				}
+				return;
+			}
+			if (ts.isFunctionDeclaration(child) && child.name) declare(child.name.text, child);
+			if (ts.isClassDeclaration(child) && child.name) declare(child.name.text, child);
+		});
+
+		if (!functionLevel) return;
+		const collectVars = (node) => {
+			if (ts.isVariableStatement(node)) {
+				const blockScoped = Boolean(node.declarationList.flags &
+					(ts.NodeFlags.Let | ts.NodeFlags.Const));
+				if (!blockScoped) {
+					for (const declaration of node.declarationList.declarations) {
+						if (ts.isIdentifier(declaration.name)) {
+							declareVar(declaration.name.text, declaration);
+							noteObject(declaration);
+						}
+					}
+				}
+			}
+			ts.forEachChild(node, (child) => {
+				if (isFunctionLevel(child)) return;   // a nested function owns its vars
+				collectVars(child);
+			});
+		};
+		ts.forEachChild(scopeNode, (child) => {
+			if (isFunctionLevel(child)) return;
+			collectVars(child);
+		});
+	};
+
+	/** Give an object-literal declaration its identity before the body is walked. */
+	const noteObject = (declaration) => {
+		if (!declaration.initializer || !ts.isIdentifier(declaration.name)) return;
+		if (!ts.isObjectLiteralExpression(unwrapParens(declaration.initializer))) return;
+		declaration.__objectId = toCodePoint(declaration.name.getStart(file));
+	};
+
+	const unwrapParens = (node) => {
+		let current = node;
+		while (current && ts.isParenthesizedExpression(current)) current = current.expression;
+		return current;
+	};
+
 	const visit = (node) => {
 		const scoped = opensScope(node);
-		if (scoped) scopes.push(new Map());
+		if (scoped) {
+			scopes.push({ names: new Map(), functionLevel: isFunctionLevel(node) });
+		}
 
 		// PARAMETERS SHADOW. A parameter named `env` is a different object from an
 		// outer `env`, so it must be declared in the scope the function opens before
@@ -193,6 +246,7 @@ function analyse(path, source) {
 		if (ts.isCatchClause(node) && node.variableDeclaration) {
 			declarePattern(node.variableDeclaration.name, node.variableDeclaration);
 		}
+		if (scoped) hoist(node, isFunctionLevel(node));
 
 		if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name)) {
 			// A destructured binding introduces names too; none of them can be an
@@ -226,7 +280,8 @@ function analyse(path, source) {
 					node.__objectId = offset;
 				}
 			}
-			declare(node.name.text, node);
+			// The name is already registered by the hoisting pass; re-declaring it here
+			// would put a `var` into the block rather than its function scope.
 		}
 
 		// `delete <receiver>.NAME`. A DeleteExpression's operand is `.expression`;

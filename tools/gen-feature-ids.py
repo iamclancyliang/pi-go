@@ -48,8 +48,8 @@ from census_families import (  # noqa: E402
     union_literals,
 )
 from census_source import (  # noqa: E402
-    DEFAULT_BASELINE, Source, SourceUnavailable, SourceView, Spans, blank,
-    errors, fail, normalize,
+    DEFAULT_BASELINE, EnvFacts, MemberFacts, Source, SourceUnavailable, SourceView,
+    Spans, blank, errors, fail, normalize,
 )
 
 def emit(family: str, membership_authority: str, name_authority: str,
@@ -241,16 +241,22 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
         # exported and differ only in leading case, so one flat set cannot hold
         # them without an ID collision.
         emit("tui.export.value",
-             "`tui/src/index.ts` barrel, value exports — the package's DECLARED "
-             "public surface; the published `dist/**/*` without an `exports` map is "
-             "wider and is recorded as a packaging risk rather than as members",
+             "`tui/src/index.ts` barrel, exports whose symbol is a VALUE as the "
+             "checker resolves it. This is the package's DECLARED surface; the "
+             "published `dist/**/*` without an `exports` map is wider, and which one "
+             "is the parity denominator is an OPEN product decision",
              "the exported name, aliases resolved to what a consumer imports",
              barrel["value"])
         emit("tui.export.type",
-             "`tui/src/index.ts` barrel, type-only exports (`export type {...}` and "
-             "`export { type ... }`)",
+             "`tui/src/index.ts` barrel, exports whose symbol is a TYPE as the "
+             "checker resolves it — not as the export syntax spells it",
              "the exported name",
              barrel["type"])
+        emit("tui.export.namespace",
+             "`tui/src/index.ts` barrel, exports whose symbol is a NAMESPACE; "
+             "neither declaration space holds these",
+             "the exported name",
+             barrel["namespace"])
 
     keys = keybinding_actions(src)
     if keys is not None:
