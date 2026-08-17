@@ -1154,7 +1154,7 @@ invariant is checkable — the success line appears only on exit 0.
 
 Two of these were only reachable synthetically. The duplicate-id path cannot occur in Pi today, so
 it was exercised against a purpose-built fixture repository with two factories declaring one id;
-without that, "we would catch it" would be an assumption rather than a result.
+without that, "the control would catch it" is an assumption rather than a result.
 
 ### 22.5 Why the check mode exists
 
@@ -2294,7 +2294,7 @@ addressed by tree position rather than a linear boundary:
 
 | Field | Meaning |
 | --- | --- |
-| `targetId` / `oldLeafId` / `commonAncestorId` | where we are going, where we were, where the paths meet (the last two nullable) |
+| `targetId` / `oldLeafId` / `commonAncestorId` | the destination, the previous leaf, and where the two paths meet (the last two nullable) |
 | `entriesToSummarize` | the entries on the abandoned path |
 | `userWantsSummary` | **the user's choice, carried in the payload** — not something the extension infers |
 | `customInstructions?` | extra instructions for the summariser |
@@ -2408,10 +2408,10 @@ both entries.
 
 ## Counting discipline
 
-Four counts in this document were wrong, and **all four failed the same way: counting a convenient
-proxy instead of the authoritative source.**
+Four counts in this document have been corrected, and **all four failed the same way: a convenient
+proxy was counted instead of the authoritative source.**
 
-| Claim | Wrong | Right | Proxy I counted | Authority |
+| Claim | Wrong | Right | Proxy counted | Authority |
 | --- | --- | --- | --- | --- |
 | RPC events | 21/22 | **24** | the docs table | source union of `AgentEvent` + `AgentSessionEvent` + RPC |
 | RPC UI requests | 10 | **9** | doc headings | the `RpcExtensionUIRequest` type |
