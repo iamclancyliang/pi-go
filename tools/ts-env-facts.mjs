@@ -201,7 +201,28 @@ function analyse(path, source) {
 			return [];
 		};
 
+		// A `for` header's binding belongs to the scope the LOOP opens, not to the
+		// block containing it: `for (let env = ...)` is invisible after the loop. The
+		// parent must therefore not absorb it, so the loop's own declaration list is
+		// collected only when the loop itself is the scope being hoisted.
+		const ownList = (node) =>
+			(ts.isForStatement(node) || ts.isForOfStatement(node) ||
+				ts.isForInStatement(node)) && node.initializer &&
+			ts.isVariableDeclarationList(node.initializer);
+
+		if (ownList(scopeNode)) {
+			const list = scopeNode.initializer;
+			const blockScoped = Boolean(list.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const));
+			for (const declaration of list.declarations) {
+				if (blockScoped) {
+					declarePattern(declaration.name, declaration);
+					if (ts.isIdentifier(declaration.name)) noteObject(declaration);
+				}
+			}
+		}
+
 		ts.forEachChild(scopeNode, (child) => {
+			if (ownList(child)) return;   // the loop hoists its own header
 			for (const list of declarationLists(child)) {
 				const blockScoped = Boolean(list.flags &
 					(ts.NodeFlags.Let | ts.NodeFlags.Const));

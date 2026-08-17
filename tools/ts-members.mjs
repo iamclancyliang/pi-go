@@ -326,9 +326,21 @@ function analyse(path, program, checker) {
 	// family reading it would publish the wrong keys.
 	const topLevel = new Set(file.statements);
 
-	let enclosingBinding = null;
+	// Enclosure is a STACK, not a variable. Setting a name when a top-level binding
+	// is seen and never clearing it lets every later call in the file borrow that
+	// name, so a call in an unrelated function is reported inside the last binding
+	// walked -- and a family scoping by enclosure then absorbs it.
+	const enclosure = [];
+	// Initializers walked with a binding pushed must not be walked again by the
+	// generic recursion, or every fact inside them is reported twice.
+	const alreadyDescended = new Set();
+	const enclosingBinding = () => (enclosure.length ? enclosure[enclosure.length - 1] : null);
 
 	const visit = (node) => {
+		// An initializer already walked with its binding pushed must not be walked
+		// again, or every fact inside it is reported twice -- once scoped, once not.
+		if (alreadyDescended.has(node)) return;
+
 		const scoped = opensScope(node);
 		if (scoped) scopes.push(new Map());
 		if (scoped && node.parameters) {
@@ -359,7 +371,7 @@ function analyse(path, program, checker) {
 						callLiterals.push({
 							callee,
 							value: argument.text,
-							enclosing: enclosingBinding,
+							enclosing: enclosingBinding(),
 						});
 					}
 				}
@@ -390,9 +402,15 @@ function analyse(path, program, checker) {
 		if (ts.isVariableStatement(node) && topLevel.has(node)) {
 			for (const declaration of node.declarationList.declarations) {
 				const name = nameOf(declaration.name);
-				if (name) enclosingBinding = name;
 				if (declaration.initializer) {
 					const initializer = unwrap(declaration.initializer);
+					if (name) enclosure.push(name);
+					try {
+						ts.forEachChild(declaration.initializer, visit);
+						alreadyDescended.add(declaration.initializer);
+					} finally {
+						if (name) enclosure.pop();
+					}
 					recordKeyedLiterals(initializer, name ? [name] : []);
 					if (name && ts.isObjectLiteralExpression(initializer)) {
 						objectKeys[name] = initializer.properties

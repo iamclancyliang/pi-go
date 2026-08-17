@@ -525,6 +525,63 @@ def test_a_parenthesised_alias_chain_is_followed() -> None:
     gen.errors.clear()
 
 
+def test_a_loop_binding_is_invisible_after_the_loop() -> None:
+    """`for (let env = ...)` binds inside the loop only.
+
+    If the enclosing block absorbs the header's binding, a write after the loop is
+    attributed to the loop's fresh object and the outer object's obligation vanishes.
+    """
+    loops = dict(ENV_FIXTURE)
+    loops["packages/coding-agent/src/afterloop.ts"] = (
+        "function g() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  for (let env = {}; cond; ) {}\n"
+        "  env.PI_AFTER_LOOP = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(loops))
+    # The write belongs to the OUTER seeded object, which was never cleared.
+    assert any("PI_AFTER_LOOP" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_loop_binding_is_invisible_before_the_loop() -> None:
+    """The same at the other end: a write above the loop is not the loop's."""
+    loops = dict(ENV_FIXTURE)
+    loops["packages/coding-agent/src/beforeloop.ts"] = (
+        "function h() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  env.PI_BEFORE_LOOP = value;\n"
+        "  for (let env = {}; cond; ) {}\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(loops))
+    assert any("PI_BEFORE_LOOP" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_call_enclosure_does_not_leak_past_its_initializer() -> None:
+    """Enclosure is a stack: a later call is not inside the last binding walked.
+
+    A variable set on entering a top-level binding and never cleared makes every
+    subsequent call in the file report that binding, so a family scoping by enclosure
+    absorbs literals from unrelated code.
+    """
+    facts = _facts({"schema.ts": (
+        'export const ThinkingLevelSchema = Type.Union([Type.Literal("off")]);\n'
+        'function unrelated() { Type.Literal("phantom"); }\n')}, "schema.ts")
+    by_value = {c["value"]: c["enclosing"] for c in facts["callLiterals"]}
+    assert by_value["off"] == "ThinkingLevelSchema", by_value
+    assert by_value["phantom"] is None, by_value
+
+
+def test_call_literals_are_reported_once() -> None:
+    """Walking an initializer twice reports every fact inside it twice."""
+    facts = _facts({"once.ts": 'export const S = Type.Union([Type.Literal("a")]);\n'}, "once.ts")
+    values = [c["value"] for c in facts["callLiterals"]]
+    assert values == ["a"], values
+
+
 def test_a_for_header_declaration_is_a_binding() -> None:
     """`for (let env = ...)` declares in the scope the loop opens.
 
