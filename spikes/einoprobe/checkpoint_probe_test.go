@@ -193,10 +193,51 @@ func TestSpike3ObserveCheckpointOnGracefulStop(t *testing.T) {
 		len(exit.InterruptedItems), len(exit.UnhandledItems), exit.StopCause))
 	tr.add(layerControl, "store:finalState", fmt.Sprintf("checkpointPresent=%v", store.has(cpID)))
 
-	if rootCtxID == "" {
-		t.Fatal("no root-cause interrupt context found — step 2 would have to guess a target")
+	// Properties that must hold no matter how the stop lands. These are the
+	// real gate: if the tool never ran, or the graceful stop was never
+	// requested from inside it, the scenario did not happen at all and any
+	// conclusion drawn below would be about nothing.
+	if n := tr.countEvents("tool:invoke"); n != 1 {
+		t.Fatalf("probe_tool invoked %d times, want exactly 1", n)
 	}
-	t.Logf("root-cause interrupt context ID = %s", rootCtxID)
+	if n := tr.countEvents("Stop:graceful"); n != 1 {
+		t.Fatalf("graceful stop requested %d times from inside the tool, want exactly 1", n)
+	}
+
+	// TWO OUTCOMES ARE LEGAL HERE, and demanding only one is what made this
+	// test fail intermittently.
+	//
+	// Stop is fire-and-forget: it records a request and returns, with no
+	// barrier a caller can wait on. The framework documents that when a cancel
+	// cannot be applied to the running agent, cancel options DEGRADE to "exit
+	// the loop on entering the next iteration" — that is, the current turn runs
+	// to completion instead. Calling Stop from inside the tool therefore races
+	// the stop against the turn finishing on its own. Usually the stop wins;
+	// occasionally it does not, and the loop exits cleanly with no interrupt.
+	//
+	// Both are correct framework behaviour, so both are asserted rather than
+	// one being treated as a failure. What is NOT acceptable is passing without
+	// checking anything, so each branch carries its own assertions.
+	if rootCtxID != "" {
+		// The stop landed while the turn was still cancellable.
+		if !errors.As(exit.ExitReason, &ce) {
+			t.Errorf("a root-cause interrupt context exists but the exit reason is not a cancel error: %v", exit.ExitReason)
+		}
+		if len(exit.InterruptedItems) == 0 {
+			t.Error("a root-cause interrupt context exists but no items were recorded as interrupted")
+		}
+		t.Logf("OUTCOME: cancel applied — root-cause interrupt context ID = %s", rootCtxID)
+	} else {
+		// The stop degraded: the turn completed and the loop exited at the
+		// next iteration. There is then nothing to resume from, which is a
+		// legitimate result and not a defect.
+		if errors.As(exit.ExitReason, &ce) {
+			t.Errorf("no root-cause interrupt context, yet the exit reason is a cancel error — "+
+				"the cancel applied but produced no usable target: %v", exit.ExitReason)
+		}
+		t.Log("OUTCOME: stop degraded to exit-at-next-iteration; the turn ran to completion, " +
+			"so there is no interrupt target. Legal framework behaviour, asserted as such.")
+	}
 	t.Logf("\n=== SPIKE 3 arm C step 1 RAW TIMELINE ===\n%s", tr.render())
 	t.Logf("exit: reason=%v attempted=%v err=%v interrupted=%d unhandled=%d",
 		exit.ExitReason, exit.CheckpointAttempted, exit.CheckpointErr,
