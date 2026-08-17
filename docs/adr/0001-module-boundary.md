@@ -91,7 +91,9 @@ shape for the same problem. Note this is precedent, not proof: pigo also made ch
   better. Rejected: it reproduces a limitation rather than a design, and gives up the one place
   where the Go port is structurally stronger than the original.
 - **Multiple public packages from the start** — rejected as premature *for v0*. Package boundaries
-  are published contracts; with ADR-0002/0003 open we cannot yet know which are stable. Consistent
+  are published contracts; with ADR-0003 still open we cannot yet know which are stable. (ADR-0002
+  was accepted 2026-08-17 and does not weaken this: the extension transport, not loop ownership, is
+  what would reshape the public surface.) Consistent
   with the release scope above: promotion is expected later, gated on a real consumer, not
   forbidden.
 - **Nested Go modules per subsystem** — rejected for now (architecture §6.2). Independence is
