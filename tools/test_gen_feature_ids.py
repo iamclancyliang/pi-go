@@ -1105,6 +1105,29 @@ def _facts(files: dict[str, str], wanted: str) -> dict:
     return gen.MemberFacts(TS_REPO).of(files)[wanted]
 
 
+def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
+    """A file present in the CHECKOUT but not supplied must not resolve.
+
+    This is the discriminating case for reading the working tree: `./keys.ts` exists
+    in the Pi checkout, so a host that falls back to the file system answers from it,
+    while one that fails closed cannot. A bare specifier would not discriminate,
+    because it is classified as external before resolution matters.
+    """
+    facts = _facts({"packages/tui/src/index.ts":
+                    'export { type KeyId } from "./keys.ts";\n'},
+                   "packages/tui/src/index.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds == {"KeyId": "unknown"}, kinds
+
+
+def test_a_local_namespace_is_its_own_kind() -> None:
+    """A locally declared namespace resolves, and belongs to neither space."""
+    facts = _facts({"ns2.ts": "export namespace Space { export const inner = 1; }\n"
+                              "export const value = 2;\n"}, "ns2.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds == {"Space": "namespace", "value": "value"}, kinds
+
+
 def test_the_program_never_reads_the_working_tree() -> None:
     """A module the caller did not supply must NOT resolve from disk.
 

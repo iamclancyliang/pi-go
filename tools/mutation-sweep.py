@@ -152,9 +152,9 @@ MUTATIONS = [
              "		ts.forEachChild(scopeNode, (child) => {\n			if (ts.isVariableStatement(child)) {",
              "		ts.forEachChild(scopeNode, function walk(child) {\n			ts.forEachChild(child, walk);\n			if (ts.isVariableStatement(child)) {"),
     # The compiler-API member facts: each guarantee the checker path rests on.
-    Mutation("export kind taken from syntax, not the checker",
-             "\t\t\tconst kind = !resolved ? \"unknown\"",
-             "\t\t\tconst kind = !resolved ? \"value\""),
+    Mutation("unresolved export given a space instead of failing",
+             '\t\t\tconst kind = external ? "external"\n\t\t\t\t: !resolved ? "unknown"',
+             '\t\t\tconst kind = external ? "external"\n\t\t\t\t: !resolved ? "value"'),
     Mutation("namespace folded into another space",
              "\t\t\tconst isNamespace = Boolean(flags & ts.SymbolFlags.Namespace) &&",
              "\t\t\tconst isNamespace = false && Boolean(flags & ts.SymbolFlags.Namespace) &&"),
