@@ -580,6 +580,52 @@ def setting_keys(src: Source) -> list[str] | None:
     return keys
 
 
+def type_alias_span(view: SourceView, name: str) -> tuple[int, int] | None:
+    """The span of one `export type NAME = ...;` declaration.
+
+    The end is the first `;` at nesting depth zero, found on the structural view.
+    A line range would truncate when the file moves, and the first `;` in the raw
+    text lands inside `options: readonly { id: string; label: string }` -- which
+    is why depth is tracked rather than the first semicolon taken.
+    """
+    match = re.search(rf"export type {re.escape(name)}\s*=", view.structural)
+    if not match:
+        fail(f"cannot locate the {name} type declaration")
+        return None
+
+    depth = 0
+    for index in range(match.end(), len(view.structural)):
+        char = view.structural[index]
+        if char in "{([":
+            depth += 1
+        elif char in "})]":
+            depth -= 1
+        elif char == ";" and depth == 0:
+            return match.end(), index
+    fail(f"the {name} declaration has no terminating semicolon at depth zero")
+    return None
+
+
+def auth_literals(src: Source, name: str, keyed: bool) -> list[str] | None:
+    """Members of one auth union: either bare string literals or `type:` tags.
+
+    `AuthType` is a union OF strings, so the quotes are the anchor; `AuthPrompt`
+    and `AuthEvent` are unions of objects, so the `type` key is. Passing the
+    wrong one yields a plausible short set rather than an error, so the caller
+    states which shape it expects.
+    """
+    view = src.view("packages/ai/src/auth/types.ts")
+    span = type_alias_span(view, name)
+    if span is None:
+        return None
+    members = (view.quoted_after(r"type:\s*", *span) if keyed
+               else view.quoted_in(*span))
+    if not members:
+        fail(f"{name} yielded no members - its shape probably changed")
+        return None
+    return members
+
+
 def environment_names(src: Source) -> list[str] | None:
     """Every `PI_*` environment variable the product READS.
 
@@ -941,6 +987,18 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              f"the AppMode literal — the `--mode` flag accepts {sorted(cli_literals)}, "
              f"which map onto these rather than being members",
              modes)
+
+    for family, name, keyed in (
+        ("ai.auth.type", "AuthType", False),
+        ("ai.auth.prompt", "AuthPrompt", True),
+        ("ai.auth.event", "AuthEvent", True),
+    ):
+        members = auth_literals(src, name, keyed)
+        if members is not None:
+            emit(family,
+                 f"`ai/src/auth/types.ts` `{name}` union",
+                 "the string literal" if not keyed else "the `type` tag",
+                 members)
 
     environment = environment_names(src)
     if environment is not None:

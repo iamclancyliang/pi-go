@@ -234,6 +234,74 @@ def test_environment_fails_when_the_derivation_rule_changes() -> None:
     gen.errors.clear()
 
 
+AUTH_PATH = "packages/ai/src/auth/types.ts"
+
+# Mirrors the real shape: the object union's own `options: readonly { id: string;
+# label: string }` contains semicolons INSIDE braces, so a span that ends at the
+# first `;` truncates the union and silently returns a short set. A phantom union
+# in a template must contribute nothing.
+AUTH_FIXTURE = {
+    AUTH_PATH: '''
+export type AuthType = "api_key" | "oauth";
+
+export type AuthPrompt = { signal?: AbortSignal } & (
+\t| { type: "text"; message: string }
+\t| { type: "select"; message: string; options: readonly { id: string; label: string }[] }
+\t| { type: "hint"; placeholder: "type ; then }" }
+\t| { type: "manual_code"; message: string }
+);
+
+const docs = `export type AuthPrompt = { type: "phantom_prompt" };`;
+'''
+}
+
+
+def test_auth_type_reads_a_union_of_bare_literals() -> None:
+    assert gen.auth_literals(FakeSource(AUTH_FIXTURE), "AuthType", keyed=False) \
+        == ["api_key", "oauth"]
+
+
+def test_auth_prompt_span_survives_a_semicolon_inside_braces() -> None:
+    """The member AFTER the nested braces is the one a shallow span loses."""
+    members = gen.auth_literals(FakeSource(AUTH_FIXTURE), "AuthPrompt", keyed=True)
+    assert members == ["text", "select", "hint", "manual_code"], members
+
+
+def test_no_auth_member_from_a_template() -> None:
+    members = gen.auth_literals(FakeSource(AUTH_FIXTURE), "AuthPrompt", keyed=True)
+    assert "phantom_prompt" not in members, members
+
+
+def test_auth_fixture_really_is_adversarial() -> None:
+    """Both traps are present: a nested semicolon, and a phantom that would match."""
+    source = AUTH_FIXTURE[AUTH_PATH]
+    assert "options: readonly { id: string; label: string }" in source
+    # A brace and a semicolon INSIDE a string value: on the extraction view these
+    # act as delimiters and the span never terminates, so scanning the wrong view
+    # is detectable. Without this the two views agree and the mutation survives.
+    assert 'placeholder: "type ; then }"' in source
+    view = gen.SourceView(AUTH_PATH, source)
+    declaration = view.structural.index("export type AuthPrompt")
+    shallow = view.structural.index(";", declaration)
+    deep = gen.type_alias_span(view, "AuthPrompt")
+    assert deep is not None and deep[1] > shallow, (
+        "fixture has no nested semicolon for the depth tracking to matter")
+    assert 'type: "phantom_prompt"' in view.extraction
+
+
+def test_auth_literals_rejects_the_wrong_shape() -> None:
+    """Asking for bare literals on an object union must fail, not return a subset.
+
+    `quoted_in` over an object union would happily return `message`-adjacent
+    strings and look like a plausible member set.
+    """
+    gen.errors.clear()
+    result = gen.auth_literals(FakeSource(AUTH_FIXTURE), "NoSuchUnion", keyed=True)
+    assert result is None
+    assert any("NoSuchUnion" in message for message in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 def test_quoted_after_ignores_a_key_written_inside_a_template() -> None:
     """A template literal is the adversarial case, not an escaped string.
 
