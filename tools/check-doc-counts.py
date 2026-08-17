@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Fail when a published count disagrees with the generator or with itself.
 
-Every count in the census documents was being kept in step by hand, and three
-drifted at once: a heading said 34 memberships over 25 names while its own body
-said 35 over 26, the Chinese feature list still said 350 members, and the usage
-document still said 25 environment names. A reader cannot tell which number is
-newer, so the disagreement has to break a gate rather than be left to them.
+Counts kept in step by hand drift, and they drift independently: a heading against
+its own body, one document against another, a quoted total against the suite it
+quotes. A reader cannot tell which figure is newer, so a disagreement has to break a
+gate rather than be left to them.
 
 This checks what can be checked mechanically:
 

@@ -76,7 +76,7 @@ always get distinct IDs.
 
 Scale: 1123 `.ts` files under `packages/` at baseline.
 
-## 2. Modes — two sets, previously conflated
+## 2. Modes — two sets that are easy to conflate
 
 **What the app runs as** is `AppMode` (`core/project-trust.ts:12`): `interactive` · `print` ·
 `json` · `rpc`. **What `--mode` accepts** is a different, smaller set
@@ -409,7 +409,7 @@ Not tools, despite living in the same directory: `edit-diff.ts` (diff rendering)
 
 > **A file listing is not this set.** Counting files gives six tools "including
 > `image`". That was a file listing, not the export set — `image.ts` exports
-> `detectSupportedImageMimeType` and `encodeBase64`, never a tool. **A fourth case of the same
+> `detectSupportedImageMimeType` and `encodeBase64`, never a tool. **Another case of the same
 > counting error** (see the counting discipline section): counting files instead of the registry.
 > The finding it supported still holds and is now sharper: the two sets genuinely differ —
 > coding-agent has 7 including `find`/`grep`/`ls`; the harness has 4 and none of those three.
@@ -1145,7 +1145,7 @@ still said 25 environment names. A reader cannot tell which number is newer.
 disagreement — the summary row, every embedded block, the four environment role
 counts with their name and membership totals, the same totals as stated in both
 Chinese documents, and the test total those documents quote. It found two stale
-figures on its first run, which is the argument for having it.
+figures the moment it was applied, which is the argument for having it.
 
 The mutation total is behind `--with-sweep` because verifying it re-runs the whole
 suite once per mutation. A gate slow enough to be skipped protects nothing.
@@ -2490,7 +2490,7 @@ structure to build on than the original guarantees.
 ### 26.5 Compaction axis status
 
 Closed for both summarizers: triggers, mechanism, cut/ancestor rules, entry schemas, cumulative
-tracking and the shared output format. Previously remaining and now recorded in §25.4a/§25.4b: the `preparation` and
+tracking and the shared output format. Recorded in §25.4a/§25.4b: the `preparation` and
 `branchEntries` payload types named in the session hooks (§23.3), and the `Usage` type referenced by
 both entries.
 

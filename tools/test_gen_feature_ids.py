@@ -425,8 +425,8 @@ process.env.PI_SELF_SET = "true";
 const on = process.env.PI_COMPARED === "1";
 ''',
     # A child environment built the way bash.ts builds one: cleared, then set.
-    # The deletion must NOT read as a read, which is the defect that filed all
-    # five session variables as reads and then documented them as such.
+    # A deletion must NOT count as a read; treating it as one files every cleared
+    # name among the configuration inputs.
     "packages/coding-agent/src/child.ts": '''
 const env = { ...getShellEnv() };
 delete env.PI_EXPOSED_ONE;
@@ -465,8 +465,8 @@ def test_no_environment_name_from_a_comment_string_or_template() -> None:
 def test_a_deletion_is_not_a_read() -> None:
     """`delete env.X` must not file X as configuration input.
 
-    This is the defect that put all five session variables in the read set and
-    then described them, in prose, as reads.
+    Counting a deletion as a read puts every cleared name among the inputs, where it
+    is then described as something the product reads.
     """
     roles = gen.environment_names(EnvFakeSource(ENV_FIXTURE))
     assert "PI_EXPOSED_ONE" not in roles["input"], roles["input"]

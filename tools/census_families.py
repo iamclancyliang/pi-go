@@ -462,7 +462,7 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
     `PI_OFFLINE` is read in six places and also set on this process. Reporting
     each name under one role would hide the others.
 
-    Two further facts each cost a wrong count before this:
+    Two further facts, each of which produces a wrong count when missed:
 
     1. Not every name is a literal. `config.ts` builds two of them from the
        configurable app name (`${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`), so
