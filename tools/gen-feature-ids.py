@@ -151,18 +151,38 @@ def emit(family: str, membership_authority: str, name_authority: str,
     print("```\n")
 
 
-def balanced_argument(source: str, open_paren: int) -> str | None:
-    """Return the text inside a call's parentheses, ignoring non-code regions.
+def _scan(source: str, blank_string_contents: bool) -> str:
+    """Return source with non-code regions blanked, preserving every offset.
 
-    Counting parentheses over raw text is not enough: a parenthesis inside a
-    comment or a string literal would change the depth, letting the scan run
-    past the end of this call and read the argument of the next one. This
-    scanner skips line comments, block comments, and single-, double- and
-    backtick-quoted strings, so only parentheses in code are counted.
+    Two views are derived from this, and the distinction matters:
+
+      * `without_comments` blanks comments and regex literals but KEEPS string
+        contents, because the values being extracted -- ids, type names, command
+        literals -- live inside strings.
+      * `structural` additionally blanks string contents, and is used only where
+        a delimiter is being counted, so a parenthesis inside a string cannot
+        change a depth.
+
+    Both preserve length and newlines, so an offset found in one view addresses
+    the same character in the other.
+
+    A `/` begins a regex only where a value cannot already have ended, which is
+    the standard test applied to the previous significant character.
     """
-    depth = 0
-    index = open_paren
+    result = list(source)
     length = len(source)
+    index = 0
+
+    def blank(begin: int, finish: int) -> None:
+        for position in range(begin, min(finish, length)):
+            if result[position] != "\n":
+                result[position] = " "
+
+    def previous_significant(before: int) -> str:
+        scan = before - 1
+        while scan >= 0 and source[scan] in " \t\n\r":
+            scan -= 1
+        return source[scan] if scan >= 0 else ""
 
     while index < length:
         char = source[index]
@@ -170,33 +190,91 @@ def balanced_argument(source: str, open_paren: int) -> str | None:
 
         if pair == "//":
             newline = source.find("\n", index)
-            index = length if newline == -1 else newline + 1
-            continue
-        if pair == "/*":
-            close = source.find("*/", index + 2)
-            index = length if close == -1 else close + 2
-            continue
-        if char in "\"'`":
-            quote = char
-            index += 1
-            while index < length:
-                if source[index] == "\\":
-                    index += 2
-                    continue
-                if source[index] == quote:
-                    index += 1
-                    break
-                index += 1
+            stop = length if newline == -1 else newline
+            blank(index, stop)
+            index = stop
             continue
 
+        if pair == "/*":
+            close = source.find("*/", index + 2)
+            stop = length if close == -1 else close + 2
+            blank(index, stop)
+            index = stop
+            continue
+
+        if char in "\"'`":
+            quote = char
+            scan = index + 1
+            while scan < length:
+                if source[scan] == "\\":
+                    scan += 2
+                    continue
+                if source[scan] == quote:
+                    break
+                if source[scan] == "\n" and quote != "`":
+                    break
+                scan += 1
+            if blank_string_contents:
+                blank(index + 1, scan)
+            index = min(scan + 1, length)
+            continue
+
+        previous = previous_significant(index)
+        if char == "/" and not (previous.isalnum() or previous in ")]}_$"):
+            scan = index + 1
+            in_class = False
+            while scan < length:
+                if source[scan] == "\\":
+                    scan += 2
+                    continue
+                if source[scan] == "[":
+                    in_class = True
+                elif source[scan] == "]":
+                    in_class = False
+                elif source[scan] == "/" and not in_class:
+                    scan += 1
+                    break
+                elif source[scan] == "\n":
+                    break
+                scan += 1
+            while scan < length and source[scan].isalpha():
+                scan += 1
+            blank(index, scan)
+            index = scan
+            continue
+
+        index += 1
+
+    return "".join(result)
+
+
+def without_comments(source: str) -> str:
+    """Code and string contents, with comments and regex literals blanked."""
+    return _scan(source, blank_string_contents=False)
+
+
+def structural(source: str) -> str:
+    """Delimiters only: comments, regex literals and string contents blanked."""
+    return _scan(source, blank_string_contents=True)
+
+
+def balanced_argument(visible: str, open_paren: int) -> str | None:
+    """Return the text inside a call's parentheses.
+
+    Depth is counted on the structural view, so a parenthesis in a comment or
+    string cannot shift it, while the text returned comes from the view that
+    still contains string contents.
+    """
+    delimiters = structural(visible)
+    depth = 0
+    for index in range(open_paren, len(delimiters)):
+        char = delimiters[index]
         if char == "(":
             depth += 1
         elif char == ")":
             depth -= 1
             if depth == 0:
-                return source[open_paren + 1: index]
-        index += 1
-
+                return visible[open_paren + 1: index]
     return None
 
 
@@ -241,7 +319,7 @@ def coding_agent_tool_names(src: Source) -> list[str] | None:
     A hardcoded list can agree with the registry today and diverge silently the
     moment a tool is added upstream, because nothing would detect the drift.
     """
-    source = src.read("packages/coding-agent/src/core/tools/index.ts")
+    source = without_comments(src.read("packages/coding-agent/src/core/tools/index.ts"))
     declared = re.search(
         r"export const allToolNames: Set<ToolName> = new Set\(\[(.*?)\]\)", source, re.S
     )
@@ -263,16 +341,26 @@ def harness_tool_names(src: Source) -> list[str] | None:
     (`export const createXTool = ...`). A reference that is not exported -- an
     internal alias, for instance -- is not a member.
     """
-    source = src.read("packages/agent/src/harness/tools/index.ts")
+    source = without_comments(src.read("packages/agent/src/harness/tools/index.ts"))
 
     creators: set[str] = set()
-    for block in re.finditer(r"export\s*\{([^}]*)\}", source, re.S):
-        creators.update(re.findall(r"\bcreate([A-Z][A-Za-z]*)Tool\b", block.group(1)))
-    for declaration in re.finditer(
-        r"^export\s+(?:const|function|let|var|class)\s+create([A-Z][A-Za-z]*)Tool\b",
-        source, re.M,
-    ):
-        creators.add(declaration.group(1))
+
+    # Re-export blocks, including `as` aliases: the exported name is what counts.
+    for block in re.finditer(r"\bexport\s*\{([^}]*)\}", source, re.S):
+        for clause in block.group(1).split(","):
+            exported = clause.split(" as ")[-1].strip()
+            found = re.fullmatch(r"create([A-Z][A-Za-z]*)Tool", exported)
+            if found:
+                creators.add(found.group(1))
+
+    # Exported declarations in every form the language allows here, including
+    # `async function`, `declare`, and `default`.
+    declaration = re.compile(
+        r"\bexport\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
+        r"(?:const|let|var|function\*?|class)\s+create([A-Z][A-Za-z]*)Tool\b"
+    )
+    for match in declaration.finditer(source):
+        creators.add(match.group(1))
 
     if not creators:
         fail("no exported tool creators found in harness tools/index.ts")
@@ -292,7 +380,7 @@ def app_modes(src: Source) -> list[str] | None:
     `AppMode`, because that is the product surface; the CLI literals are its
     input mapping and are recorded as evidence rather than as members.
     """
-    source = src.read("packages/coding-agent/src/core/project-trust.ts")
+    source = without_comments(src.read("packages/coding-agent/src/core/project-trust.ts"))
     declared = re.search(r"export type AppMode = ([^;]+);", source)
     if not declared:
         fail("cannot locate the AppMode type in core/project-trust.ts")
@@ -310,7 +398,7 @@ def cli_mode_literals(src: Source) -> list[str]:
     The type and the parser must agree; if they diverge the parser is what a
     user experiences, so a mismatch is an error rather than a silent choice.
     """
-    source = src.read("packages/coding-agent/src/cli/args.ts")
+    source = without_comments(src.read("packages/coding-agent/src/cli/args.ts"))
     declared = re.search(r'export type Mode = ([^;]+);', source)
     if not declared:
         fail("cannot locate the Mode type in cli/args.ts")
@@ -336,7 +424,7 @@ def setting_keys(src: Source) -> list[str] | None:
     Authority is the interface declaration, not the settings documentation:
     the two are separate artefacts and may disagree.
     """
-    source = src.read("packages/coding-agent/src/core/settings-manager.ts")
+    source = without_comments(src.read("packages/coding-agent/src/core/settings-manager.ts"))
     match = re.search(r"^export interface Settings \{$", source, re.M)
     if not match:
         fail("cannot locate the Settings interface declaration")
@@ -362,11 +450,11 @@ def rpc_event_ids(src: Source) -> list[str] | None:
     events that are emitted but undocumented, so each source is read directly.
     """
     agent_events = union_literals(
-        src.read("packages/agent/src/types.ts"),
+        without_comments(src.read("packages/agent/src/types.ts")),
         "export type AgentEvent =", "AgentEvent",
     )
     session_events = union_literals(
-        src.read("packages/coding-agent/src/core/agent-session.ts"),
+        without_comments(src.read("packages/coding-agent/src/core/agent-session.ts")),
         "export type AgentSessionEvent =", "AgentSessionEvent",
     )
     if agent_events is None or session_events is None:
@@ -378,7 +466,9 @@ def rpc_event_ids(src: Source) -> list[str] | None:
     # `coding-agent.rpc.ui` and must not be counted again here.
     request_envelopes = {"extension_ui_request"}
 
-    rpc_mode = src.read("packages/coding-agent/src/modes/rpc/rpc-mode.ts")
+    # Discovery and parsing both run on the code-only view, so a commented-out
+    # call is not discovered at all and no literal can be read from a comment.
+    rpc_mode = without_comments(src.read("packages/coding-agent/src/modes/rpc/rpc-mode.ts"))
 
     # Every `output(` call must be classifiable, not just the ones whose object
     # literal fits on one line. A single-line pattern silently ignores
@@ -440,7 +530,7 @@ def rpc_event_ids(src: Source) -> list[str] | None:
 
 def provider_ids(src: Source) -> list[str]:
     """Registry decides membership; each provider's createProvider id names it."""
-    registry_source = src.read("packages/ai/src/providers/all.ts")
+    registry_source = without_comments(src.read("packages/ai/src/providers/all.ts"))
     symbol_to_file = dict(
         re.findall(r'import \{ (\w+Provider) \} from "\./([\w.-]+)\.ts"', registry_source)
     )
@@ -559,7 +649,7 @@ def main() -> int:
 
 def generate(src: "Source", args: argparse.Namespace) -> int:
 
-    rpc_types_source = src.read("packages/coding-agent/src/modes/rpc/rpc-types.ts")
+    rpc_types_source = without_comments(src.read("packages/coding-agent/src/modes/rpc/rpc-types.ts"))
     request_union = rpc_types_source[
         rpc_types_source.index("RpcCommand"): rpc_types_source.index("RpcResponse")
     ]
@@ -573,7 +663,7 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
          "the `method` string literal",
          re.findall(r'method: "([A-Za-z_]+)"', rpc_types_source))
 
-    protocol_schemas = src.read("packages/protocol/src/schemas.ts")
+    protocol_schemas = without_comments(src.read("packages/protocol/src/schemas.ts"))
     emit("wire.protocol.command",
          "`packages/protocol/src/schemas.ts:291-310`",
          "the command literal",
@@ -627,13 +717,13 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "the declared key name",
              settings)
 
-    slash_source = src.read("packages/coding-agent/src/core/slash-commands.ts")
+    slash_source = without_comments(src.read("packages/coding-agent/src/core/slash-commands.ts"))
     emit("coding-agent.slash",
          "`core/slash-commands.ts:20-41`",
          "the `name` field",
          re.findall(r'\{ name: "([a-z-]+)"', slash_source))
 
-    cli_args_source = src.read("packages/coding-agent/src/cli/args.ts")
+    cli_args_source = without_comments(src.read("packages/coding-agent/src/cli/args.ts"))
     emit("coding-agent.flag",
          "`cli/args.ts` `arg ===` comparisons",
          "the long-form flag literal",
