@@ -17,7 +17,7 @@ Exit status is non-zero if any mutation survives.
 """
 from __future__ import annotations
 
-import atexit, pathlib, shutil, subprocess, sys, tempfile
+import atexit, os, pathlib, shutil, subprocess, sys, tempfile
 
 from collections import namedtuple
 
@@ -153,8 +153,7 @@ MUTATIONS = [
              "\t\t\tif (ts.isCaseClause(child) || ts.isDefaultClause(child)) {\n\t\t\t\tts.forEachChild(child, (n) => scopeStatements.push(n));\n\t\t\t\treturn;"),
     # The compiler-API member facts: each guarantee the checker path rests on.
     Mutation("unresolved alias accepted instead of failing",
-             '        fail(f"the checker could not classify',
-             '        pass  # fail(f"the checker could not classify'),
+             "    if unknown:", "    if False:"),
     Mutation("synthetic alias target treated as resolved",
              "\t\t\t\t\t!(target.declarations ?? []).length) {",
              "\t\t\t\t\tfalse) {"),
@@ -184,9 +183,15 @@ MUTATIONS = [
     Mutation("for-header declarations not hoisted",
              "\t\t\tif ((ts.isForStatement(node) || ts.isForOfStatement(node) ||",
              "\t\t\tif (false && (ts.isForStatement(node) || ts.isForOfStatement(node) ||"),
+    # All three reads must fail closed together: with any one of them still
+    # refusing, resolution stops there and the other two are never reached.
     Mutation("compiler host falls back to the file system",
-             "\t\tif (isLib(fileName)) {\n\t\t\treturn original(fileName, languageVersion, onError, shouldCreate);\n\t\t}\n\t\treturn undefined;",
-             "\t\treturn original(fileName, languageVersion, onError, shouldCreate);"),
+             ("\t\tif (isLib(fileName)) {\n\t\t\treturn original(fileName, languageVersion, onError, shouldCreate);\n\t\t}\n\t\treturn undefined;",
+              "\t\tsupplied.has(fileName) || (isLib(fileName) && ts.sys.fileExists(fileName));",
+              "\t\tsupplied.get(fileName) ?? (isLib(fileName) ? ts.sys.readFile(fileName) : undefined);"),
+             ("\t\treturn original(fileName, languageVersion, onError, shouldCreate);",
+              "\t\tsupplied.has(fileName) || ts.sys.fileExists(fileName);",
+              "\t\tsupplied.get(fileName) ?? ts.sys.readFile(fileName);")),
     Mutation("initialiser not unwrapped where identity is decided",
              "\t\t\tconst initializer = unwrapParens(node.initializer);",
              "\t\t\tconst initializer = node.initializer;"),
@@ -216,7 +221,22 @@ MUTATIONS = [
     Mutation("enclosure not popped after its initializer",
              "\t\t\t\t\t\tif (name) enclosure.pop();", "\t\t\t\t\t\tif (false) enclosure.pop();"),
     Mutation("initializer walked twice",
-             "\t\tif (alreadyDescended.has(node)) return;", "\t\tif (false) return;"),
+             "\t\tif (!force && alreadyDescended.has(node)) return;",
+             "\t\tif (!force && false) return;"),
+    Mutation("re-export specifier read at a fixed depth",
+             "\t\t\t\tconst specifier = exportSpecifierOf(node);",
+             "\t\t\t\tconst specifier = node.parent?.parent?.moduleSpecifier?.text;"),
+    Mutation("unresolved star re-export ignored",
+             "    if opaque:", "    if False:"),
+    Mutation("destructured var left in the scope the walk stands in",
+             "\t\t\t\t\t} else {\n\t\t\t\t\t\t// A destructured `var` introduces names too",
+             "\t\t\t\t\t} else if (false) {\n\t\t\t\t\t\t// A destructured `var` introduces names too"),
+    Mutation("enum name not declared in its scope",
+             "\t\t\tif (ts.isEnumDeclaration(child) && child.name) declare(child.name.text, child);",
+             "\t\t\tif (false && child.name) declare(child.name.text, child);"),
+    Mutation("meanings compressed back to one dominant space",
+             "        for meaning in meanings:\n            spaces[meaning].append(export[\"name\"])",
+             "        spaces[meanings[0]].append(export[\"name\"])"),
     Mutation("initializer root skipped",
              "\t\t\t\t\t\tvisit(declaration.initializer, true);",
              "\t\t\t\t\t\tts.forEachChild(declaration.initializer, visit);"),
@@ -249,13 +269,24 @@ def run() -> str:
     return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "NO OUTPUT"
 
 
-def apply(old: str, new: str) -> tuple[str, int] | None:
-    """Put the mutation in whichever COPY contains it; None if nowhere does."""
+def apply(old: str | tuple, new: str | tuple) -> tuple[str, int] | None:
+    """Put the mutation in whichever COPY contains it; None if nowhere does.
+
+    A guarantee may be held at SEVERAL sites at once, and reverting one of them
+    changes no answer because the others still hold the line. Such an entry pairs
+    a tuple of searches with a tuple of replacements and applies them together;
+    mutated one site at a time, redundancy scores as an untested guarantee.
+    """
+    edits = list(zip(old, new)) if isinstance(old, tuple) else [(old, new)]
     for name in COPIES:
         text = ORIGINALS[name]
-        if old in text:
-            (workspace / name).write_text(text.replace(old, new))
-            return name, text.count(old)
+        if all(search in text for search, _ in edits):
+            count = 0
+            for search, replacement in edits:
+                count += text.count(search)
+                text = text.replace(search, replacement)
+            (workspace / name).write_text(text)
+            return name, count
     return None
 
 
@@ -264,6 +295,59 @@ def restore() -> None:
         if (workspace / name).read_text() != text:
             (workspace / name).write_text(text)
 
+
+def preflight() -> list[str]:
+    """Every reason a mutation could score as caught without testing anything.
+
+    Both checks run BEFORE the suite does, because both failure modes are invisible
+    in a green report:
+
+      * A search string that is no longer in the source tests nothing. The sweep
+        scores it as an escape, but only after re-running the suite once per
+        mutation -- so a rename removes coverage and the report that would say so is
+        the one nobody waits for. This cannot be a test in the graded suite: a
+        mutation removes its own search text by construction, so such a test would
+        fail under every mutation and score all of them as caught.
+      * A replacement that leaves the file unparseable is not a behaviour change.
+        The suite cannot run at all, which differs from the baseline, so the
+        mutation is credited to a control that was never reached. Commenting out
+        the first line of a multi-line call does exactly this.
+    """
+    problems = []
+    for label, old, new in MUTATIONS:
+        searches = old if isinstance(old, tuple) else (old,)
+        replacements = new if isinstance(new, tuple) else (new,)
+        for name, text in ORIGINALS.items():
+            if not all(s in text for s in searches):
+                continue
+            mutated = text
+            for search, replacement in zip(searches, replacements):
+                mutated = mutated.replace(search, replacement)
+            if name.endswith(".py"):
+                try:
+                    compile(mutated, name, "exec")
+                except SyntaxError as exc:
+                    problems.append(f"{label}: mutating {name} leaves it unparseable ({exc.msg})")
+            else:
+                with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False) as handle:
+                    handle.write(mutated)
+                checked = subprocess.run(["node", "--check", handle.name],
+                                         capture_output=True, text=True)
+                os.unlink(handle.name)
+                if checked.returncode:
+                    problems.append(f"{label}: mutating {name} leaves it unparseable")
+            break
+        else:
+            problems.append(f"{label}: search text is no longer in any source file")
+    return problems
+
+
+blocking = preflight()
+if blocking:
+    for problem in blocking:
+        print(f"  {problem}")
+    print(f"\n{len(blocking)} mutation(s) cannot test anything; nothing was run")
+    sys.exit(1)
 
 BASELINE = run()
 print(f"  {'BASELINE (must be green)':<40} -> {BASELINE}")
@@ -278,6 +362,14 @@ for label, old, new in MUTATIONS:
         continue
     name, count = placed
     result = run()
+    if "passed" not in result:
+        # No summary means the suite could not RUN -- a mutation that breaks the
+        # syntax of a file, say. Scoring that as caught credits a control that may
+        # not exist: the harness never reached the assertion.
+        print(f"  {label:<40} -> {result}  (in {name})   <-- DID NOT RUN, not a behaviour change")
+        escaped += 1
+        restore()
+        continue
     survived = (result == BASELINE)   # green means the mutation was NOT caught
     if survived:
         escaped += 1

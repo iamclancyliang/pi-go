@@ -782,15 +782,18 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
     Syntax cannot answer it: `interface Foo {}; export { Foo }` exports a TYPE
     through a clause shaped exactly like a value export.
 
-    A locally declared namespace belongs to neither space and is reported as one;
-    this barrel has none, so that set is emitted only when it is non-empty.
+    **A name appears in every space its symbol carries**, so the sets are not a
+    partition of the 133 names: 22 of them are classes, which are a value and a type
+    at once, and both memberships are real. Counting each name once under a dominant
+    space would describe a bucketing rather than the declaration spaces.
 
-    **Three exports come from a DEPENDENCY and their space is not determinable from
-    the baseline.** The barrel re-exports `Marked`, `Token` and `Tokens` from
-    `marked`, a bare module specifier, and `node_modules` is not in the pinned tree
-    at all. Reading the installed package would answer from the WORKING TREE, which
-    is not baseline evidence, so they are reported as `external` -- a fact the pinned
-    source states about itself.
+    **What the source states about its own surface outranks what the target means.**
+    The barrel re-exports `Marked`, `Token` and `Tokens` from `marked`, a bare
+    specifier whose package is absent from the pinned tree. `Token` and `Tokens` are
+    written `export { type ... }`, so the baseline states their surface directly and
+    they are types. `Marked` carries no such statement, and reading the installed
+    package would answer from the WORKING TREE rather than the baseline, so it is
+    reported as `external`.
 
     Classifying local re-exports requires the modules they come from, so the whole
     package's sources are parsed together. An alias that still cannot be resolved is
@@ -822,12 +825,23 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
         meanings = export["meanings"]
         if not meanings:
             unknown.append(export["name"])
-        elif "value" in meanings:
-            spaces["value"].append(export["name"])
-        elif "namespace" in meanings:
-            spaces["namespace"].append(export["name"])
-        else:
-            spaces["type"].append(export["name"])
+            continue
+        # A NAME OCCUPIES EVERY SPACE ITS SYMBOL CARRIES. A class is a value and a
+        # type; an enum is a value, a type and a namespace. Filing each name once
+        # under a dominant space is a bucketing of names, not a description of the
+        # declaration spaces, and it silently drops the meanings that lose.
+        for meaning in meanings:
+            spaces[meaning].append(export["name"])
+
+    # A star re-export names nothing, so an unresolved one removes members from the
+    # set with nothing left in the output to show that it did.
+    opaque = [star["specifier"] for star in facts["starExports"] if not star["resolved"]]
+    if opaque:
+        fail(f"the TUI barrel re-exports all of {sorted(opaque)} without naming any of "
+             f"it, and those modules are not in the pinned inputs - the surface is not "
+             f"enumerable from the baseline, and a set built anyway would be short by "
+             f"an unknown number of names")
+        return None
 
     if unknown:
         fail(f"the checker could not classify {sorted(unknown)} in the TUI barrel - "

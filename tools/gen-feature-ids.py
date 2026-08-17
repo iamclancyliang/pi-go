@@ -320,8 +320,9 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
 
     environment = environment_names(src)
     if environment is not None:
-        # Four families, not one: a name's ROLE is part of what it is, and the
-        # earlier single set silently filed writes and deletions as reads.
+        # Four families, not one: a name's ROLE is part of what it is. Merged into
+        # a single set, writes and deletions are published as reads -- the exact
+        # opposite of what those call sites do.
         emit("coding-agent.environment.input",
              "every `PI_*` READ across `packages/*/src` at the baseline, in all "
              "four read forms, plus the two names derived from `APP_NAME`; "

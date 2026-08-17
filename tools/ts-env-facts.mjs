@@ -40,9 +40,11 @@ const ts = loadTypeScript(process.argv[2]);
 
 
 /** Whether an expression reads an inherited environment. */
-function readsInheritedEnv(candidate) {
-	const node = candidate && ts.isParenthesizedExpression(candidate)
-		? candidate.expression : candidate;
+function readsInheritedEnv(node) {
+	// Every caller unwraps parentheses first, at any depth. Repeating one level
+	// here is a defence nothing can exercise, and it takes the teeth out of the
+	// unwrap that does the work: with both in place, dropping either one still
+	// answers `( getShellEnv() )` correctly and nothing can tell.
 	if (!node) return false;
 	if (ts.isCallExpression(node)) {
 		const callee = node.expression;
@@ -159,6 +161,19 @@ function analyse(path, source) {
 		return { seeded: false };
 	};
 
+	/** Declare every identifier a binding pattern introduces, at function level. */
+	const declareVarPattern = (name, node) => {
+		if (ts.isIdentifier(name)) {
+			declareVar(name.text, node);
+			return;
+		}
+		if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+			for (const element of name.elements) {
+				if (ts.isBindingElement(element)) declareVarPattern(element.name, node);
+			}
+		}
+	};
+
 	/** Declare every identifier a binding pattern introduces. */
 	const declarePattern = (name, node) => {
 		if (ts.isIdentifier(name)) {
@@ -248,6 +263,12 @@ function analyse(path, source) {
 			if (declarationLists(child).length) return;
 			if (ts.isFunctionDeclaration(child) && child.name) declare(child.name.text, child);
 			if (ts.isClassDeclaration(child) && child.name) declare(child.name.text, child);
+			// An enum or a namespace declares a name in the enclosing scope too;
+			// without them a reference resolves outward to something else entirely.
+			if (ts.isEnumDeclaration(child) && child.name) declare(child.name.text, child);
+			if (ts.isModuleDeclaration(child) && child.name && ts.isIdentifier(child.name)) {
+				declare(child.name.text, child);
+			}
 		});
 
 		if (!functionLevel) return;
@@ -260,6 +281,11 @@ function analyse(path, source) {
 					if (ts.isIdentifier(declaration.name)) {
 						declareVar(declaration.name.text, declaration);
 						noteObject(declaration);
+					} else {
+						// A destructured `var` introduces names too, and they hoist to
+						// the function scope like any other. Handling only identifiers
+						// leaves them registered wherever the walk happened to be.
+						declareVarPattern(declaration.name, declaration);
 					}
 				}
 			}

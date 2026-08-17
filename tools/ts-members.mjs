@@ -69,11 +69,10 @@ const ts = loadTypeScript(process.argv[2]);
  * Syntax cannot answer what a module exports. `interface Foo {}; export { Foo }`
  * exports a TYPE through a clause that looks identical to a value export, and
  * `namespace N { export const Hidden = 1 }` exports nothing from the module at all.
- * Both were reported wrongly while the classification was syntactic.
  *
- * Files the caller did not supply are not invented: an alias that cannot be
- * resolved is reported with kind `"unknown"`, so a family that needs kinds can
- * refuse to use the result rather than accept a guess.
+ * Files the caller did not supply are not invented: the host refuses every read
+ * outside them, so an alias into an unsupplied module resolves to nothing and comes
+ * back with no meanings rather than a guessed one.
  */
 function buildProgram(files, repoRoot) {
 	const options = {
@@ -132,6 +131,7 @@ function analyse(path, program, checker) {
 	requireParsed(ts, file, path);
 
 	const exports_ = [];
+	const starExports = [];
 	const typeAliasUnions = {};
 	const interfaceKeys = {};
 	const keyedLiterals = [];
@@ -154,16 +154,6 @@ function analyse(path, program, checker) {
 		node && (ts.isIdentifier(node) || ts.isStringLiteral(node)) ? node.text : undefined;
 
 	/**
-	 * The module's exports, as the CHECKER sees them.
-	 *
-	 * Syntax cannot answer what a module exports. `interface Foo {}; export { Foo }`
-	 * exports a TYPE through a clause identical in shape to a value export, and
-	 * `namespace N { export const Hidden = 1 }` exports nothing from the module.
-	 * Aliases are followed to classify the target; if the target's module was not
-	 * supplied, the kind is `"unknown"` rather than assumed, so a family that needs
-	 * kinds can refuse the result instead of accepting a guess.
-	 */
-	/**
 	 * The module's exports as THREE orthogonal facts, because they answer different
 	 * questions and compressing them loses one:
 	 *
@@ -173,14 +163,47 @@ function analyse(path, program, checker) {
 	 *                    own.
 	 *   meanings       - what the target symbol MEANS, from the checker: value, type,
 	 *                    namespace, or several at once. A class is a value and a type;
-	 *                    an enum is a value and a type; a class merged with a namespace
-	 *                    is all three. One dominant kind cannot say that.
+	 *                    an enum is a value, a type and a namespace. One dominant kind
+	 *                    cannot say that, and the meanings it drops are real.
 	 *   externalTarget - whether the declaration lives outside the pinned inputs. The
 	 *                    barrel re-exports from a bare specifier, and `node_modules` is
 	 *                    absent from the pinned commit, so the target's meanings are
 	 *                    not determinable from the baseline -- but the export surface
 	 *                    still is.
 	 */
+	/** The module a declaration is re-exported FROM, at whatever depth it sits. */
+	function exportSpecifierOf(node) {
+		for (let current = node; current && !ts.isSourceFile(current); current = current.parent) {
+			if (ts.isExportDeclaration(current) || ts.isImportDeclaration(current)) {
+				const specifier = current.moduleSpecifier;
+				return specifier && ts.isStringLiteral(specifier) ? specifier.text : undefined;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * `export * from "..."` re-exports a whole surface without naming any of it.
+	 *
+	 * When the target module is not among the supplied files the checker reports no
+	 * exports for it, so the barrel's list simply comes back short and nothing in
+	 * the output marks the gap. Recording the statement lets a family refuse a set
+	 * it cannot enumerate instead of publishing a truncated one.
+	 */
+	function recordStarExports() {
+		for (const statement of file.statements) {
+			if (!ts.isExportDeclaration(statement) || statement.exportClause) continue;
+			const specifier = statement.moduleSpecifier;
+			if (!specifier || !ts.isStringLiteral(specifier)) continue;
+			const moduleSymbol = checker.getSymbolAtLocation(specifier);
+			starExports.push({
+				specifier: specifier.text,
+				resolved: Boolean(moduleSymbol &&
+					checker.getExportsOfModule(moduleSymbol).length > 0),
+			});
+		}
+	}
+
 	function recordExports() {
 		const moduleSymbol = checker.getSymbolAtLocation(file);
 		if (!moduleSymbol) return;
@@ -195,11 +218,14 @@ function analyse(path, program, checker) {
 				return ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node);
 			});
 
-			// Whether the declaration is outside the pinned inputs.
+			// Whether the declaration is outside the pinned inputs. The clause is
+			// found by walking OUT to it: an export specifier sits two levels below
+			// its declaration, but `export * as ns from "pkg"` sits one, so a fixed
+			// depth reads past the specifier and calls a dependency local.
 			const externalTarget = declarations.some((node) => {
-				const specifier = node.parent?.parent?.moduleSpecifier;
-				return Boolean(specifier && ts.isStringLiteral(specifier) &&
-					!specifier.text.startsWith(".") && !specifier.text.startsWith("/"));
+				const specifier = exportSpecifierOf(node);
+				return Boolean(specifier && !specifier.startsWith(".") &&
+					!specifier.startsWith("/"));
 			});
 
 			let target = symbol;
@@ -455,8 +481,9 @@ function analyse(path, program, checker) {
 	};
 
 	recordExports();
+	recordStarExports();
 	visit(file);
-	return { exports: exports_, typeAliasUnions, interfaceKeys, keyedLiterals,
+	return { exports: exports_, starExports, typeAliasUnions, interfaceKeys, keyedLiterals,
 		objectKeys, comparisons, bindings, callLiterals };
 }
 

@@ -1231,6 +1231,136 @@ def test_a_bare_case_clause_declaration_is_hoisted() -> None:
     gen.errors.clear()
 
 
+def test_a_name_occupies_every_space_its_symbol_carries() -> None:
+    """A class is a value AND a type; both memberships are real.
+
+    Filing each name once under a dominant space describes a bucketing of names,
+    not the declaration spaces, and the losing meanings vanish silently.
+    """
+    result = gen.tui_barrel_names(FakeSource(dict(BARREL_FIXTURE)))
+    assert "Box" in result["value"], result["value"]
+    assert "Box" in result["type"], result["type"]
+
+
+def _write_receiver(source: str, name: str) -> str:
+    """Which object a write is attributed to: an object id, or "unresolved".
+
+    Asserted on the FACT rather than on a role set, because a write bound to the
+    wrong object and a write bound to none produce the same published roles and
+    the same silence from the guard -- the two are only distinguishable here.
+    """
+    facts = gen.EnvFacts(TS_REPO).of({"scope.ts": source})["scope.ts"]
+    for write in facts["writes"]:
+        if write["name"] == name:
+            return f"object {write['object']}"
+    if any(entry["name"] == name for entry in facts["unresolved"]):
+        return "unresolved"
+    raise AssertionError(f"{name} was not reported at all: {facts}")
+
+
+def test_a_destructured_var_hoists_like_any_other_var() -> None:
+    """`var` reaches the whole function even when it destructures.
+
+    Registered wherever the walk happened to be standing, the binding leaves a
+    later write resolving OUTWARD to the file-level object -- which was cleared --
+    so the write is reported as guarded by a delete that never touched it.
+    """
+    for inner in (
+        "function f(o) {\n  { var { env } = o; }\n  env.PI_PATTERN = value;\n}\n",
+        "function f(xs) {\n  for (var { env } of xs) {}\n  env.PI_PATTERN = value;\n}\n",
+    ):
+        source = ("const env = { ...getShellEnv() };\n"
+                  "delete env.PI_PATTERN;\n" + inner)
+        # The receiver is the inner binding, whose contents are unknowable -- not
+        # the outer object, which is the only one the file declares.
+        assert _write_receiver(source, "PI_PATTERN") == "unresolved", inner
+
+
+def test_an_enum_declares_a_name_in_its_scope() -> None:
+    """An enum binds its name like a class or a function does.
+
+    Left unregistered, a reference to it resolves outward to whatever else holds
+    that name, and the write is attributed to an object it never touched.
+    """
+    source = ("const env = { ...getShellEnv() };\n"
+              "delete env.PI_ENUM;\n"
+              "function g() {\n  enum env { a }\n  env.PI_ENUM = value;\n}\n")
+    assert _write_receiver(source, "PI_ENUM") == "unresolved"
+
+
+def test_a_namespace_keeps_its_own_space() -> None:
+    """A namespace is not a value that happens to hold things.
+
+    Folded into another space, `export namespace X` reads as an ordinary binding
+    and the namespace space silently empties.
+    """
+    result = gen.tui_barrel_names(FakeSource(dict(BARREL_FIXTURE)))
+    assert "Space" in result["namespace"], result
+
+
+def test_a_parenthesised_seed_is_still_a_seeded_map() -> None:
+    """Parentheses change grouping, not meaning.
+
+    `({ ...getShellEnv() })` inherits the ambient environment exactly as the
+    unwrapped form does; missing that reads it as a fresh override map, which owes
+    no delete, so an unguarded write passes silently.
+    """
+    for source in (
+        "const env = ({ ...getShellEnv() });\nenv.PI_PAREN = value;\n",
+        "const env = { ...(getShellEnv()) };\nenv.PI_PAREN = value;\n",
+    ):
+        facts = gen.EnvFacts(TS_REPO).of({"paren.ts": source})["paren.ts"]
+        # Asserted on `seeded` itself: an unclassifiable spread also raises an
+        # error mentioning the name, so the error alone does not distinguish
+        # "inherits the environment" from "could not tell".
+        assert [object_["seeded"] for object_ in facts["objects"]] == [True], facts
+        assert not any(object_["unresolvedSeed"] for object_ in facts["objects"]), facts
+
+
+def test_a_failing_helper_is_fatal_not_an_empty_result() -> None:
+    """A helper that exits non-zero has no answer; it does not have an empty one.
+
+    Read as "nothing found", a crashed helper removes every member it would have
+    reported and the census still exits green -- the loudest possible failure
+    becomes the quietest.
+    """
+    facts = gen.MemberFacts(TS_REPO)
+    try:
+        facts.helper.of({"broken.ts": "export const x = (;\n"})
+    except SystemExit as exit_:
+        assert exit_.code == 2, exit_.code
+    else:
+        raise AssertionError("a helper that exits non-zero was treated as a result")
+
+
+def test_a_namespace_star_export_names_its_dependency() -> None:
+    """`export * as ns from "pkg"` sits one level below its clause, not two.
+
+    Read at a fixed depth the module specifier is missed, and a name whose whole
+    meaning lives in an unavailable dependency is published as a local unknown.
+    """
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export * as marked from "outside";\n'
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert result is not None, gen.errors
+    assert "marked" in result["external"], result
+
+
+def test_a_star_export_that_cannot_be_enumerated_is_refused() -> None:
+    """`export * from "pkg"` names nothing, so an unresolved one is invisible.
+
+    The checker reports no exports for a module it cannot see, so the set comes
+    back short by an unknown number of names with nothing marking the gap.
+    """
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export * from "outside";\n'
+    gen.errors.clear()
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert result is None, result
+    assert any("outside" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
     """A file present in the CHECKOUT but not supplied must not resolve.
 
@@ -1549,6 +1679,15 @@ def main() -> int:
         except AssertionError as exc:
             failures += 1
             print(f"FAIL {name}: {exc}", file=sys.stderr)
+            continue
+        except (Exception, SystemExit) as exc:
+            # Anything else a test raises is also a failure, not a reason to stop.
+            # Aborting leaves every later test unrun and prints no summary at all,
+            # so a run whose helper crashed reports a test NAME where a count
+            # belongs -- which reads as a broken harness rather than as a control
+            # doing its job. KeyboardInterrupt still propagates.
+            failures += 1
+            print(f"FAIL {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             continue
         if gen.errors:
             failures += 1

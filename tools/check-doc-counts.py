@@ -150,7 +150,7 @@ def main() -> int:
                            capture_output=True, text=True, cwd=ROOT)
     passed = first_int(r"(\d+)/\d+ passed", tests.stdout)
     expect("feature list test count",
-           first_int(r"这 (\d+) 个测试都做过", feature_list), passed or -1)
+           first_int(r"这样的测试共 (\d+) 个", feature_list), passed or -1)
 
     # The DEFINED mutation count is checkable instantly; only proving each one is
     # caught needs the slow run. Leaving both to the slow gate meant a stale

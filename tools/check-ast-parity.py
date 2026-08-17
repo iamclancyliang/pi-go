@@ -41,22 +41,20 @@ def derive(family: str, path: str):
 
 
 def _tui_space(facts, wanted):
-    """Classify by the surface the SOURCE states, then by the target's meanings."""
+    """Every space a name occupies, from the stated surface or the target's meanings.
+
+    A name is not assigned ONE space: a class is a value and a type, and both
+    memberships are real.
+    """
     names = []
     for export in facts["exports"]:
         if export["exportTypeOnly"]:
-            space = "type"
+            spaces = {"type"}          # what the source states about its own surface
         elif export["externalTarget"]:
-            space = "external"
-        elif "value" in export["meanings"]:
-            space = "value"
-        elif "namespace" in export["meanings"]:
-            space = "namespace"
-        elif export["meanings"]:
-            space = "type"
+            spaces = {"external"}      # target outside the pinned inputs
         else:
-            space = "unknown"
-        if space == wanted:
+            spaces = set(export["meanings"]) or {"unknown"}
+        if wanted in spaces:
             names.append(export["name"])
     return names
 
