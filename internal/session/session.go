@@ -1,6 +1,6 @@
 // Package session holds conversational truth.
 //
-// The distinction this package exists to enforce (PRD §5.2) is between:
+// The distinction this package exists to enforce is between:
 //
 //   - TRUTH — the durable, append-only record of what actually happened. It is
 //     never edited, summarized, or trimmed.
@@ -10,11 +10,11 @@
 // Conflating the two is how a compaction or a steering event silently destroys
 // history. Steering in particular depends on this: eino truncates at a safe
 // point and starts a NEW execution, so continuity is reconstructed from truth
-// held here, not carried by the framework (ADR-0002).
+// held here, not carried by the framework.
 //
-// v0 is in-memory only. The storage port is v1 (architecture §1.4); this is the
-// "minimal session/context abstraction" v0 requires, and deliberately not a
-// durable backend.
+// In-memory only for now. Durable storage arrives later behind its own
+// interface; this is deliberately the minimum needed to keep truth and
+// projection apart, not a storage backend.
 package session
 
 import (
@@ -110,7 +110,7 @@ func (s *Session) Project() Projection {
 
 // UnmatchedToolCalls returns the IDs of tool calls with no recorded result.
 //
-// This is the state a cancellation can leave behind (A8, C6). It must be
+// This is the state a cancellation can leave behind. It must be
 // representable rather than treated as corruption: recovery has to know a call
 // was emitted and never settled, and must not blindly replay it.
 func (s *Session) UnmatchedToolCalls() []string {

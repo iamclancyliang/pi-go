@@ -1,12 +1,12 @@
 // Package tools defines the tool registration seam and pi-go's tool contract.
 //
-// This is the tool registration seam from architecture §1.4: owned by the
-// runtime core's layer, consumed later by the extension host and coding-agent.
-// It exists at v0 with no extension host in sight, because retrofitting a seam
-// means reworking the core (architecture §2).
+// This is where tools are registered. It exists already, with no extension
+// host to consume it yet, because adding a seam like this later means
+// reworking the core rather than extending it.
 //
-// No eino types appear here. A tool is a pi-go concept; the runtime adapts
-// these to whatever the framework wants (ADR-0001, ADR-0002).
+// No framework types appear here. A tool is a pi-go concept, and the runtime
+// adapts these to whatever the underlying framework wants — so swapping that
+// framework never reaches this package.
 package tools
 
 import (
@@ -19,9 +19,9 @@ import (
 
 // Execution describes how a tool may be scheduled relative to others.
 //
-// This is per-tool metadata, not a global mode, because acceptance scenario A5
-// requires one tool in a multi-call batch to be sequential while the others are
-// not. A single global flag cannot express that.
+// This is per-tool metadata, not a global mode: one tool in a multi-call batch
+// may need to run alone while the others do not care. A single global flag
+// cannot express that.
 type Execution struct {
 	// Sequential declares that this tool cannot tolerate running
 	// concurrently with other calls.
@@ -36,8 +36,8 @@ type Execution struct {
 	Sequential bool
 
 	// ReadOnly declares the tool performs no mutation. v0 ships read-only
-	// tools only (PRD §5.2 excludes arbitrary write/shell tools); the field
-	// exists so the pre-execution policy seam has something to decide on.
+	// tools only — no arbitrary write or shell access yet — and the field
+	// exists so the pre-execution policy check has something to decide on.
 	ReadOnly bool
 }
 

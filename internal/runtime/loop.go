@@ -1,10 +1,10 @@
 // Package runtime is pi-go's agent loop and the owner of its observable
 // contracts.
 //
-// It builds on eino's prebuilt `adk.TurnLoop` (ADR-0002, accepted 2026-08-17;
-// architecture §4 edge E2). That edge is an implementation dependency only:
-// eino types never leave this package, and the runtime reaches models solely
-// through the pi-go-owned model port (ADR-0001).
+// It builds on eino's prebuilt `adk.TurnLoop`. That dependency is an
+// implementation detail of this package: eino types never leave it, and models
+// are reached solely through pi-go's own model port. Replacing the framework
+// therefore stays a change to this package rather than to its callers.
 //
 // What eino provides: loop orchestration, cancellation, safe points,
 // checkpointing.
@@ -111,7 +111,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 // Run is a started, still-live agent run.
 //
 // It exists because steering and follow-up are defined by WHEN a message
-// arrives relative to work already in flight (C1). A one-shot call cannot
+// arrives relative to work already in flight. A one-shot call cannot
 // express "while a tool round is active", so it cannot test the contract
 // either.
 type Run struct {
@@ -147,7 +147,7 @@ func (a *Agent) failStart(err error) {
 	})
 }
 
-// Follow queues a follow-up message (C1a).
+// Follow queues a follow-up message.
 //
 // A plain Push. eino buffers it and hands it to the NEXT GenInput iteration, so
 // the in-flight turn finishes untouched and the message is consumed only once
@@ -159,7 +159,7 @@ func (r *Run) Follow(text string) error {
 	return nil
 }
 
-// Steer injects a message into the work already in flight (C1b).
+// Steer injects a message into the work already in flight.
 //
 // Push with WithPreempt(AfterToolCalls): eino lets the current tool-call round
 // finish, then truncates at that safe point and starts a NEW execution.
@@ -218,7 +218,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// The model port is wrapped in an observing decorator BEFORE it is
 	// adapted to eino. Emission therefore belongs to the runtime, and the
 	// ai package stays free of event concerns — the event observation seam
-	// is owned here (architecture §1.4).
+	// is owned here.
 	observed := &observingPort{
 		inner:     a.cfg.Model,
 		emitter:   a.emitter,
@@ -377,7 +377,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 
 	// eino executes a model swap but never interprets it, so if the model
 	// that served the call differs from the one requested, pi-go is the
-	// only thing that can say so (ADR-0002).
+	// only thing that can say so.
 	if served := resp.Model; served != "" && served != requested {
 		o.emitter.emit(events.KindModelChanged, func(e *events.Event) {
 			e.Detail.From = requested

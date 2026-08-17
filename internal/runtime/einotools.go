@@ -95,7 +95,7 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 		// A failing tool is an observable outcome. The failure text is
 		// returned to the model rather than propagated as a Go error,
 		// because aborting the run would make a recoverable tool error
-		// indistinguishable from a harness crash (A4).
+		// indistinguishable from a harness crash.
 		msg := fmt.Sprintf("error: %v", err)
 		t.finish(callID, msg, err)
 		return msg, nil

@@ -10,7 +10,7 @@ import (
 // emitter assigns sequence numbers and fans events out to observers.
 //
 // Sequence assignment is centralised here because Seq is the ordering
-// authority for every C4 assertion. If two components numbered events
+// authority for every ordering assertion. If two components numbered events
 // independently, "before" would stop meaning anything.
 type emitter struct {
 	mu        sync.Mutex

@@ -8,9 +8,9 @@ import (
 
 // Scripted is a deterministic fake model.
 //
-// PRD §5.2 requires deterministic fake-model execution for v0: the tracer
-// bullet must produce the same trace every run, or the golden trace is not a
-// gate. It replies from a fixed script, in order.
+// Model execution has to be deterministic: the trace must come out identical
+// every run, or comparing against a recorded trace proves nothing. It replies
+// from a fixed script, in order.
 //
 // It is NOT a "returns canned answers" stub in the naive sense. The spike work
 // was bitten by exactly that: a fresh scripted model on a resumed run re-issued
@@ -80,7 +80,8 @@ func (s *Scripted) Requests() []Request {
 // toolsSettled reports whether every tool call in msgs has a matching result.
 //
 // "Settled" is decided by ToolCallID pairing, not by counting or by looking at
-// roles: an unmatched call is precisely the state A8 and C6 care about.
+// roles: an unmatched call is precisely the state that matters after an
+// interrupted run.
 func toolsSettled(msgs []Message) bool {
 	pending := make(map[string]bool)
 	for _, m := range msgs {

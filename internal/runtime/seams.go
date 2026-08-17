@@ -10,10 +10,10 @@ import (
 
 // The v0 seams.
 //
-// Architecture §2 requires these to exist at v0 even though the extension host
-// that consumes them ships at v2, because retrofitting a seam means reworking
-// the core. They are deliberately small: enough to be real call sites with real
-// behaviour, not speculative extension APIs.
+// These exist now even though the extension host that will consume them ships
+// much later, because adding a seam after the fact means reworking the core.
+// They are deliberately small: real call sites with real behaviour, not
+// speculative extension APIs.
 
 // Decision is the outcome of a pre-execution policy check.
 type Decision struct {
@@ -27,10 +27,11 @@ type Decision struct {
 
 // Policy is the pre-execution policy / denial seam.
 //
-// Scope is policy and denial ONLY. Rewriting a tool's arguments is explicitly
-// NOT approved (architecture §1.4, §6.3) — an earlier draft imported that idea
-// from pigo, and it was removed because the PRD never approved it. Do not add
-// an argument-rewrite return value here without an ADR.
+// Scope is policy and denial ONLY. Rewriting a tool's arguments is deliberately
+// not offered: an earlier draft borrowed that idea from another project and it
+// was removed, because silently altering what the model asked for makes the
+// trace stop describing what actually happened. Do not add an argument-rewrite
+// return value here without an explicit decision to allow it.
 type Policy interface {
 	// Before runs before a tool executes. Returning a denial prevents
 	// execution; the call still produces observable tool_start/tool_end
@@ -72,9 +73,9 @@ var DenyWrites Policy = PolicyFunc(func(_ context.Context, c PolicyCall) Decisio
 
 // Capabilities is the host capability discovery seam.
 //
-// Architecture §2 requires degradation to be DECLARED here rather than
-// discovered by an extension calling something and failing. An extension that
-// asks "can I stream?" gets an answer; it does not get to find out by crashing.
+// Degradation is DECLARED here rather than discovered by an extension calling
+// something and failing. An extension that asks "can I stream?" gets an answer;
+// it does not get to find out by crashing.
 type Capabilities struct {
 	// Streaming reports whether the model boundary delivers incremental
 	// output. False at v0: the eino adapter delivers a single chunk, which
@@ -89,8 +90,8 @@ type Capabilities struct {
 	ToolDenial bool
 
 	// ExtensionTransport names the transport for out-of-process
-	// extensions. Empty at v0: ADR-0003 is still open, and declaring one
-	// here would pre-decide it.
+	// extensions. Empty for now: the transport has not been chosen, and
+	// naming one here would quietly decide it.
 	ExtensionTransport string
 }
 

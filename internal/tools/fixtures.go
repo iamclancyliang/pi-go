@@ -12,11 +12,11 @@ import (
 
 // The v0 fixture tools.
 //
-// PRD §5.2 requires deterministic fake-tool execution. Two are provided, with
-// DIFFERENT execution metadata, because the v0 acceptance scenarios need that
-// contrast: A5 puts one sequential tool in a multi-call batch, and A15 runs the
-// same two tools sequentially and then in parallel. One tool cannot express
-// either scenario.
+// Tool execution has to be deterministic. Two tools are provided with
+// DIFFERENT execution metadata, because the scheduling behaviour only becomes
+// observable with a contrast: one batch containing a tool that cannot run
+// concurrently, and the same pair of tools run once serialised and once in
+// parallel. A single tool cannot express either case.
 //
 // These are fixtures, not a product tool catalogue. They exist to make the
 // contracts observable.
@@ -24,13 +24,13 @@ import (
 // FileRead is a deterministic read-only tool over an in-memory file map.
 //
 // Parallel-safe: reading two different paths concurrently is exactly what the
-// parallel arm of A15 needs.
+// parallel case needs.
 type FileRead struct {
 	// Files is the fixed content this tool serves. Nil is valid and yields
 	// a not-found error for every path.
 	Files map[string]string
 
-	// Delay, if set, is how long each call takes. It exists so A15 can
+	// Delay, if set, is how long each call takes. It exists so a test can
 	// observe whether execution intervals overlap. Tests that assert
 	// ordering must not depend on it being long enough to win a race — use
 	// the emitted start/end events, not timing.
@@ -73,8 +73,8 @@ func (f *FileRead) Call(ctx context.Context, args string) (string, error) {
 	if f.Delay > 0 {
 		select {
 		case <-ctx.Done():
-			// Cancellation is an observable outcome, not a panic. A8
-			// depends on a cancelled tool still producing an event.
+			// Cancellation is an observable outcome, not a panic:
+			// a cancelled tool must still produce an event.
 			return "", ctx.Err()
 		case <-time.After(f.Delay):
 		}
@@ -96,8 +96,9 @@ func (f *FileRead) Calls() []string {
 
 // ListFiles is a deterministic read-only tool that is declared SEQUENTIAL.
 //
-// The sequential flag is the point of this fixture: it is what makes A5
-// ("one tool in a three-call batch is sequential") constructible at all.
+// The sequential flag is the point of this fixture: without a tool that
+// declares it, "one tool in a batch cannot run concurrently" is not
+// constructible at all.
 type ListFiles struct {
 	Files map[string]string
 

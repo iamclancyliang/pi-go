@@ -1,11 +1,9 @@
 // Package conformance holds the acceptance-scenario tests from
 // docs/specs/traceability-matrix.md.
 //
-// It lives INSIDE the module deliberately. ADR-0001 puts implementation under
+// It lives INSIDE the module deliberately. Implementation sits under
 // `internal/`, which no code outside this repository can import — so a
 // conformance suite in a separate module could not reach the runtime at all.
-// ADR-0001 flagged this as a real constraint on how the suite is structured;
-// this is the resolution.
 package conformance
 
 import (
@@ -21,10 +19,11 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
-// TestA1TracerBullet is acceptance scenario A1: "Fake model requests two
-// tools, then answers" -> "Complete event trace and final answer".
+// TestA1TracerBullet covers the headline scenario: a fake model requests two
+// tools, then answers, and the run produces a complete event trace plus a
+// final answer.
 //
-// It exercises the full v0 path required by PRD §5.2:
+// It exercises the full path:
 //
 //	prompt -> model boundary -> agent loop -> read-only tools -> model answer
 //	       -> event trace -> session snapshot
@@ -67,7 +66,7 @@ func TestA1TracerBullet(t *testing.T) {
 		events.KindAgentEnd,
 	)
 
-	// --- tool events pair by ID (C4b), not by position ---
+	// --- tool events pair by ID, not by position ---
 	//
 	// Asserting "a tool_start is followed by a tool_end" would pass even if
 	// the runtime paired the wrong call with the wrong result. The IDs are
@@ -164,7 +163,8 @@ func TestA1TracerBullet(t *testing.T) {
 	}
 }
 
-// TestA1NoToolsControl is the negative control for the tool half of A1.
+// TestA1NoToolsControl is the negative control for the tool half of that
+// scenario.
 //
 // Without it, "the tools ran because the model asked for them" rests only on
 // the positive case — and tools firing for some other reason would look
@@ -208,7 +208,7 @@ func TestA1NoToolsControl(t *testing.T) {
 	}
 }
 
-// runA1 executes the A1 scenario and returns everything needed to assert on it.
+// runA1 executes the scenario and returns everything needed to assert on it.
 func runA1(t *testing.T) (*runtime.Recorder, *session.Session, *ai.Scripted, *tools.FileRead, *tools.ListFiles) {
 	t.Helper()
 

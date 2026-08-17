@@ -1,13 +1,11 @@
 // Package ai owns the model port.
 //
-// Architecture §1.3: the model port is the interface `ai` defines AND
-// implements; eino model/provider types and every provider adapter are hidden
-// inside this package's implementation. The runtime core reaches models only
-// through these types.
+// This package defines AND implements the boundary the rest of pi-go uses to
+// reach a model. Framework and provider types stay hidden behind it.
 //
-// Nothing here may expose an eino type. That is what keeps ADR-0002 reversible:
-// if pi-go ever stops building on eino's loop, this port does not change
-// (ADR-0001).
+// Nothing here may expose a third-party type. That is what keeps the framework
+// choice reversible: if pi-go ever stops using its current one, this boundary
+// does not change, and neither does any caller of it.
 package ai
 
 import "context"
@@ -60,8 +58,8 @@ type Request struct {
 	// Model names the model to serve this request. Empty means the
 	// implementation's default.
 	//
-	// It is per-request because C8 requires the model to be changeable
-	// between turns without rebuilding the agent.
+	// It is per-request because the model must be changeable between turns
+	// without rebuilding the agent.
 	Model string
 
 	// ReasoningLevel is a provider-specific reasoning/thinking setting

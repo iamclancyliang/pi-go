@@ -7,21 +7,18 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// This file is the ONLY place eino's model types appear.
+// This file is the ONLY place the framework's model types appear.
 //
-// Architecture §4 registers this as edge E1: `ai` implementation → eino
-// ChatModel + provider adapters, hidden behind the model port. Nothing in this
-// file is exported in eino terms — NewEinoChatModel returns eino's interface
-// type because eino must consume it, but no pi-go caller outside the runtime's
-// composition ever names it, and it never crosses the public surface
-// (ADR-0001).
+// Everything else in this package speaks pi-go's own model port; the framework
+// and its provider adapters stay hidden behind it, and none of this reaches
+// pi-go's public surface.
 
 // NewEinoChatModel adapts a pi-go Port to the chat-model interface eino
 // consumes.
 //
-// The Port stays in charge: this is translation only. If ADR-0002 is ever
-// revisited and pi-go stops using eino's loop, this file is what gets deleted —
-// not the port, and not any caller of it.
+// The Port stays in charge: this is translation only. If pi-go ever stops
+// using this framework, this file is what gets deleted — not the port, and not
+// any caller of it.
 func NewEinoChatModel(p Port, defaultModel string) model.BaseChatModel {
 	return &einoChatModel{port: p, defaultModel: defaultModel}
 }
@@ -51,8 +48,8 @@ func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, o
 // This is deliberately NOT presented as streaming support. pi's real path is
 // streaming and it needs its own verification; emitting one chunk would make a
 // streaming test pass without proving anything about incremental delivery. v0
-// is a deterministic slice (PRD §5.2), so the honest position is that streaming
-// is unimplemented, not that it works.
+// slice is deterministic, so the honest position is that streaming is
+// unimplemented, not that it works.
 func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	msg, err := m.Generate(ctx, input, opts...)
 	if err != nil {

@@ -1,13 +1,11 @@
 // Package events defines pi-go's observable event contract.
 //
-// The event stream is a published contract (architecture §3.2): the trace a
-// client sees is the product, not a debugging aid. This package therefore has
-// zero dependencies — on eino, on the runtime core, on anything. Contract-only,
-// like telemetry in the module graph.
+// The event stream is a published contract: the trace a client sees is the
+// product, not a debugging aid. This package therefore has zero dependencies —
+// not on the framework, not on the runtime, not on anything.
 //
-// Ordering rules live with the contracts that define them (C4, C4.0, C4b in
-// docs/specs/behaviour-contracts.md). This package only names the events and
-// carries their payloads.
+// This package only names the events and carries their payloads. The rules
+// about what order they may be emitted in live with the code that emits them.
 package events
 
 import "time"
@@ -26,7 +24,7 @@ const (
 	// KindModelChanged is pi-go's own event. eino executes a per-call model
 	// swap but does not interpret it and emits nothing, so if we do not
 	// publish this, a mid-turn model change is invisible to clients and to
-	// the session record (ADR-0002).
+	// the session record.
 	KindModelChanged Kind = "model_changed"
 
 	KindToolStart Kind = "tool_start"
@@ -40,7 +38,7 @@ const (
 //
 // Seq is assigned by the emitter and is the ordering authority: consumers must
 // not infer order from Time. Wall-clock timestamps can tie or go backwards, and
-// C4 ordering assertions have to survive that.
+// ordering assertions have to survive that.
 type Event struct {
 	Seq  int       `json:"seq"`
 	Kind Kind      `json:"kind"`
@@ -97,10 +95,10 @@ type Detail struct {
 
 // Observer receives events as they are emitted.
 //
-// This is the event observation seam (architecture §1.4, owned by the runtime
-// core, consumed by the extension host, telemetry and wire adapters). It exists
-// at v0 even though its consumers ship later, because retrofitting a seam means
-// reworking the core.
+// This is how anything outside the runtime watches it work — extensions,
+// telemetry and protocol adapters all consume this. It exists already even
+// though those consumers ship later, because adding it afterwards would mean
+// reworking the runtime.
 //
 // Implementations must not block: the emitter holds the loop while calling.
 type Observer interface {

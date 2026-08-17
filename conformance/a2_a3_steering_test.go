@@ -267,7 +267,7 @@ func TestA3FollowUpQueuedDuringRun(t *testing.T) {
 	}
 
 	// A follow-up starts a NEW turn; steering does not. That difference is
-	// what makes them distinct inputs (PRD §5.2).
+	// what makes them distinct inputs.
 	if turns := countKind(rec, events.KindTurnStart); turns < 2 {
 		t.Errorf("turn_start events = %d, want >= 2 — a follow-up must open a new turn", turns)
 	}

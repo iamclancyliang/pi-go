@@ -1,7 +1,7 @@
 // Package einoprobe holds isolated eino capability spikes (issues #4, #5, #6).
 //
 // Scope guard: this directory is experiment code only. It must not become the
-// product architecture — see docs/architecture/architecture.md and the Phase 0
+// product architecture — see the design notes and the readiness
 // readiness gate. No product module may import anything from spikes/.
 package einoprobe
 

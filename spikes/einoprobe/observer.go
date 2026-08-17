@@ -2,7 +2,7 @@
 //
 // Scope guard: experiment code only. No product module may import from spikes/,
 // and spike code must not become the architecture by default — see
-// docs/architecture/architecture.md and the Phase 0 readiness gate.
+// the product design notes before any of it is reused.
 package einoprobe
 
 import (

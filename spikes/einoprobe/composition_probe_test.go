@@ -87,8 +87,8 @@ func (h *injectingHandler) WrapModel(ctx context.Context, m model.BaseModel[*sch
 }
 
 // substitutingHandler DISCARDS the model it is given and returns a fresh one.
-// This is exactly the pattern ADR-0002 flags as a risk: pi's per-turn model
-// selection replaces the model outright.
+// This is exactly the risky pattern: per-turn model selection replaces the
+// model outright.
 type substitutingHandler struct {
 	adk.BaseChatModelAgentMiddleware
 	tr      *trace
@@ -157,14 +157,14 @@ func runCompositionProbe(t *testing.T, substituterFirst bool) *trace {
 	return tr
 }
 
-// TestWrapModelCompositionOrder answers the ADR-0002 open item: when two
-// WrapModel handlers are registered and one SUBSTITUTES the model outright,
-// does it silently bypass the other?
+// TestWrapModelCompositionOrder answers: when two WrapModel handlers are
+// registered and one SUBSTITUTES the model outright, does it silently bypass
+// the other?
 //
 // Pre-registered interpretations (INTERPRETATION.md, M1-M4). The assertions
 // below encode M-outer/M-inner as observed, and will fail if eino's composition
 // order changes — which is the point: this is the regression gate for the
-// ordering risk the ADR names.
+// ordering risk described above.
 func TestWrapModelCompositionOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name             string

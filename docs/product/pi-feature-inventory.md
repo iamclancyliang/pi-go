@@ -31,7 +31,7 @@ always get distinct IDs.
 | CLI flags | `enumerated` (40) · semantics per flag `semantics-needed` |
 | Slash commands | `enumerated` (22) · semantics from descriptions |
 | Wire protocol (CBOR) | `enumerated` |
-| coding-agent RPC commands | `enumerated` (32) · per-command payloads `schema-needed` |
+| coding-agent RPC commands | `enumerated` (32, **re-derived from `RpcCommand` union**) · payloads partially typed at `rpc-types.ts:117-210` |
 | coding-agent RPC events | `enumerated` (**24**, source union; 3 are `source-only`) |
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | `enumerated` · input schemas `schema-needed` |
@@ -159,7 +159,12 @@ All from `packages/coding-agent/src/cli/args.ts`. Coverage `enumerated`; per-fla
 `packages/coding-agent/docs/rpc.md`. **A DIFFERENT SURFACE from §5 — never merge the two.**
 Per-command request/response payloads are `schema-needed`.
 
-**Commands (32)** `Kind: command` — prompting: `prompt`(43) · `steer`(80) · `follow_up`(102) ·
+**Commands — 32, RE-DERIVED FROM SOURCE.** Authority is the `RpcCommand` union,
+`packages/coding-agent/src/modes/rpc/rpc-types.ts:22-73` (responses: `:117-210`). The docs-derived
+count of 32 **matched** the source union — recorded because a confirmation is evidence too, and this
+number had been carrying the same proxy risk that made the event and provider counts wrong.
+
+`Kind: command` — prompting: `prompt`(43) · `steer`(80) · `follow_up`(102) ·
 `abort`(124) · `new_session`(137) | state: `get_state`(162) · `get_messages`(195) | model:
 `set_model`(217) · `cycle_model`(235) · `get_available_models`(259) | thinking:
 `set_thinking_level`(281) · `cycle_thinking_level`(298) · `get_available_thinking_levels`(316) |

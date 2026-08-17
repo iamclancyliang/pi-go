@@ -2,8 +2,8 @@
 // session snapshot.
 //
 // It is a composition root: it assembles modules and carries no behaviour of
-// its own (ADR-0001). Everything it prints comes from the runtime's published
-// event contract, so what a developer reads here is what a client would see.
+// its own. Everything it prints comes from the runtime's published event
+// stream, so what a developer reads here is what a client would see.
 package main
 
 import (
@@ -40,8 +40,8 @@ func run() error {
 	sess := session.New("You are pi-go.")
 
 	// The fake model is scripted: v0 is a contract tracer bullet, not a
-	// provider integration (PRD §5.2). A real provider adapter goes behind
-	// the same ai.Port without the runtime noticing.
+	// provider integration. A real provider goes behind the same model port
+	// without the runtime noticing.
 	model := &ai.Scripted{
 		Name: "fake-1",
 		Replies: []ai.Response{

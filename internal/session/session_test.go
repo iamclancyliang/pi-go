@@ -7,7 +7,7 @@ import (
 )
 
 // TestUnmatchedToolCalls covers the state a cancellation leaves behind: a tool
-// call emitted with no result recorded (C6, A8).
+// call emitted with no result recorded.
 //
 // Getting this wrong is not cosmetic. If an unmatched call is reported as
 // settled, recovery replays a tool that may have already run; if a settled call
