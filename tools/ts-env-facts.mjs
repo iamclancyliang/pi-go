@@ -40,7 +40,10 @@ const ts = loadTypeScript(process.argv[2]);
 
 
 /** Whether an expression reads an inherited environment. */
-function readsInheritedEnv(node) {
+function readsInheritedEnv(candidate) {
+	const node = candidate && ts.isParenthesizedExpression(candidate)
+		? candidate.expression : candidate;
+	if (!node) return false;
 	if (ts.isCallExpression(node)) {
 		const callee = node.expression;
 		return ts.isIdentifier(callee) && callee.text === "getShellEnv";
@@ -52,6 +55,13 @@ function readsInheritedEnv(node) {
 		ts.isIdentifier(node.expression) &&
 		node.expression.text === "process"
 	);
+}
+
+/** Look through parentheses: they are punctuation, not part of the value. */
+function unwrapParens(node) {
+	let current = node;
+	while (current && ts.isParenthesizedExpression(current)) current = current.expression;
+	return current;
 }
 
 /** `X.env` or a bare `env` identifier: the receiver of an environment access. */
@@ -117,11 +127,14 @@ function analyse(path, source) {
 		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node);
 
 	/** Does this object literal spread an inherited environment, possibly via a chain? */
-	const seededFrom = (initializer) => {
-		if (!ts.isObjectLiteralExpression(initializer)) return { seeded: false };
+	const seededFrom = (candidate) => {
+		const initializer = unwrapParens(candidate);
+		if (!initializer || !ts.isObjectLiteralExpression(initializer)) {
+			return { seeded: false };
+		}
 		for (const property of initializer.properties) {
 			if (!ts.isSpreadAssignment(property)) continue;
-			const spread = property.expression;
+			const spread = unwrapParens(property.expression);
 			if (readsInheritedEnv(spread)) return { seeded: true };
 			// A spread of anything other than a resolvable local binding cannot be
 			// classified: `{ ...execution.env }` may or may not carry an inherited
@@ -234,12 +247,6 @@ function analyse(path, source) {
 		declaration.__objectId = toCodePoint(declaration.name.getStart(file));
 	};
 
-	const unwrapParens = (node) => {
-		let current = node;
-		while (current && ts.isParenthesizedExpression(current)) current = current.expression;
-		return current;
-	};
-
 	const visit = (node) => {
 		const scoped = opensScope(node);
 		if (scoped) {
@@ -267,7 +274,10 @@ function analyse(path, source) {
 			declarePattern(node.name, node);
 		}
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-			const initializer = node.initializer;
+			// Parentheses are not part of the value. Unwrapping in one place and not
+			// the others produced an object with no record: the write still resolved to
+			// it, so the clear-before-set obligation disappeared without a trace.
+			const initializer = unwrapParens(node.initializer);
 			const offset = toCodePoint(node.name.getStart(file));
 			if (initializer) {
 				// Mark bindings that hold an inherited environment, so an object

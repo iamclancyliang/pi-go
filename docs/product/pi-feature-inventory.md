@@ -630,7 +630,7 @@ pass naive tests and silently diverge here.
 `read` truncates to a max line count **or** byte budget, whichever hits first, and instructs
 continuation via `offset` (`read.ts:218`).
 
-### 15.1 Tools contribute to the system prompt — a surface not previously recorded
+### 15.1 Tools contribute to the system prompt
 
 Every tool exports a `<name>ToolSystemPromptContribution` with a `snippet` and `guidelines`, which
 are assembled into the system prompt (`parameters`/`promptSnippet`/`promptGuidelines` fields on the
@@ -1112,8 +1112,9 @@ returns spans; `census_source.py` blanks them. Two consequences worth stating:
 * **A file that does not parse is an error, not a partial result.** Reporting spans from a file with
   syntax errors is how a subtly wrong answer would get published.
 
-It also forces the tests to be honest: a fixture must now be real TypeScript, and one earlier fixture
-(`x = return /re/;`) was not valid code at all, so it had been proving nothing.
+It also forces the tests to be honest: a fixture must be real TypeScript. A fixture like
+`x = return /re/;` is not valid code at all and proves nothing about any construct that can appear in
+the source.
 
 ⚠️ **Offsets are converted from UTF-16 code UNITS to code POINTS.** TypeScript counts code units and
 Python indexes code points, so a single astral character — one emoji anywhere in a file — shifted every

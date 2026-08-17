@@ -199,6 +199,17 @@ MUTATIONS = [
     Mutation("dependency re-export not marked external",
              "\t\t\tconst external = (symbol.declarations ?? []).some((node) => {",
              "\t\t\tconst external = false && (symbol.declarations ?? []).some((node) => {"),
+    Mutation("initialiser not unwrapped where identity is decided",
+             "\t\t\tconst initializer = unwrapParens(node.initializer);",
+             "\t\t\tconst initializer = node.initializer;"),
+    Mutation("seed test not unwrapped",
+             "\t\tconst initializer = unwrapParens(candidate);",
+             "\t\tconst initializer = candidate;"),
+    Mutation("spread operand not unwrapped",
+             "\t\t\tconst spread = unwrapParens(property.expression);",
+             "\t\t\tconst spread = property.expression;"),
+    Mutation("helper failure treated as an empty result",
+             "        if finished.returncode != 0:", "        if False:"),
 ]
 
 

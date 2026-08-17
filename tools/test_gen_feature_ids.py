@@ -482,6 +482,49 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert "PI_EXPOSED_ONE" not in roles["self"]
 
 
+def test_a_parenthesised_seed_still_carries_the_obligation() -> None:
+    """Parentheses are punctuation, not part of the value.
+
+    Unwrapping them where identity is noted but not where the seed is classified
+    produces an object with no record: the write still resolves to it, so the
+    clear-before-set obligation disappears without a trace.
+    """
+    parens = dict(ENV_FIXTURE)
+    parens["packages/coding-agent/src/paren.ts"] = (
+        "const env = ({ ...getShellEnv() });\n"
+        "env.PI_PAREN = value;\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(parens))
+    assert any("PI_PAREN" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_parenthesised_seed_can_still_be_guarded() -> None:
+    guarded = dict(ENV_FIXTURE)
+    guarded["packages/coding-agent/src/parenok.ts"] = (
+        "const env = ({ ...getShellEnv() });\n"
+        "delete env.PI_PAREN_OK;\n"
+        "env.PI_PAREN_OK = value;\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(guarded))
+    assert not gen.errors, gen.errors
+    assert "PI_PAREN_OK" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_a_parenthesised_alias_chain_is_followed() -> None:
+    """`{ ...(base) }` where `base` holds an inherited environment still seeds."""
+    chained = dict(ENV_FIXTURE)
+    chained["packages/coding-agent/src/parenchain.ts"] = (
+        "const base = (getShellEnv());\n"
+        "const env = { ...(base) };\n"
+        "env.PI_PAREN_CHAIN = value;\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(chained))
+    assert any("PI_PAREN_CHAIN" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 def test_a_for_header_declaration_is_a_binding() -> None:
     """`for (let env = ...)` declares in the scope the loop opens.
 

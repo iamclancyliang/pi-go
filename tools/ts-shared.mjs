@@ -2,10 +2,10 @@
  * The parts every TypeScript helper needs, in one place.
  *
  * Loading the compiler, refusing to work on a file that does not parse, and
- * converting UTF-16 offsets to code points were written out three times. Each is a
- * decision that must hold identically across helpers: if one of them starts
- * tolerating a parse error, or reports raw UTF-16 offsets, its facts disagree with
- * the others while looking equally authoritative.
+ * converting UTF-16 offsets to code points must hold IDENTICALLY across every
+ * helper. If one of them tolerates a parse error, or reports raw UTF-16 offsets, its
+ * facts disagree with the others while looking equally authoritative, so these live
+ * in one place rather than once per helper.
  */
 import { createRequire } from "node:module";
 

@@ -174,6 +174,43 @@ class Source:
 SPANS_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-spans.mjs")
 
 
+class Helper:
+    """One way to call a Node helper, so fail-closed behaviour cannot drift.
+
+    Each helper answers a different question, but the way it is invoked is the same
+    decision every time: the script must exist, node must run, a non-zero status is
+    fatal rather than an empty result, and the protocol is JSON in and JSON out.
+    Written per helper, those decisions drift, and a drifted one fails open.
+    """
+
+    def __init__(self, repo: str, script: str, purpose: str) -> None:
+        self.repo = repo
+        self.path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script)
+        self.purpose = purpose
+
+    def of(self, files: dict[str, str]) -> dict:
+        if not os.path.exists(self.path):
+            print(f"ERROR: missing {self.path}: {self.purpose} requires it, and the "
+                  f"fallback it replaced is what made the answer unreliable",
+                  file=sys.stderr)
+            sys.exit(2)
+        try:
+            finished = subprocess.run(
+                ["node", self.path, self.repo],
+                input=json.dumps(files), capture_output=True, text=True,
+            )
+        except OSError as exc:
+            print(f"ERROR: cannot run node for {self.path}: {exc.strerror}\n"
+                  f"       Node and the checkout's typescript are required; there is "
+                  f"deliberately no heuristic fallback.", file=sys.stderr)
+            sys.exit(2)
+        if finished.returncode != 0:
+            print(f"ERROR: {os.path.basename(self.path)} failed "
+                  f"({finished.returncode}): {finished.stderr.strip()}", file=sys.stderr)
+            sys.exit(2)
+        return json.loads(finished.stdout)
+
+
 class Spans:
     """Non-code spans for a batch of files, from TypeScript's own parser.
 
@@ -200,29 +237,10 @@ class Spans:
     """
 
     def __init__(self, repo: str) -> None:
-        self.repo = repo
+        self.helper = Helper(repo, "ts-spans.mjs", "lexical span extraction")
 
-    def of(self, files: dict[str, str]) -> dict[str, dict[str, list]]:
-        helper = SPANS_HELPER
-        if not os.path.exists(helper):
-            print(f"ERROR: missing {helper}: the lexical helper is required, and "
-                  f"falling back to a heuristic is what it replaced", file=sys.stderr)
-            sys.exit(2)
-        try:
-            finished = subprocess.run(
-                ["node", helper, self.repo],
-                input=json.dumps(files), capture_output=True, text=True,
-            )
-        except OSError as exc:
-            print(f"ERROR: cannot run node for {helper}: {exc.strerror}\n"
-                  f"       Node and the pinned checkout's typescript are required; "
-                  f"there is deliberately no heuristic fallback.", file=sys.stderr)
-            sys.exit(2)
-        if finished.returncode != 0:
-            print(f"ERROR: {SPANS_HELPER} failed ({finished.returncode}): "
-                  f"{finished.stderr.strip()}", file=sys.stderr)
-            sys.exit(2)
-        return json.loads(finished.stdout)
+    def of(self, files: dict[str, str]) -> dict:
+        return self.helper.of(files)
 
 
 class MemberFacts:
@@ -234,29 +252,11 @@ class MemberFacts:
     supplies the facts it reads.
     """
 
-    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-members.mjs")
-
     def __init__(self, repo: str) -> None:
-        self.repo = repo
+        self.helper = Helper(repo, "ts-members.mjs", "member extraction")
 
-    def of(self, files: dict[str, str]) -> dict[str, dict]:
-        if not os.path.exists(self.HELPER):
-            print(f"ERROR: missing {self.HELPER}: member extraction requires it, and "
-                  f"a pattern fallback is what it replaced", file=sys.stderr)
-            sys.exit(2)
-        try:
-            finished = subprocess.run(
-                ["node", self.HELPER, self.repo],
-                input=json.dumps(files), capture_output=True, text=True,
-            )
-        except OSError as exc:
-            print(f"ERROR: cannot run node for {self.HELPER}: {exc.strerror}", file=sys.stderr)
-            sys.exit(2)
-        if finished.returncode != 0:
-            print(f"ERROR: ts-members.mjs failed ({finished.returncode}): "
-                  f"{finished.stderr.strip()}", file=sys.stderr)
-            sys.exit(2)
-        return json.loads(finished.stdout)
+    def of(self, files: dict[str, str]) -> dict:
+        return self.helper.of(files)
 
 
 class EnvFacts:
@@ -269,30 +269,11 @@ class EnvFacts:
     cannot resolve instead of guessing.
     """
 
-    HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-env-facts.mjs")
-
     def __init__(self, repo: str) -> None:
-        self.repo = repo
+        self.helper = Helper(repo, "ts-env-facts.mjs", "environment scope identity")
 
-    def of(self, files: dict[str, str]) -> dict[str, dict]:
-        if not os.path.exists(self.HELPER):
-            print(f"ERROR: missing {self.HELPER}: environment scope identity requires "
-                  f"it, and a text-level fallback is what it replaced", file=sys.stderr)
-            sys.exit(2)
-        try:
-            finished = subprocess.run(
-                ["node", self.HELPER, self.repo],
-                input=json.dumps(files), capture_output=True, text=True,
-            )
-        except OSError as exc:
-            print(f"ERROR: cannot run node for {self.HELPER}: {exc.strerror}",
-                  file=sys.stderr)
-            sys.exit(2)
-        if finished.returncode != 0:
-            print(f"ERROR: ts-env-facts.mjs failed ({finished.returncode}): "
-                  f"{finished.stderr.strip()}", file=sys.stderr)
-            sys.exit(2)
-        return json.loads(finished.stdout)
+    def of(self, files: dict[str, str]) -> dict:
+        return self.helper.of(files)
 
 
 def blank(source: str, spans: list) -> str:

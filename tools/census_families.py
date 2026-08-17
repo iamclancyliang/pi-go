@@ -437,11 +437,10 @@ def is_process_env(receiver: str) -> bool:
 def environment_names(src: Source) -> dict[str, list[str]] | None:
     """`PI_*` environment variables, separated BY ROLE.
 
-    One set covering "environment variables" was wrong, and wrong in a way that
-    produced a confident set and a false explanation. `delete env.PI_SESSION_ID`
-    matched the read pattern, so the five session variables entered the set as
-    reads and were then DOCUMENTED as reads -- when in fact the product writes
-    them for child processes and clears them first. FOUR roles, four
+    One set covering "environment variables" produces a confident set with a false
+    explanation. `delete env.PI_SESSION_ID` matches a read pattern, so the five
+    session variables land among the reads and get described as reads, when the
+    product writes them for child processes and clears them first. FOUR roles, four
     authorities, stated separately:
 
       * `input`   -- read as configuration: `process.env.X`, `process.env["X"]`,
