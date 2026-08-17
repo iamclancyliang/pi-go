@@ -5,9 +5,9 @@ A green test suite proves nothing on its own -- it may be testing the wrong
 thing. Each entry breaks the extractor in a way that a real mistake would, and
 the suite must go red. Two lessons are baked in:
 
-  * The baseline is MEASURED, not hardcoded. An earlier version compared against
-    a literal "16/16", so once the suite grew, green runs were counted as caught
-    and the sweep reported success it had not observed.
+  * The baseline is MEASURED, not hardcoded. Comparing against a literal count
+    means every green run is scored as "caught" as soon as the suite grows, so the
+    sweep reports a success it never observed.
   * A mutation must model the actual failure. "Anchor `on(` to a line start" left
     the suite green, because the wrapped overloads do start a line -- what
     truncates upstream is reading the event literal from the same line.
@@ -17,12 +17,7 @@ Exit status is non-zero if any mutation survives.
 """
 from __future__ import annotations
 
-import pathlib, shutil, subprocess, sys
-
-TARGETS = [pathlib.Path("tools/ts-spans.mjs"),
-           pathlib.Path("tools/census_source.py"),
-           pathlib.Path("tools/census_families.py"),
-           pathlib.Path("tools/gen-feature-ids.py")]
+import atexit, pathlib, shutil, subprocess, sys, tempfile
 
 MUTATIONS = [
     ("discover reads extraction",
@@ -118,37 +113,47 @@ MUTATIONS = [
      '+ [])'),
 ]
 
+
+# The sweep NEVER writes to a tracked file. Mutating in place and restoring
+# afterwards leaves a mutated extractor on disk whenever the process is
+# interrupted, and no handler is guaranteed to run: a verification tool must not be
+# able to damage the thing it verifies. Every write goes to a throwaway copy, so an
+# interrupt at any moment leaves the repository untouched by construction rather
+# than by cleanup.
+TOOLS = pathlib.Path("tools")
+COPIES = ["census_source.py", "census_families.py", "gen-feature-ids.py",
+          "ts-spans.mjs", "test_gen_feature_ids.py"]
+
+workspace = pathlib.Path(tempfile.mkdtemp(prefix="census-mutation-")) / "tools"
+workspace.mkdir(parents=True)
+for name in COPIES:
+    shutil.copy(TOOLS / name, workspace / name)
+ORIGINALS = {name: (TOOLS / name).read_text() for name in COPIES}
+atexit.register(lambda: shutil.rmtree(workspace.parent, ignore_errors=True))
+
+
 def run() -> str:
-    shutil.rmtree("tools/__pycache__", ignore_errors=True)
-    out = subprocess.run([sys.executable, "-B", "tools/test_gen_feature_ids.py"],
+    shutil.rmtree(workspace / "__pycache__", ignore_errors=True)
+    out = subprocess.run([sys.executable, "-B", str(workspace / "test_gen_feature_ids.py")],
                          capture_output=True, text=True)
     return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "NO OUTPUT"
 
 
-ORIGINALS = {path: path.read_text() for path in TARGETS}
-
-
-def apply(old: str, new: str) -> tuple[pathlib.Path, int] | None:
-    """Put the mutation in whichever file contains it; None if nowhere does."""
-    for path in TARGETS:
-        text = ORIGINALS[path]
+def apply(old: str, new: str) -> tuple[str, int] | None:
+    """Put the mutation in whichever COPY contains it; None if nowhere does."""
+    for name in COPIES:
+        text = ORIGINALS[name]
         if old in text:
-            path.write_text(text.replace(old, new))
-            return path, text.count(old)
+            (workspace / name).write_text(text.replace(old, new))
+            return name, text.count(old)
     return None
 
 
 def restore() -> None:
-    for path, text in ORIGINALS.items():
-        if path.read_text() != text:
-            path.write_text(text)
+    for name, text in ORIGINALS.items():
+        if (workspace / name).read_text() != text:
+            (workspace / name).write_text(text)
 
-
-import atexit
-
-# A crash mid-run must not leave a mutated tool on disk. Registered before the
-# first mutation so it holds however the process exits.
-atexit.register(restore)
 
 BASELINE = run()
 print(f"  {'BASELINE (must be green)':<40} -> {BASELINE}")
@@ -161,13 +166,13 @@ for label, old, new in MUTATIONS:
         print(f"  {label:<40} -> TARGET MISSING")
         escaped += 1
         continue
-    path, count = placed
+    name, count = placed
     result = run()
     survived = (result == BASELINE)   # green means the mutation was NOT caught
     if survived:
         escaped += 1
     print(f"  {label:<40} -> {result}  ({count} site{'s' if count > 1 else ''} "
-          f"in {path.name}){'   <-- NOT CAUGHT' if survived else ''}")
+          f"in {name}){'   <-- NOT CAUGHT' if survived else ''}")
     restore()
 
 print(f"  {'RESTORED':<40} -> {run()}")

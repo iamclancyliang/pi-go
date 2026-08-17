@@ -303,7 +303,7 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
 
     environment = environment_names(src)
     if environment is not None:
-        # Three families, not one: a name's ROLE is part of what it is, and the
+        # Four families, not one: a name's ROLE is part of what it is, and the
         # earlier single set silently filed writes and deletions as reads.
         emit("coding-agent.environment.input",
              "every `PI_*` READ across `packages/*/src` at the baseline, in all "

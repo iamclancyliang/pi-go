@@ -340,7 +340,7 @@ log in", which the file listing invites you to answer by counting modules.
 **A per-provider `select` option id is NOT an auth method.** `amazon-bedrock` prompts with
 `bearer-token` / `aws-profile` / `credential-chain`, and `google-vertex` with `api-key`; these are
 options inside one provider's own login flow, not a taxonomy. Treating them as members is what made
-an earlier provider extraction report `api-key` and `bearer-token` as providers — the same
+a provider extraction report `api-key` and `bearer-token` as providers — the same
 authority-versus-appearance error, one layer down.
 
 **Semantics that a port gets wrong silently:**
@@ -407,7 +407,7 @@ Not tools, despite living in the same directory: `edit-diff.ts` (diff rendering)
 **`image.ts` (image MIME sniffing + base64, used by `read`)** · `file-mutation-queue.ts` ·
 `path-utils.ts` · `tool-context.ts`.
 
-> **Correction to an earlier tranche.** This set was previously listed as six tools "including
+> **A file listing is not this set.** Counting files gives six tools "including
 > `image`". That was a file listing, not the export set — `image.ts` exports
 > `detectSupportedImageMimeType` and `encodeBase64`, never a tool. **Fourth instance of the same
 > counting error** (see the counting discipline section): counting files instead of the registry.
@@ -1066,15 +1066,16 @@ zero, quietly defeating the pin.
 
 ### 22.3a Lexing is delegated to TypeScript's own parser
 
-Deciding what in a `.ts` file is code cannot be done with a scanner, and two attempts proved it rather
-than argued it:
+Deciding what in a `.ts` file is code cannot be done with a scanner, because whether `/` opens a
+regular expression or divides depends on grammatical position:
 
-| Attempt | Rule | What it got wrong |
-| --- | --- | --- |
-| first | previous **character** | `return /output({ type: "x" })/;` read as division, the regex stayed visible, and its contents produced an event. **18 such sites in the pinned source** |
-| second | previous **token** | `if (ready) /export const createGhostTool/.test(s);` still did, because `)` ends a value when it closes a call and does not when it closes an if-head |
+| Rule a scanner can apply | What it classifies wrongly |
+| --- | --- |
+| previous **character** | `return /output({ type: "x" })/;` reads as division, the regex stays visible, and its contents become an event. **18 such sites exist in the pinned source** |
+| previous **token** | `if (ready) /export const createGhostTool/.test(s);` still does, because `)` ends a value when it closes a call and does not when it closes an if-head |
 
-The distinction is grammatical, so `tools/ts-spans.mjs` asks the parser that defines the grammar. It
+Both classifications are wrong in the direction that INVENTS members, and no amount of local context
+settles the second, so `tools/ts-spans.mjs` asks the parser that defines the grammar. It
 walks the AST for regular-expression, string and template nodes, takes comments from trivia, and
 returns spans; `census_source.py` blanks them. Two consequences worth stating:
 

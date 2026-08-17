@@ -257,9 +257,9 @@ def union_discriminants(src: Source, path: str, union: str) -> list[str] | None:
 
     kinds: list[str] = []
     for name in names:
-        # Members may be generic and may extend a base; requiring neither found
-        # five of nine in one union and the tool refused to emit, which is how
-        # this surfaced.
+        # A member may be generic and may extend a base. A pattern requiring a
+        # plain `interface X {` matches only some members, and the count check
+        # then rejects the run rather than emitting a short set.
         declaration = re.search(
             rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"
             rf"(?:extends\s+[\w<>, ]+?\s*)?\{{$",
@@ -844,9 +844,10 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
     the collision guard rejected the run rather than silently dropping one. The
     split is not a workaround for the naming scheme, it is what the language says.
 
-    Three export FORMS all count, and missing one cost a member: `export { X }`,
-    `export { type X }`, and `export type { X }`. The last is a whole-clause type
-    export -- omitting it made this set 132 where the barrel names 133.
+    Three export FORMS all count: `export { X }`, `export { type X }`, and
+    `export type { X }`. The last is a whole-clause type export; a pattern that
+    requires the brace immediately after `export` silently omits every member
+    declared that way, yielding 132 against a barrel that names 133.
     """
     view = src.view("packages/tui/src/index.ts")
 

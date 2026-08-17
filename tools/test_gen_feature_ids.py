@@ -18,23 +18,15 @@ import sys
 import types
 from pathlib import Path
 
-# The extractor is COMPILED FROM SOURCE TEXT here rather than imported, and that
-# is deliberate. Python validates cached bytecode by mtime-and-size, so an edit
-# that preserves file size -- swapping `structural` for `extraction`, say, which
-# is exactly the mutation these tests exist to catch -- can be served from a
-# stale `.pyc` and the tests then grade code that is not on disk. That happened,
-# and it made a mutation look reverted when it was not. Compiling the text makes
-# the file on disk the only thing under test.
+# The tools are COMPILED FROM SOURCE TEXT rather than imported, and bytecode
+# writing is disabled. Python validates cached bytecode by mtime-and-size, so an
+# edit that preserves file size -- swapping `structural` for `extraction`, exactly
+# what these tests exist to catch -- can be served from a stale `.pyc`. The suite
+# would then grade code that is not on disk, and a live mutation would read as
+# reverted. Compiling the text makes the files on disk the only thing under test.
 _TOOLS = Path(__file__).parent
 sys.path.insert(0, str(_TOOLS))
 
-# The entry point is compiled from source text rather than imported: Python
-# validates cached bytecode by mtime-and-size, so an edit that preserves size --
-# swapping `structural` for `extraction`, exactly what these tests exist to catch
-# -- can be served from a stale `.pyc`, and the suite then grades code that is not
-# on disk. That happened. Compiling makes the files on disk the only thing tested.
-# The sibling modules are imported normally but with bytecode writing disabled for
-# the same reason.
 sys.dont_write_bytecode = True
 _PATH = _TOOLS / "gen-feature-ids.py"
 gen = types.ModuleType("gen_feature_ids")
@@ -78,9 +70,8 @@ def test_regex_in_expression_position_is_blanked() -> None:
     """A regex is blanked wherever the grammar allows one.
 
     The fixtures are REAL code for each position, which the parser now enforces:
-    the earlier version of this test used `x = return /re/;`, which is not valid
-    TypeScript at all, so it was proving nothing about a construct that could
-    appear in the source.
+    A fixture like `x = return /re/;` is not valid TypeScript at all, so it proves
+    nothing about any construct that can appear in the source.
     """
     snippets = [
         "function f() { return /export const createGhostTool/.source; }",
@@ -641,9 +632,9 @@ def test_thinking_levels_fail_when_declarations_diverge() -> None:
 
 ENTRY_PATH = "packages/coding-agent/src/core/session-manager.ts"
 
-# The two forms that broke the first attempt: a GENERIC member and one that
-# EXTENDS a base. Requiring plain `interface X {` found five of nine members and
-# the tool refused to emit rather than publishing a short set.
+# Two member forms a naive pattern misses: a GENERIC member and one that EXTENDS a
+# base. Requiring plain `interface X {` matches neither, and the count check then
+# refuses to emit rather than publishing a short set.
 ENTRY_FIXTURE = {
     ENTRY_PATH: "\n".join([
         "export type SessionEntry =",
@@ -715,7 +706,7 @@ def test_barrel_separates_the_two_declaration_spaces() -> None:
     """A value and a type differing only in leading case must both survive.
 
     In one flat set they normalise to the same ID and the collision guard rejects
-    the run, which is how this surfaced.
+    the run rather than dropping one silently.
     """
     barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
     assert "fuzzyMatch" in barrel["value"] and "FuzzyMatch" in barrel["type"]

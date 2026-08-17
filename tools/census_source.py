@@ -151,12 +151,18 @@ SPANS_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts-span
 class Spans:
     """Non-code spans for a batch of files, from TypeScript's own parser.
 
-    A hand-written scanner cannot decide `/` reliably, and two attempts proved it:
-    the first used the previous character, so `return /.../` read as division; the
-    second used the previous token, so `if (ready) /.../.test(s)` still did,
-    because `)` ends a value when it closes a call and does not when it closes an
-    if-head. That distinction is grammatical, so it is delegated to the parser
-    that defines the grammar. `tools/ts-spans.mjs` walks the AST and reports:
+    Whether `/` opens a regular expression or divides is decided by grammatical
+    position, not by the preceding character or token. `)` ends a value when it
+    closes a call and does not when it closes an if-head, so both of these are
+    legal and differ:
+
+        if (ready) /pattern/.test(s);     // regex
+        const r = compute(x) / 2;         // division
+
+    A scanner that answers this from local context leaves regular expressions
+    unblanked and their contents become members. The decision therefore belongs to
+    the parser that defines the grammar; `tools/ts-spans.mjs` walks the AST and
+    reports:
 
       * `dead` - comments and regular expression literals;
       * `text` - string bodies and template TEXT, delimiters EXCLUDED so the
