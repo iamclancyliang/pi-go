@@ -19,43 +19,50 @@ from __future__ import annotations
 
 import atexit, pathlib, shutil, subprocess, sys, tempfile
 
+from collections import namedtuple
+
+# A bare triple leaves a reader counting positions to tell the searched text from
+# the replacement. Naming the fields makes each entry read as what it claims: this
+# label describes breaking `find` into `replace`.
+Mutation = namedtuple("Mutation", "label find replace")
+
 MUTATIONS = [
-    ("discover reads extraction",
+    Mutation("discover reads extraction",
      "pattern, self.structural))", "pattern, self.extraction))"),
-    ("quoted_after anchors on extraction",
+    Mutation("quoted_after anchors on extraction",
      "self.structural[begin:stop]", "self.extraction[begin:stop]"),
-    ("quoted_in walks extraction",
+    Mutation("quoted_in walks extraction",
      "char = self.structural[index]", "char = self.extraction[index]"),
-    ("alias falls back to exact ' as '",
+    Mutation("alias falls back to exact ' as '",
      "aliased = alias.search(clause)", "aliased = None"),
-    ("derivation-change guard removed",
+    Mutation("derivation-change guard removed",
      "if len(derived) != 2:", "if len(derived) < 0:"),
     # These two target the READ PATTERNS, not the docstring that quotes them.
     # The docstring writes the lookahead with a doubled backslash, so anchoring
     # on the single-backslash form reaches only the code.
-    ("assignment lookahead dropped",
+    Mutation("assignment lookahead dropped",
      r'(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"', r'(PI_[A-Z0-9_]+)\b"'),
-    ("lookahead too broad, drops comparisons",
+    Mutation("lookahead too broad, drops comparisons",
      r'\b(?!\s*=[^=])"', r'\b(?!\s*=)"'),
-    ("type span ends at the first semicolon",
+    Mutation("type span ends at the first semicolon",
      'elif char == ";" and depth == 0:', 'elif char == ";":'),
-    ("type span scans the extraction view",
+    Mutation("type span scans the extraction view",
      "char = view.structural[index]", "char = view.extraction[index]"),
     # The real upstream-shaped mistake is reading the event literal from the SAME
     # LINE as `on(`. The wrapped overloads still start a line, so anchoring `on(`
     # is not what truncates -- requiring the literal beside it is. Upstream that
     # drops the three cancellable hooks.
-    ("hook literal read from one line only",
+    Mutation("hook literal read from one line only",
      "open_paren + 1 + len(argument))",
      'view.structural.find("\\n", open_paren))'),
     # NOT tested: "read the payload union instead". Widening the scan range still
     # contains the on() overloads, so behaviour does not change and no fixture
     # could detect it. The 25-vs-33 confusion is a prose error, not a code path.
-    ("thinking-level agreement check removed",
+    Mutation("thinking-level agreement check removed",
      "if not (sorted(set(from_agent)) == sorted(set(from_ai)) == sorted(set(from_protocol))):",
      "if False:"),
     # The two lexical defects, one in each direction.
-    ("union member pattern rejects generics and extends",
+    Mutation("union member pattern rejects generics and extends",
      r'rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"',
      r'rf"^export interface {re.escape(name)}\s*"'),
     # The parser-backed lexing: dropping either span kind must be caught.
@@ -63,28 +70,28 @@ MUTATIONS = [
     # of that view happens at a span already located on the structural view, where
     # those regions are blanked, so no extractor can reach into one. There is no
     # observable behaviour to catch, and a control that cannot fail is decoration.
-    ("string/template text not blanked structurally",
+    Mutation("string/template text not blanked structurally",
      'self.structural = blank(source, spans["dead"] + spans["text"])',
      'self.structural = blank(source, spans["dead"])'),
     # The environment rules.
     # The TUI registry/export sets.
-    ("barrel misses `export type {...}`",
+    Mutation("barrel misses `export type {...}`",
      r'r"\bexport\s+(type\s+)?\{([^}]*)\}"',
      r'r"\bexport\s*\{([^}]*)\}"'),
-    ("barrel flattens the two declaration spaces",
+    Mutation("barrel flattens the two declaration spaces",
      "(types if (whole_clause_is_type or per_clause_type) else values).append(exported)",
      "values.append(exported)"),
-    ("barrel accepts a wildcard re-export",
+    Mutation("barrel accepts a wildcard re-export",
      'if re.search(r"^export \\*", view.structural, re.M):',
      'if False:'),
-    ("keybinding authorities not compared",
+    Mutation("keybinding authorities not compared",
      "if sorted(set(from_interface)) != sorted(set(from_table)):",
      "if False:"),
     # The offset conversion and the per-receiver pairing.
-    ("utf16 offsets emitted unconverted",
+    Mutation("utf16 offsets emitted unconverted",
      "\t\tif (!/[\\uD800-\\uDBFF]/.test(source)) return spans; // BMP only: identical",
      "\t\treturn spans;"),
-    ("env accesses resolved by name, not by scope",
+    Mutation("env accesses resolved by name, not by scope",
      "\t\t\tconst binding = resolve(receiver.text);",
      "\t\t\tconst binding = [...objects.keys()].length ? { __objectId: [...objects.keys()][0] } : undefined;"),
 ]
