@@ -1,11 +1,21 @@
 # pi-go parity matrix
 
-**Status:** approved source denominator · inventory expansion in progress
+**Status:** implementation hold · complete feature-level inventory required before work resumes
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
 
+**Inventory authority:** @qy-liang decided on 2026-08-17 that the top-level denominator is not
+enough to continue implementation. Product implementation remains paused until the raw census,
+normalized matrix and source-coverage ledger satisfy every check in
+`docs/product/feature-inventory-schema.md`, followed by explicit owner approval.
+
 ## How to use this matrix
+
+`docs/product/pi-feature-inventory.md` is the raw primary-source census. This file normalizes that
+census into product accounting; it must not invent missing Pi semantics or treat a package-level row
+as feature-level coverage. Stable IDs, required fields and completeness checks are defined in
+`docs/product/feature-inventory-schema.md`.
 
 Every Pi feature or engineering surface must have:
 
@@ -34,8 +44,10 @@ evidence; it cannot replace `B`, `W`, `R`, or `I` for a Pi surface.
 
 ## Initial inventory
 
-This is the top-level denominator, not yet the feature-by-feature completion claim. Architecture and
-implementation work must expand each row before closing it.
+This is the approved top-level denominator, not the feature-by-feature completion claim. It remains
+as an index while the raw census is normalized into stable feature IDs. No row below is evidence
+that its area is completely inventoried unless the source-coverage ledger and the corresponding
+feature records are complete.
 
 | Area | Pi source surface | Class | Target | Initial acceptance boundary | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -130,7 +142,7 @@ real Pi SDK and adapts selected tools/commands onto pigo's JSON-RPC plugin proto
 the feasibility of a TS bridge candidate for ADR-0003, while its inert/no-op session, model, UI,
 provider, and widget actions demonstrate why capability degradation must remain explicit.
 
-## Next expansion order
+## Inventory completion order
 
 1. Pin the upstream baseline and inventory every documented coding-agent feature/command.
 2. Expand `packages/agent` into the existing C1-C8 contract rows.
@@ -139,3 +151,7 @@ provider, and widget actions demonstrate why capability degradation must remain 
 5. Inventory `pi-ai` provider/auth/usage surfaces separately from Eino components.
 6. Inventory TUI primitives and user-visible interaction behaviours.
 7. Inventory RPC/protocol/client/server wire and event contracts.
+
+This order organizes the work; it does not permit implementation to restart area by area. The hold
+is lifted only after the whole inventory passes C0–C8 and the repository owner explicitly approves
+reopening implementation.

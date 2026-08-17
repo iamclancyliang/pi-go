@@ -96,6 +96,12 @@ consumer of architectural lessons, not a reason to add NAS-specific features to 
 
 ### 5.1 Phase 0 — implementation readiness
 
+**Gate reopened 2026-08-17.** The repository owner ruled that the approved top-level parity
+denominator does not satisfy the “complete Pi feature/parity inventory” deliverable below. Product
+implementation is paused until the feature-level census, normalized parity records and
+source-coverage ledger pass `docs/product/feature-inventory-schema.md` C0-C8 and the owner
+explicitly reopens implementation.
+
 No production feature implementation is released from this phase. Its deliverables are:
 
 - this PRD, reviewed against the intended product;

@@ -56,10 +56,34 @@ and other automation names or emails — must not appear as the author or commit
 Do not rewrite already-pushed history solely to change old identities unless the repository owner
 explicitly requests it.
 
-## Repository layout
+## Public code and commit language
 
-Phase 0 is complete (PRD §5.1: PRD, architecture, parity denominator, ADR-0001, ADR-0002,
-traceability matrix, pinned toolchain/eino baselines), so v0 implementation is released.
+Code comments and docstrings must explain behavior and rationale in place. Do not make readers
+decode internal collaboration context such as agent names, task/review narratives, acceptance IDs,
+ADR/PRD labels, or document section markers. Replace those references with the actual constraint or
+tradeoff the code must preserve.
+
+Commit subjects and bodies follow the same rule: describe the change, its user/engineering reason,
+and verification without agent attribution, task routing, review dialogue, or internal planning
+document references. Formal documents under `docs/` may cite and cross-reference ADRs, the PRD and
+their sections because those references are part of the documents' purpose.
+
+## Implementation hold
+
+**Product implementation is paused by the repository owner as of 2026-08-17.** The approved Pi
+baseline has a top-level parity denominator, but not yet a complete feature-level inventory. Work
+may continue on the pinned-source census, feature schema, parity/traceability documents, omission
+audits, read-only review, and repository maintenance required for that inventory. Preserve existing
+product-code WIP without extending or publishing it.
+
+Before inventory work or any request to resume implementation, read
+`docs/product/feature-inventory-schema.md`. Implementation resumes only after its C0-C8 checks pass
+for the whole baseline and the repository owner explicitly lifts this hold.
+
+The current `main` includes pre-hold A1-A3 tracer work with open NO-GO review findings. Its presence
+is not evidence that a contract, module boundary or release gate is accepted.
+
+## Repository layout
 
 ```
 internal/     product code — every module from architecture §1
