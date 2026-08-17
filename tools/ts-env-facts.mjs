@@ -130,7 +130,9 @@ function analyse(path, source) {
 		ts.isFunctionExpression(node) || ts.isArrowFunction(node) ||
 		ts.isMethodDeclaration(node) || ts.isForStatement(node) ||
 		ts.isForOfStatement(node) || ts.isForInStatement(node) ||
-		ts.isCaseBlock(node) || ts.isModuleBlock(node);
+		ts.isCaseBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node) ||
+		ts.isConstructorDeclaration(node) || ts.isGetAccessor(node) ||
+		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node);
 
 	/** Does this object literal spread an inherited environment, possibly via a chain? */
 	const seededFrom = (initializer) => {
@@ -141,26 +143,72 @@ function analyse(path, source) {
 			if (readsInheritedEnv(spread)) return { seeded: true };
 			if (ts.isIdentifier(spread)) {
 				const binding = resolve(spread.text);
-				if (!binding) return { seeded: false, unresolvedSeed: true };
-				if (binding.__inherited) return { seeded: true };
+				if (binding && binding.__inherited) return { seeded: true };
+				// A binding whose VALUE this resolver did not classify -- a parameter,
+				// an import, the result of a call it does not understand -- may hold an
+				// inherited environment. Reporting it as not seeded would turn "could
+				// not tell" into "no obligation".
+				if (!binding || !binding.__known) {
+					return { seeded: false, unresolvedSeed: true };
+				}
 			}
 		}
 		return { seeded: false };
+	};
+
+	/** Declare every identifier a binding pattern introduces. */
+	const declarePattern = (name, node) => {
+		if (ts.isIdentifier(name)) {
+			declare(name.text, node);
+			return;
+		}
+		if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+			for (const element of name.elements) {
+				if (ts.isBindingElement(element)) declarePattern(element.name, node);
+			}
+		}
 	};
 
 	const visit = (node) => {
 		const scoped = opensScope(node);
 		if (scoped) scopes.push(new Map());
 
+		// PARAMETERS SHADOW. A parameter named `env` is a different object from an
+		// outer `env`, so it must be declared in the scope the function opens before
+		// the body is walked; otherwise every access in the body resolves outward and
+		// an outer object's delete appears to guard a write to the parameter.
+		if (scoped && node.parameters) {
+			for (const parameter of node.parameters) {
+				declarePattern(parameter.name, parameter);
+			}
+		}
+		// A catch clause binds its own variable in the same way.
+		if (ts.isCatchClause(node) && node.variableDeclaration) {
+			declarePattern(node.variableDeclaration.name, node.variableDeclaration);
+		}
+
+		if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name)) {
+			// A destructured binding introduces names too; none of them can be an
+			// object literal, so they only matter for shadowing.
+			declarePattern(node.name, node);
+		}
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
 			const initializer = node.initializer;
 			const offset = toCodePoint(node.name.getStart(file));
 			if (initializer) {
 				// Mark bindings that hold an inherited environment, so an object
 				// spreading them counts as seeded.
-				if (readsInheritedEnv(initializer)) node.__inherited = true;
+				if (readsInheritedEnv(initializer)) {
+					node.__inherited = true;
+					node.__known = true;
+				}
 				const seeding = seededFrom(initializer);
 				if (seeding.seeded) node.__inherited = true;
+				// `__known` marks a binding whose value this resolver classified, so a
+				// spread of it is a decidable question. Anything unmarked is unknown.
+				if (ts.isObjectLiteralExpression(initializer) && !seeding.unresolvedSeed) {
+					node.__known = true;
+				}
 				if (ts.isObjectLiteralExpression(initializer)) {
 					objects.set(offset, {
 						id: offset,

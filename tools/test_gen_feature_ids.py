@@ -336,6 +336,48 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert "PI_EXPOSED_ONE" not in roles["self"]
 
 
+def test_a_parameter_shadows_an_outer_environment_object() -> None:
+    """A parameter named `env` is NOT the outer `env`.
+
+    Without declaring parameters in the scope a function opens, every access in the
+    body resolves outward, and an outer object's delete appears to guard a write to
+    the parameter.
+    """
+    shadowed = dict(ENV_FIXTURE)
+    shadowed["packages/coding-agent/src/shadow.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "delete env.PI_OUTER;\n"
+        "function inner(env) {\n"
+        "  env.PI_OUTER = value;\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(shadowed))
+    # The parameter cannot be resolved to an object literal, so nothing is claimed
+    # about it -- but it must not be credited to the outer object's delete either.
+    assert roles["unclaimed_accesses"] >= 1, roles
+    assert "PI_OUTER" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_an_unresolved_seed_is_not_treated_as_exempt() -> None:
+    """"Could not tell" must not pass as "no obligation".
+
+    An object spread from something the resolver cannot follow has unknown
+    provenance, so whether the clear-then-set obligation applies is unknown.
+    """
+    unknown = dict(ENV_FIXTURE)
+    unknown["packages/coding-agent/src/unknown.ts"] = (
+        "function f(base) {\n"
+        "  const env = { ...base };\n"
+        "  env.PI_UNKNOWN = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(unknown))
+    assert any("could not be resolved" in m for m in gen.errors), gen.errors
+    assert any("PI_UNKNOWN" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
 def test_clear_then_set_needs_the_SAME_object_not_the_same_name() -> None:
     """Two functions may each declare a local `env`; they are different objects.
 

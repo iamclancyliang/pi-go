@@ -94,6 +94,15 @@ MUTATIONS = [
     Mutation("env accesses resolved by name, not by scope",
      "\t\t\tconst binding = resolve(receiver.text);",
      "\t\t\tconst binding = [...objects.keys()].length ? { __objectId: [...objects.keys()][0] } : undefined;"),
+    Mutation("parameters do not shadow an outer binding",
+             "\t\t\tfor (const parameter of node.parameters) {",
+             "\t\t\tfor (const parameter of []) {"),
+    Mutation("unresolved seed treated as exempt",
+             '            if write["object"] in unknown_seed:',
+             "            if False:"),
+    Mutation("unknown-value binding read as not seeded",
+             "\t\t\t\tif (!binding || !binding.__known) {",
+             "\t\t\t\tif (false) {"),
 ]
 
 

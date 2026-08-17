@@ -476,8 +476,16 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
     scanned = src.paths(r"packages/[^/]+/src/.*\.tsx?$")
     src.prefetch(scanned)
 
+    unknown_provenance: list[str] = []
+    unclaimed = 0
     for path, facts in sorted(src.env_facts(scanned).items()):
         seeded = {object_["id"] for object_ in facts["objects"] if object_["seeded"]}
+        # An object whose seed could not be resolved is NOT known to be exempt. The
+        # helper reports that separately, and ignoring the field turns "could not
+        # tell" into "no obligation" -- the exact conflation the roles exist to
+        # prevent.
+        unknown_seed = {object_["id"] for object_ in facts["objects"]
+                        if object_.get("unresolvedSeed")}
         for write in facts["writes"]:
             if write["object"] == "process":
                 on_self.add(write["name"])
@@ -492,6 +500,9 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         # be resolved carries no obligation, and is reported below rather than
         # silently exempted.
         for write in facts["writes"]:
+            if write["object"] in unknown_seed:
+                unknown_provenance.append(f"{path}:{write['name']}")
+                continue
             if write["object"] not in seeded:
                 continue
             earlier = [d["offset"] for d in facts["deletes"]
@@ -505,6 +516,7 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         # exposed -- the name is written into some environment -- but they cannot
         # be checked, and pretending otherwise is the failure this replaced.
         for access in facts["unresolved"]:
+            unclaimed += 1
             if access["kind"] == "write":
                 exposed.add(access["name"])
             else:
@@ -556,9 +568,17 @@ def environment_names(src: Source) -> dict[str, list[str]] | None:
         fail("a seeded child environment is written without clearing that name "
              "from the same object first, at: " + ", ".join(sorted(set(unguarded)))
              + " - an inherited value would survive a conditional write")
+    if unknown_provenance:
+        fail("an environment object is written whose SEED could not be resolved, at: "
+             + ", ".join(sorted(set(unknown_provenance)))
+             + " - whether the clear-then-set obligation applies is unknown, and "
+               "unknown is not the same as exempt")
 
     return {"input": sorted(names), "exposed": sorted(exposed),
-            "self": sorted(on_self), "cleared": sorted(cleared)}
+            "self": sorted(on_self), "cleared": sorted(cleared),
+            # Reported so a reader knows how much of the exposed set the
+            # clear-then-set check could NOT speak for.
+            "unclaimed_accesses": unclaimed}
 
 
 def rpc_event_ids(src: Source) -> list[str] | None:

@@ -313,8 +313,11 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "derived ones",
              environment["input"])
         emit("coding-agent.environment.exposed",
-             "every `PI_*` ASSIGNED into an environment object built for a child "
-             "process (`env.X =`) across `packages/*/src`",
+             "every name ASSIGNED into an environment object built for a child "
+             "process across `packages/*/src`, resolved to that object by lexical "
+             f"binding; **{environment['unclaimed_accesses']} accesses could not be "
+             "resolved to a binding** (a parameter or a property), so they are "
+             "members here but the clear-then-set check does not speak for them",
              "the variable name",
              environment["exposed"])
         emit("coding-agent.environment.self",
