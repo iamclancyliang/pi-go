@@ -217,6 +217,9 @@ MUTATIONS = [
              "\t\t\t\t\t\tif (name) enclosure.pop();", "\t\t\t\t\t\tif (false) enclosure.pop();"),
     Mutation("initializer walked twice",
              "\t\tif (alreadyDescended.has(node)) return;", "\t\tif (false) return;"),
+    Mutation("initializer root skipped",
+             "\t\t\t\t\t\tvisit(declaration.initializer, true);",
+             "\t\t\t\t\t\tts.forEachChild(declaration.initializer, visit);"),
 ]
 
 

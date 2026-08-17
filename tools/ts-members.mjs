@@ -357,10 +357,10 @@ function analyse(path, program, checker) {
 	const alreadyDescended = new Set();
 	const enclosingBinding = () => (enclosure.length ? enclosure[enclosure.length - 1] : null);
 
-	const visit = (node) => {
+	const visit = (node, force = false) => {
 		// An initializer already walked with its binding pushed must not be walked
 		// again, or every fact inside it is reported twice -- once scoped, once not.
-		if (alreadyDescended.has(node)) return;
+		if (!force && alreadyDescended.has(node)) return;
 
 		const scoped = opensScope(node);
 		if (scoped) scopes.push(new Map());
@@ -427,7 +427,10 @@ function analyse(path, program, checker) {
 					const initializer = unwrap(declaration.initializer);
 					if (name) enclosure.push(name);
 					try {
-						ts.forEachChild(declaration.initializer, visit);
+						// The ROOT is visited too, forced past the guard, and only then
+						// marked, so the generic recursion stops at it rather than
+						// repeating everything inside.
+						visit(declaration.initializer, true);
 						alreadyDescended.add(declaration.initializer);
 					} finally {
 						if (name) enclosure.pop();

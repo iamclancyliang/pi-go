@@ -1216,6 +1216,50 @@ def test_a_bare_case_clause_declaration_is_hoisted() -> None:
     gen.errors.clear()
 
 
+def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
+    """A file present in the CHECKOUT but not supplied must not resolve.
+
+    This is the only shape that discriminates between a host that fails closed and
+    one that reads the working tree: `./keys.ts` exists in the Pi checkout, so a host
+    falling back to the file system answers from it. A bare specifier does not
+    discriminate, because it is classified as external before resolution matters, and
+    a path absent from disk resolves in neither host.
+    """
+    facts = _facts({"packages/tui/src/index.ts":
+                    'export { type KeyId } from "./keys.ts";\n'},
+                   "packages/tui/src/index.ts")
+    by_name = {e["name"]: e for e in facts["exports"]}
+    assert by_name["KeyId"]["meanings"] == [], by_name
+    assert by_name["KeyId"]["externalTarget"] is False, by_name
+
+
+def test_a_call_at_the_initializer_root_is_reported() -> None:
+    """`export const D = Type.Literal("x")` has its only call at the root.
+
+    Walking an initializer's children alone loses it entirely, which silently
+    shortens any family whose members sit at the root of a binding.
+    """
+    facts = _facts({"root.ts": 'export const Direct = Type.Literal("direct");\n'}, "root.ts")
+    values = {c["value"]: c["enclosing"] for c in facts["callLiterals"]}
+    assert values == {"direct": "Direct"}, values
+
+
+def test_a_nested_call_keeps_its_enclosure() -> None:
+    facts = _facts({"nested.ts":
+                    'export const Wrapped = Type.Union([Type.Literal("nested")]);\n'}, "nested.ts")
+    values = {c["value"]: c["enclosing"] for c in facts["callLiterals"]}
+    assert values == {"nested": "Wrapped"}, values
+
+
+def test_every_call_literal_is_reported_exactly_once() -> None:
+    """Visiting the root forced past the guard must not reintroduce double-walking."""
+    facts = _facts({"once2.ts": ('export const Direct = Type.Literal("direct");\n'
+                                 'export const Wrapped = Type.Union([Type.Literal("nested")]);\n'
+                                 'function f() { Type.Literal("loose"); }\n')}, "once2.ts")
+    values = [c["value"] for c in facts["callLiterals"]]
+    assert sorted(values) == ["direct", "loose", "nested"], values
+
+
 def test_facts_report_only_top_level_interfaces() -> None:
     """A nested declaration must not replace the module-level authority.
 
