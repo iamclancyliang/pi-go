@@ -964,6 +964,107 @@ BARREL_FIXTURE = {
 }
 
 
+def _facts(files: dict[str, str], wanted: str) -> dict:
+    """Compiler-API facts for one fixture file, parsed with the others."""
+    return gen.MemberFacts(TS_REPO).of(files)[wanted]
+
+
+def test_facts_report_only_top_level_interfaces() -> None:
+    """A nested declaration must not replace the module-level authority.
+
+    Facts keyed by text name keep whichever occurrence is seen last, so an interface
+    inside a function replaces the exported one that a family reads.
+    """
+    facts = _facts({"a.ts": "\n".join([
+        "export interface Settings { real?: string }",
+        "function helper() {",
+        "\tinterface Settings { decoy?: string }",
+        "\treturn null as unknown as Settings;",
+        "}",
+        "",
+    ])}, "a.ts")
+    assert facts["interfaceKeys"]["Settings"] == ["real"], facts["interfaceKeys"]
+
+
+def test_facts_report_only_top_level_object_registries() -> None:
+    """The same hazard for an object literal used as a registry."""
+    facts = _facts({"b.ts": "\n".join([
+        'export const TABLE = { "real.key": { x: 1 } };',
+        "function decoy() {",
+        '\tconst TABLE = { "decoy.key": { x: 2 } };',
+        "\treturn TABLE;",
+        "}",
+        "",
+    ])}, "b.ts")
+    assert facts["objectKeys"]["TABLE"] == ["real.key"], facts["objectKeys"]
+
+
+def test_facts_classify_an_interface_exported_by_clause_as_a_type() -> None:
+    """Syntax cannot answer the declaration space; the checker can."""
+    facts = _facts({"c.ts": "interface Foo {}\nexport { Foo };\nexport const bar = 1;\n"}, "c.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds == {"Foo": "type", "bar": "value"}, kinds
+
+
+def test_facts_exclude_a_namespace_members_exports() -> None:
+    """A namespace's exports are not the module's exports."""
+    facts = _facts({"d.ts": "namespace N { export const Hidden = 1; }\nexport const Visible = 2;\n"}, "d.ts")
+    assert [e["name"] for e in facts["exports"]] == ["Visible"]
+
+
+def test_facts_report_an_unresolvable_alias_as_unknown() -> None:
+    """An alias whose module is absent must not be assigned a space."""
+    facts = _facts({"e.ts": 'export { Missing } from "./absent.ts";\n'}, "e.ts")
+    assert [e["kind"] for e in facts["exports"]] == ["unknown"], facts["exports"]
+
+
+def test_a_nested_interface_does_not_replace_the_exported_one() -> None:
+    """Facts keyed by text name let a nested declaration win.
+
+    A `Settings` interface inside a function has the same name as the exported one
+    that this family reads, so keeping the last occurrence publishes the wrong keys.
+    """
+    shadowed = {
+        "packages/coding-agent/src/core/settings-manager.ts": "\n".join([
+            "export interface Settings {",
+            "\treal?: string;",
+            "}",
+            "function helper() {",
+            "\tinterface Settings {",
+            "\t\tdecoy?: string;",
+            "\t}",
+            "\treturn null as unknown as Settings;",
+            "}",
+            "",
+        ]),
+    }
+    assert gen.setting_keys(FakeSource(shadowed)) == ["real"]
+
+
+def test_a_nested_registry_does_not_replace_the_exported_one() -> None:
+    """The same hazard for an object literal: a nested one must not win."""
+    shadowed = {
+        "packages/tui/src/keybindings.ts": "\n".join([
+            "export interface Keybindings {",
+            '\t"tui.editor.cursorUp": true;',
+            "}",
+            "",
+            "export const TUI_KEYBINDINGS = {",
+            '\t"tui.editor.cursorUp": { defaultKeys: "up" },',
+            "}",
+            "",
+            "function decoy() {",
+            "\tconst TUI_KEYBINDINGS = {",
+            '\t\t"tui.decoy.action": { defaultKeys: "x" },',
+            "\t};",
+            "\treturn TUI_KEYBINDINGS;",
+            "}",
+            "",
+        ]),
+    }
+    assert gen.keybinding_actions(FakeSource(shadowed)) == ["tui.editor.cursorUp"]
+
+
 def test_barrel_classifies_by_declaration_space_not_by_syntax() -> None:
     """`interface Foo {}; export { Foo }` exports a TYPE.
 

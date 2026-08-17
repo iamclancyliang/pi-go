@@ -75,15 +75,6 @@ MUTATIONS = [
      'self.structural = blank(source, spans["dead"])'),
     # The environment rules.
     # The TUI registry/export sets.
-    Mutation("barrel misses `export type {...}`",
-     r'r"\bexport\s+(type\s+)?\{([^}]*)\}"',
-     r'r"\bexport\s*\{([^}]*)\}"'),
-    Mutation("barrel flattens the two declaration spaces",
-     "(types if (whole_clause_is_type or per_clause_type) else values).append(exported)",
-     "values.append(exported)"),
-    Mutation("barrel accepts a wildcard re-export",
-     'if re.search(r"^export \\*", view.structural, re.M):',
-     'if False:'),
     Mutation("keybinding authorities not compared",
      "if sorted(set(from_interface)) != sorted(set(from_table)):",
      "if False:"),
@@ -179,11 +170,18 @@ MUTATIONS = [
     Mutation("nested object literal overwrites a top-level registry",
              "		if (ts.isVariableStatement(node) && topLevel.has(node)) {",
              "		if (ts.isVariableStatement(node)) {"),
-    Mutation("ts extension imports disallowed, aliases collapse",
-             "\t\tallowImportingTsExtensions: true,", "\t\tallowImportingTsExtensions: false,"),
+    # NOT tested: "disallow .ts extension imports". Bundler resolution already
+    # permits them, so the option changes nothing observable and a control for it
+    # could not fail.
     Mutation("in-memory files keyed relatively, resolution misses them",
              "\t\tObject.entries(files).map(([path, text]) => [`${repoRoot}/${path}`, text]));",
              "\t\tObject.entries(files).map(([path, text]) => [path, text]));"),
+    Mutation("barrel takes exports from syntax, not the module symbol",
+             "\t\tconst moduleSymbol = checker.getSymbolAtLocation(file);",
+             "\t\tconst moduleSymbol = undefined && checker.getSymbolAtLocation(file);"),
+    Mutation("alias not followed to its target",
+             "\t\t\t\t\ttarget = checker.getAliasedSymbol(symbol);",
+             "\t\t\t\t\ttarget = symbol;"),
 ]
 
 
