@@ -503,7 +503,7 @@ actions and double-counts the multi-key ones.
 
 | | Size | What it is |
 | --- | --- | --- |
-| **Barrel** (`src/index.ts`) | **133** — 69 values + 63 types + 1 namespace | Names the package DECLARES as its API. No `export *`, so it is enumerable |
+| **Barrel** (`src/index.ts`) | **133** — 68 values + 62 types + 3 external | Names the package DECLARES as its API. No `export *`, so it is enumerable |
 | **Published surface** | larger | `package.json` has `main` and `files: ["dist/**/*", …]` and **no `exports` map**, so every compiled module is importable by path |
 
 ⚠️ **WHICH ONE IS THE PARITY DENOMINATOR IS AN OPEN PRODUCT DECISION.** It has not been made, and this
@@ -530,12 +530,19 @@ them: they normalise to one ID and the collision guard rejects the run. The spli
 language rather than working around the naming scheme, and it is the first family where the
 normalisation rule met a genuine limit.
 
-⚠️ **The declaration space is decided by the CHECKER, not by the export syntax, and the two disagree
-here.** `interface Foo {}` followed by `export { Foo }` exports a type through a clause shaped exactly
-like a value export. Reading the syntax also mis-states this barrel: `export { …, type Tokens } from
-"marked"` re-exports a **namespace** (`marked` declares `export declare namespace Tokens`), which
-belongs to neither space and is emitted as `tui.export.namespace`. Counting by syntax gives 64 types;
-by declaration space it is 63 types and 1 namespace.
+⚠️ **The declaration space is decided by the CHECKER, not by the export syntax.** `interface Foo {}`
+followed by `export { Foo }` exports a type through a clause shaped exactly like a value export.
+
+⚠️ **Three of the 133 have no determinable space, and saying otherwise means reading the working
+tree.** The barrel re-exports `Marked`, `Token` and `Tokens` from `marked` — a bare module specifier —
+and **`node_modules` is not in the pinned commit at all**. The installed package does declare `Tokens`
+as a namespace, but that is evidence from the working tree, not from the baseline, so the three are
+emitted as `tui.export.external`. The breakdown from the pinned source alone is **68 values, 62 types,
+3 external**.
+
+The generator's compiler host therefore **fails closed**: only files the caller supplies resolve, apart
+from the compiler's own lib, which is part of the tool rather than of the pinned source. A fallback to
+the file system is how a census starts answering from whatever happens to be installed.
 
 **Classifying a re-export requires the module it comes from.** All of `packages/tui/src` is parsed as
 one program for this family; with only the barrel in the program, every alias resolves to a synthetic
@@ -1474,7 +1481,7 @@ agent-harness.compaction-reason.overflow
 agent-harness.compaction-reason.threshold
 ```
 
-### `tui.export.value` — 69 members
+### `tui.export.value` — 68 members
 
 - **Membership authority:** `tui/src/index.ts` barrel, exports whose symbol is a VALUE as the checker resolves it. This is the package's DECLARED surface; the published `dist/**/*` without an `exports` map is wider, and which one is the parity denominator is an OPEN product decision
 - **Name authority:** the exported name, aliases resolved to what a consumer imports
@@ -1493,7 +1500,6 @@ tui.export.value.key    # source literal: Key
 tui.export.value.keybindings-manager    # source literal: KeybindingsManager
 tui.export.value.loader    # source literal: Loader
 tui.export.value.markdown    # source literal: Markdown
-tui.export.value.marked    # source literal: Marked
 tui.export.value.process-terminal    # source literal: ProcessTerminal
 tui.export.value.scroll-view    # source literal: ScrollView
 tui.export.value.select-list    # source literal: SelectList
@@ -1551,7 +1557,7 @@ tui.export.value.visible-width    # source literal: visibleWidth
 tui.export.value.wrap-text-with-ansi    # source literal: wrapTextWithAnsi
 ```
 
-### `tui.export.type` — 63 members
+### `tui.export.type` — 62 members
 
 - **Membership authority:** `tui/src/index.ts` barrel, exports whose symbol is a TYPE as the checker resolves it — not as the export syntax spells it
 - **Name authority:** the exported name
@@ -1612,7 +1618,6 @@ tui.export.type.tui    # source literal: TUI
 tui.export.type.terminal    # source literal: Terminal
 tui.export.type.terminal-capabilities    # source literal: TerminalCapabilities
 tui.export.type.terminal-color-scheme    # source literal: TerminalColorScheme
-tui.export.type.token    # source literal: Token
 tui.export.type.tui-alt-screen-options    # source literal: TuiAltScreenOptions
 tui.export.type.tui-input-listener    # source literal: TuiInputListener
 tui.export.type.tui-input-listener-result    # source literal: TuiInputListenerResult
@@ -1622,13 +1627,15 @@ tui.export.type.tui-stop-options    # source literal: TuiStopOptions
 tui.export.type.viewport-tui    # source literal: ViewportTUI
 ```
 
-### `tui.export.namespace` — 1 members
+### `tui.export.external` — 3 members
 
-- **Membership authority:** `tui/src/index.ts` barrel, exports whose symbol is a NAMESPACE; neither declaration space holds these
+- **Membership authority:** `tui/src/index.ts` barrel, exports re-exported from a DEPENDENCY (a bare module specifier). `node_modules` is absent from the pinned tree, so their declaration space is not determinable from the baseline; reading the installed package would answer from the working tree
 - **Name authority:** the exported name
 
 ```
-tui.export.namespace.tokens    # source literal: Tokens
+tui.export.external.marked    # source literal: Marked
+tui.export.external.token    # source literal: Token
+tui.export.external.tokens    # source literal: Tokens
 ```
 
 ### `tui.keybinding` — 47 members

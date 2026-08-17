@@ -50,9 +50,9 @@ def _tui_types(facts):
     return [e["name"] for e in facts["exports"] if e["kind"] == "type"]
 
 
-@derive("tui.export.namespace", "packages/tui/src/index.ts")
-def _tui_namespaces(facts):
-    return [e["name"] for e in facts["exports"] if e["kind"] == "namespace"]
+@derive("tui.export.external", "packages/tui/src/index.ts")
+def _tui_externals(facts):
+    return [e["name"] for e in facts["exports"] if e["kind"] == "external"]
 
 
 @derive("tui.keybinding", "packages/tui/src/keybindings.ts")

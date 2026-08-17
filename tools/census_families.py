@@ -781,11 +781,19 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
 
     **The declaration space comes from the checker, not from the export syntax.**
     Syntax cannot answer it: `interface Foo {}; export { Foo }` exports a TYPE
-    through a clause shaped exactly like a value export. Reading the syntax also
-    mis-states this barrel, which re-exports the NAMESPACE `Tokens` from `marked`
-    as `type Tokens`; a namespace is neither space, so it is reported as its own.
+    through a clause shaped exactly like a value export.
 
-    Classifying re-exports requires the modules they come from, so the whole
+    A locally declared namespace belongs to neither space and is reported as one;
+    this barrel has none, so that set is emitted only when it is non-empty.
+
+    **Three exports come from a DEPENDENCY and their space is not determinable from
+    the baseline.** The barrel re-exports `Marked`, `Token` and `Tokens` from
+    `marked`, a bare module specifier, and `node_modules` is not in the pinned tree
+    at all. Reading the installed package would answer from the WORKING TREE, which
+    is not baseline evidence, so they are reported as `external` -- a fact the pinned
+    source states about itself.
+
+    Classifying local re-exports requires the modules they come from, so the whole
     package's sources are parsed together. An alias that still cannot be resolved is
     reported as `unknown` and fails here rather than being folded into a space.
     """
@@ -796,7 +804,8 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
         return None
     facts = src.members_graph(graph, barrel)
 
-    spaces: dict[str, list[str]] = {"value": [], "type": [], "namespace": []}
+    spaces: dict[str, list[str]] = {"value": [], "type": [], "namespace": [],
+                                    "external": []}
     unknown: list[str] = []
     for export in facts["exports"]:
         if export["kind"] in spaces:

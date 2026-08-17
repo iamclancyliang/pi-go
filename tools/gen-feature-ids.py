@@ -252,11 +252,22 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "checker resolves it — not as the export syntax spells it",
              "the exported name",
              barrel["type"])
-        emit("tui.export.namespace",
-             "`tui/src/index.ts` barrel, exports whose symbol is a NAMESPACE; "
-             "neither declaration space holds these",
+        # A locally declared namespace is neither space. This barrel has none, and a
+        # zero-member set would state that as a family rather than as a fact, so it is
+        # emitted only when present.
+        if barrel["namespace"]:
+            emit("tui.export.namespace",
+                 "`tui/src/index.ts` barrel, exports whose symbol is a locally "
+                 "declared NAMESPACE; neither declaration space holds these",
+                 "the exported name",
+                 barrel["namespace"])
+        emit("tui.export.external",
+             "`tui/src/index.ts` barrel, exports re-exported from a DEPENDENCY (a bare "
+             "module specifier). `node_modules` is absent from the pinned tree, so "
+             "their declaration space is not determinable from the baseline; reading "
+             "the installed package would answer from the working tree",
              "the exported name",
-             barrel["namespace"])
+             barrel["external"])
 
     keys = keybinding_actions(src)
     if keys is not None:

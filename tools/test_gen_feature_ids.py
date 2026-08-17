@@ -1062,6 +1062,37 @@ def _facts(files: dict[str, str], wanted: str) -> dict:
     return gen.MemberFacts(TS_REPO).of(files)[wanted]
 
 
+def test_the_program_never_reads_the_working_tree() -> None:
+    """A module the caller did not supply must NOT resolve from disk.
+
+    Falling back to the file system classifies an export by reading the working
+    tree, and `node_modules` is not in the pinned commit at all, so such an answer
+    could never be baseline evidence.
+    """
+    facts = _facts({"only.ts": 'export { something } from "some-installed-package";\n'}, "only.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds == {"something": "external"}, kinds
+
+
+def test_a_dependency_reexport_is_external_not_a_space() -> None:
+    """A bare module specifier means the declaration is outside the pinned tree."""
+    facts = _facts({"bare.ts": ('export { A, type B } from "pkg";\n'
+                                'export { C } from "./local.ts";\n'),
+                    "local.ts": "export const C = 1;\n"}, "bare.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds["A"] == "external" and kinds["B"] == "external", kinds
+    assert kinds["C"] == "value", kinds
+
+
+def test_a_relative_reexport_is_still_classified() -> None:
+    """Failing closed must not stop local modules from resolving."""
+    facts = _facts({"rel.ts": 'export { Box, type BoxOptions } from "./box.ts";\n',
+                    "box.ts": "export class Box {}\nexport interface BoxOptions { x: number }\n"},
+                   "rel.ts")
+    kinds = {e["name"]: e["kind"] for e in facts["exports"]}
+    assert kinds == {"Box": "value", "BoxOptions": "type"}, kinds
+
+
 def test_facts_report_only_top_level_interfaces() -> None:
     """A nested declaration must not replace the module-level authority.
 
@@ -1177,10 +1208,12 @@ def test_barrel_excludes_a_namespace_member_export() -> None:
     assert "Visible" in barrel["value"], barrel["value"]
 
 
-def test_barrel_reports_a_namespace_as_its_own_space() -> None:
-    """A re-exported namespace belongs to neither space."""
-    barrel = gen.tui_barrel_names(FakeSource(BARREL_FIXTURE))
-    assert barrel["namespace"] == ["Space"], barrel["namespace"]
+def test_barrel_reports_a_dependency_export_as_external() -> None:
+    """An export re-exported from a bare specifier is not placed in a space."""
+    withdep = dict(BARREL_FIXTURE)
+    withdep[BARREL_PATH] += 'export { type Outside } from "some-package";\n'
+    barrel = gen.tui_barrel_names(FakeSource(withdep))
+    assert barrel["external"] == ["Outside"], barrel["external"]
 
 
 def test_barrel_fails_on_an_export_it_cannot_classify() -> None:

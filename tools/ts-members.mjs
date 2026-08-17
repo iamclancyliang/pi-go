@@ -88,6 +88,13 @@ function buildProgram(files, repoRoot) {
 	};
 	const host = ts.createCompilerHost(options, true);
 	const original = host.getSourceFile.bind(host);
+	// The compiler's own lib files are part of the TOOL, not of the pinned source, so
+	// they load from the installation. Everything else must come from the caller: a
+	// fallback to the file system would classify a re-export by reading the working
+	// tree, and `node_modules` is not in the pinned commit at all, so such an answer
+	// could never be baseline evidence.
+	const libDirectory = ts.getDirectoryPath(ts.sys.getExecutingFilePath());
+	const isLib = (fileName) => fileName.startsWith(libDirectory);
 	// Keyed by ABSOLUTE path rooted at the checkout: module resolution normalises to
 	// absolute paths, so a relatively-keyed map is never consulted and every alias
 	// resolves to a synthetic symbol.
@@ -99,10 +106,15 @@ function buildProgram(files, repoRoot) {
 			const kind = scriptKindFor(ts, fileName);
 			return ts.createSourceFile(fileName, text, languageVersion, true, kind);
 		}
-		return original(fileName, languageVersion, onError, shouldCreate);
+		if (isLib(fileName)) {
+			return original(fileName, languageVersion, onError, shouldCreate);
+		}
+		return undefined;
 	};
-	host.fileExists = (fileName) => supplied.has(fileName) || ts.sys.fileExists(fileName);
-	host.readFile = (fileName) => supplied.get(fileName) ?? ts.sys.readFile(fileName);
+	host.fileExists = (fileName) =>
+		supplied.has(fileName) || (isLib(fileName) && ts.sys.fileExists(fileName));
+	host.readFile = (fileName) =>
+		supplied.get(fileName) ?? (isLib(fileName) ? ts.sys.readFile(fileName) : undefined);
 	const program = ts.createProgram([...supplied.keys()], options, host);
 	return { program, checker: program.getTypeChecker() };
 }
@@ -177,7 +189,19 @@ function analyse(path, program, checker) {
 			const isValue = Boolean(flags & ts.SymbolFlags.Value);
 			const isType = Boolean(flags & (ts.SymbolFlags.Type | ts.SymbolFlags.TypeAlias |
 				ts.SymbolFlags.Interface));
-			const kind = !resolved ? "unknown"
+			// `external` means the export comes from a DEPENDENCY: the barrel re-exports
+			// it from a bare module specifier, so the declaration is not in the pinned
+			// tree and its declaration space is not determinable from the baseline.
+			// That is a fact the pinned source states, unlike reading the installed
+			// package, which would answer from the working tree.
+			const external = (symbol.declarations ?? []).some((node) => {
+				const statement = node.parent?.parent;
+				const specifier = statement?.moduleSpecifier;
+				return Boolean(specifier && ts.isStringLiteral(specifier) &&
+					!specifier.text.startsWith(".") && !specifier.text.startsWith("/"));
+			});
+			const kind = external ? "external"
+				: !resolved ? "unknown"
 				: isNamespace ? "namespace"
 				: isValue ? "value"
 				: isType ? "type"

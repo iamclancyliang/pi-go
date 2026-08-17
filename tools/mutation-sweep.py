@@ -193,6 +193,12 @@ MUTATIONS = [
     Mutation("for-header declarations not hoisted",
              "\t\t\tif ((ts.isForStatement(node) || ts.isForOfStatement(node) ||",
              "\t\t\tif (false && (ts.isForStatement(node) || ts.isForOfStatement(node) ||"),
+    Mutation("compiler host falls back to the file system",
+             "\t\tif (isLib(fileName)) {\n\t\t\treturn original(fileName, languageVersion, onError, shouldCreate);\n\t\t}\n\t\treturn undefined;",
+             "\t\treturn original(fileName, languageVersion, onError, shouldCreate);"),
+    Mutation("dependency re-export not marked external",
+             "\t\t\tconst external = (symbol.declarations ?? []).some((node) => {",
+             "\t\t\tconst external = false && (symbol.declarations ?? []).some((node) => {"),
 ]
 
 
