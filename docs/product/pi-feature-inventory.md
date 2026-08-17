@@ -32,8 +32,8 @@ always get distinct IDs.
 | Slash commands | `enumerated` (22) · semantics from descriptions |
 | Wire protocol (CBOR) | `enumerated` |
 | coding-agent RPC commands | `enumerated` (32) · per-command payloads `schema-needed` |
-| coding-agent RPC events | `enumerated` (22) |
-| RPC UI-dialog requests | `enumerated` (9) |
+| coding-agent RPC events | `enumerated` (**24**, source union; 3 are `source-only`) |
+| RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | `enumerated` · input schemas `schema-needed` |
 | Providers | `enumerated` (44) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
@@ -169,17 +169,59 @@ queue: `set_steering_mode`(338) · `set_follow_up_mode`(355) | compaction: `comp
 `fork`(615) · `clone`(643) · `get_fork_messages`(671) · `get_entries`(694) · `get_tree`(724) ·
 `get_last_assistant_text`(752) · `set_session_name`(772) | commands: `get_commands`(793)
 
-**UI-dialog requests (9)** `Kind: ui-api`, server→client — `select`(1182) · `confirm`(1199) ·
-`input`(1216) · `editor`(1232) · `notify`(1248) · `setStatus`(1264) · `setWidget`(1280) ·
-`setTitle`(1297) · `set_editor_text`(1310)
+**UI-dialog requests — 9** `Kind: ui-api`, server→client.
 
-**Events (22)** `Kind: event` — rpc.md:838+
+Source of truth is `RpcExtensionUIRequest`, `packages/coding-agent/src/modes/rpc/rpc-types.ts:238-273`
+(4 dialogs + 5 fire-and-forget), matching `docs/rpc.md:1161-1162`.
 
-`agent_start` · `agent_end` · `agent_settled` · `turn_start` · `turn_end` · `message_start` ·
-`message_update` · `message_end` · `bash_execution_update` · `tool_execution_start` ·
-`tool_execution_update` · `tool_execution_end` · `queue_update` · `compaction_start` ·
-`compaction_end` · `auto_retry_start` · `auto_retry_end` · `summarization_retry_scheduled` ·
-`summarization_retry_attempt_start` · `summarization_retry_finished` · `extension_error`
+`select`(1182) · `confirm`(1199) · `input`(1216) · `editor`(1232) · `notify`(1248) ·
+`setStatus`(1264) · `setWidget`(1280) · `setTitle`(1297) · `set_editor_text`(1310)
+
+> Tranche 1 said "10". That was a miscount against a 9-item list; corrected here from the source
+> type rather than from the doc headings.
+
+**Events — 24 by SOURCE UNION, not the 21 the docs table lists** `Kind: event`
+
+Counting from `docs/rpc.md:838+` gives 21 and is **wrong**. The emitted set is the union of three
+sources, and RPC session subscription forwards session events straight to stdout via
+`output(toJsonEvent(event))` — so anything in `AgentSessionEvent` reaches an RPC client.
+
+| Layer | Evidence | Unique types |
+| --- | --- | --- |
+| `AgentEvent` | `packages/agent/src/types.ts:428-443` | 10 |
+| `AgentSessionEvent` adds | `packages/coding-agent/src/core/agent-session.ts:141-185` | +13 |
+| RPC adds | `extension_error` | +1 |
+| **Total** | | **24** |
+
+From `AgentEvent` (10): `agent_start` · `agent_end` · `turn_start` · `turn_end` · `message_start` ·
+`message_update` · `message_end` · `tool_execution_start` · `tool_execution_update` ·
+`tool_execution_end`
+
+Added by `AgentSessionEvent` (13): `agent_settled` · `queue_update` · `compaction_start` ·
+`compaction_end` · **`entry_appended`** · **`session_info_changed`** · **`thinking_level_changed`** ·
+`auto_retry_start` · `auto_retry_end` · `summarization_retry_scheduled` ·
+`summarization_retry_attempt_start` · `summarization_retry_finished` · `bash_execution_update`
+
+Added by RPC: `extension_error`
+
+**`source-only` / docs gap — three events are emitted but undocumented:**
+
+| Feature ID | Evidence | Coverage state |
+| --- | --- | --- |
+| `coding-agent.rpc.event.entry_appended` | `agent-session.ts:~152`; docs `none` | `source-only` |
+| `coding-agent.rpc.event.session_info_changed` | `agent-session.ts:~153`; docs `none` | `source-only` |
+| `coding-agent.rpc.event.thinking_level_changed` | `agent-session.ts:~154`; docs `none` | `source-only` |
+
+> **Method correction this forced.** Tranche 1 enumerated RPC events by grepping the docs table.
+> That is docs-derived, not source-derived, and it silently dropped three real events. Event and
+> command enumeration must take the **source union first** and use docs only as a cross-check in
+> both directions. My own count of that same docs table was also off by one (21 rows, reported 22).
+
+> **Independent observation while verifying:** `auto_retry_end` is declared **twice** in the
+> `AgentSessionEvent` union (once after `auto_retry_start`, once after
+> `summarization_retry_finished`), with identical shape. Harmless in TypeScript (unions dedupe) but
+> it is a real duplication in Pi's source, and it is why a naive line-count of the union
+> over-reports by one.
 
 > **`agent_end` and `agent_settled` are separate features and must not be merged.** `agent_end` is
 > one low-level run finishing; `agent_settled` means no automatic retry, compaction retry **or**
