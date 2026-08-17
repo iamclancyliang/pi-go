@@ -15,11 +15,13 @@ the suite must go red. Two lessons are baked in:
 Run from the repo root: python3 tools/mutation-sweep.py
 Exit status is non-zero if any mutation survives.
 """
-import pathlib, shutil, subprocess, sys, tempfile
+from __future__ import annotations
 
-TOOL = pathlib.Path("tools/gen-feature-ids.py")
-GOOD = pathlib.Path(tempfile.gettempdir()) / "gen-feature-ids.good.py"
-shutil.copy(TOOL, GOOD)
+import pathlib, shutil, subprocess, sys
+
+TARGETS = [pathlib.Path("tools/census_source.py"),
+           pathlib.Path("tools/census_families.py"),
+           pathlib.Path("tools/gen-feature-ids.py")]
 
 MUTATIONS = [
     ("discover reads extraction",
@@ -56,24 +58,37 @@ MUTATIONS = [
     ("thinking-level agreement check removed",
      "if not (sorted(set(from_agent)) == sorted(set(from_ai)) == sorted(set(from_protocol))):",
      "if False:"),
-    # The lexical defects @gpt-codex found: both directions.
-    ("regex-vs-division decided by character",
-     'if token in _KEYWORDS_BEFORE_EXPRESSION:\n            return False',
-     'if False:\n            return False'),
-    ("template expression treated as text",
-     'if self.source[scan: scan + 2] == "${":\n                break',
-     'if False:\n                break'),
+    # The two lexical defects, one in each direction.
     ("deletion counted as a read",
      r'r"(?<!delete )(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"',
      r'r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\b(?!\s*=[^=])"'),
     ("child write and self write merged",
-     r'child_writes = [r"(?<!process\.)\benv\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]',
-     r'child_writes = [r"(?:process\s*\.\s*)?\benv\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]'),
-    ("clear-then-set guard removed",
-     "unguarded = exposed - cleared", "unguarded = set()"),
+     r'child_writes = [r"(?<!process\.)\benv\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
+     r'child_writes = [r"(?:process\s*\.\s*)?\benv\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]'),
+    ("clear-then-set guard removed entirely",
+     "    if unguarded:\n        fail(\"a FINAL child environment is written",
+     "    if False:\n        fail(\"a FINAL child environment is written"),
     ("union member pattern rejects generics and extends",
      r'rf"^export interface {re.escape(name)}\s*(?:<[^>]*>)?\s*"',
      r'rf"^export interface {re.escape(name)}\s*"'),
+    # The parser-backed lexing: dropping either span kind must be caught.
+    # NOT tested: "leave comments and regexes in the EXTRACTION view". Every read
+    # of that view happens at a span already located on the structural view, where
+    # those regions are blanked, so no extractor can reach into one. There is no
+    # observable behaviour to catch, and a control that cannot fail is decoration.
+    ("string/template text not blanked structurally",
+     'self.structural = blank(source, spans["dead"] + spans["text"])',
+     'self.structural = blank(source, spans["dead"])'),
+    # The environment rules.
+    ("clear-then-set order not required",
+     "if not any(offset < min(writes) for offset in deletes_here):",
+     "if not deletes_here:"),
+    ("final-map scoping dropped, every site must clear",
+     "        if path not in final_map_files:\n            continue",
+     "        if False:\n            continue"),
+    ("writes limited to the PI_ namespace",
+     r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*=[^=]"]',
+     r'self_writes = [r"\bprocess\s*\.\s*env\s*\.\s*(PI_[A-Z0-9_]+)\s*=[^=]"]'),
 ]
 
 def run() -> str:
@@ -82,26 +97,45 @@ def run() -> str:
                          capture_output=True, text=True)
     return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "NO OUTPUT"
 
+
+ORIGINALS = {path: path.read_text() for path in TARGETS}
+
+
+def apply(old: str, new: str) -> tuple[pathlib.Path, int] | None:
+    """Put the mutation in whichever file contains it; None if nowhere does."""
+    for path in TARGETS:
+        text = ORIGINALS[path]
+        if old in text:
+            path.write_text(text.replace(old, new))
+            return path, text.count(old)
+    return None
+
+
+def restore() -> None:
+    for path, text in ORIGINALS.items():
+        if path.read_text() != text:
+            path.write_text(text)
+
+
 BASELINE = run()
 print(f"  {'BASELINE (must be green)':<40} -> {BASELINE}")
 assert "passed" in BASELINE and BASELINE.split("/")[0] == BASELINE.split("/")[1].split()[0], \
     f"baseline is not green: {BASELINE}"
 escaped = 0
 for label, old, new in MUTATIONS:
-    text = GOOD.read_text()
-    count = text.count(old)
-    if count == 0:
+    placed = apply(old, new)
+    if placed is None:
         print(f"  {label:<40} -> TARGET MISSING")
         escaped += 1
         continue
-    TOOL.write_text(text.replace(old, new))
+    path, count = placed
     result = run()
     survived = (result == BASELINE)   # green means the mutation was NOT caught
     if survived:
         escaped += 1
-    print(f"  {label:<40} -> {result}  ({count} site{'s' if count > 1 else ''})"
-          f"{'   <-- NOT CAUGHT' if survived else ''}")
-    shutil.copy(GOOD, TOOL)
+    print(f"  {label:<40} -> {result}  ({count} site{'s' if count > 1 else ''} "
+          f"in {path.name}){'   <-- NOT CAUGHT' if survived else ''}")
+    restore()
 
 print(f"  {'RESTORED':<40} -> {run()}")
 print(f"\n{len(MUTATIONS) - escaped}/{len(MUTATIONS)} mutations caught")

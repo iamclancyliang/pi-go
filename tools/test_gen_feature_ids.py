@@ -12,6 +12,7 @@ fixture was toothless rather than because the code is right.
 Run: python3 tools/test_gen_feature_ids.py
 """
 
+import os
 import re
 import sys
 import types
@@ -24,17 +25,41 @@ from pathlib import Path
 # stale `.pyc` and the tests then grade code that is not on disk. That happened,
 # and it made a mutation look reverted when it was not. Compiling the text makes
 # the file on disk the only thing under test.
-_PATH = Path(__file__).with_name("gen-feature-ids.py")
+_TOOLS = Path(__file__).parent
+sys.path.insert(0, str(_TOOLS))
+
+# The entry point is compiled from source text rather than imported: Python
+# validates cached bytecode by mtime-and-size, so an edit that preserves size --
+# swapping `structural` for `extraction`, exactly what these tests exist to catch
+# -- can be served from a stale `.pyc`, and the suite then grades code that is not
+# on disk. That happened. Compiling makes the files on disk the only thing tested.
+# The sibling modules are imported normally but with bytecode writing disabled for
+# the same reason.
+sys.dont_write_bytecode = True
+_PATH = _TOOLS / "gen-feature-ids.py"
 gen = types.ModuleType("gen_feature_ids")
 gen.__file__ = str(_PATH)
 exec(compile(_PATH.read_text(), str(_PATH), "exec"), gen.__dict__)
+
+
+# The extractor delegates lexing to TypeScript's own parser, so these tests need a
+# checkout that provides it. Resolved from PI_REPO, else the conventional sibling
+# path. If it is missing the tests FAIL rather than skip: a negative control that
+# quietly does not run is worse than no control, because the suite still reports
+# green.
+TS_REPO = os.environ.get("PI_REPO") or str(Path.home() / "Project" / "github" / "pi")
+if not (Path(TS_REPO) / "node_modules" / "typescript").exists():
+    print(f"FATAL: no typescript under {TS_REPO}; set PI_REPO to a Pi checkout "
+          f"whose dependencies are installed. Refusing to run a suite whose "
+          f"lexical controls cannot execute.", file=sys.stderr)
+    raise SystemExit(2)
 
 
 class FakeSource(gen.Source):
     """A Source whose files come from a dict instead of a pinned commit."""
 
     def __init__(self, files: dict[str, str]) -> None:
-        super().__init__(repo="/nonexistent", baseline="0" * 40)
+        super().__init__(repo=TS_REPO, baseline="0" * 40)
         self._files = files
 
     def read(self, path: str) -> str:
@@ -43,20 +68,65 @@ class FakeSource(gen.Source):
         return self._files[path]
 
 
-def test_regex_after_a_keyword_is_blanked() -> None:
-    """`return /.../` is a REGEX, not a division.
+def view_of(source: str, path: str = "f.ts") -> "gen.SourceView":
+    """Build a view the way the tool does: real spans from the real parser."""
+    spans = gen.Spans(TS_REPO).of({path: source})[path]
+    return gen.SourceView(path, source, spans)
 
-    Deciding from the previous CHARACTER classifies it as division, leaves the
-    regex unblanked, and lets the code inside it become a member. The pinned
-    source has 18 such sites, so this is not hypothetical.
+
+def test_regex_in_expression_position_is_blanked() -> None:
+    """A regex is blanked wherever the grammar allows one.
+
+    The fixtures are REAL code for each position, which the parser now enforces:
+    the earlier version of this test used `x = return /re/;`, which is not valid
+    TypeScript at all, so it was proving nothing about a construct that could
+    appear in the source.
     """
-    for keyword in ("return", "throw", "typeof", "case", "in", "of", "new",
-                    "delete", "await", "yield", "void", "instanceof", "default"):
-        source = f'x = {keyword} /output({{ type: "phantom" }})/;\n'
-        view = gen.SourceView("f.ts", source)
-        assert "output(" not in view.structural, (
-            f"regex after `{keyword}` was not blanked: {view.structural!r}")
-        assert "phantom" not in view.structural
+    snippets = [
+        "function f() { return /export const createGhostTool/.source; }",
+        "function f() { throw /export const createGhostTool/; }",
+        "const t = typeof /export const createGhostTool/;",
+        "switch (x) { case /export const createGhostTool/.source: break; }",
+        "const b = x instanceof /export const createGhostTool/.constructor;",
+        "async function f() { await /export const createGhostTool/.source; }",
+        "function* g() { yield /export const createGhostTool/; }",
+        "void /export const createGhostTool/;",
+        "for (const c of /export const createGhostTool/.source) { use(c); }",
+        "delete /export const createGhostTool/.lastIndex;",
+        "if (ready) /export const createGhostTool/.test(s);",
+        "while (ready) /export const createGhostTool/.test(s);",
+        "const v = ready ? /export const createGhostTool/ : null;",
+        "const list = [/export const createGhostTool/];",
+        "call(/export const createGhostTool/);",
+        "const r = 1 + /export const createGhostTool/.source.length;",
+    ]
+    for snippet in snippets:
+        view = view_of(snippet + "\n")
+        assert "createGhostTool" not in view.structural, f"not blanked: {snippet}"
+        assert "export const" not in view.structural, f"not blanked: {snippet}"
+
+
+def test_regex_after_a_closing_paren_is_position_dependent() -> None:
+    """`)` does NOT settle it: an if-head is followed by a regex, a call by division.
+
+    Both lines below are legal. A previous-token rule treated every `)` as ending
+    a value, so the regex went unblanked and `harness_tool_names` produced a
+    member from its contents. Only the grammar decides this, which is why the
+    parser does.
+    """
+    regex_case = view_of("function f(s) {\n\tif (ready) /export const createGhostTool/.test(s);\n}\n")
+    assert "createGhostTool" not in regex_case.structural, regex_case.structural
+    assert "export const" not in regex_case.structural
+
+    division_case = view_of("const ratio = compute(x) / total;\n")
+    assert division_case.structural == "const ratio = compute(x) / total;\n"
+
+
+def test_no_harness_member_from_a_regex_after_an_if_head() -> None:
+    source = ("function f(s) {\n\tif (ready) /export const createGhostTool/.test(s);\n}\n"
+              "export const createBashTool = () => {};\n")
+    names = gen.harness_tool_names(FakeSource({HARNESS_PATH: source}))
+    assert names == ["bash"], names
 
 
 def test_division_is_still_division() -> None:
@@ -65,7 +135,7 @@ def test_division_is_still_division() -> None:
                        "const r = arr[0] / 2;",
                        "const r = f() / 2;",
                        "const r = x.y / 2;"):
-        view = gen.SourceView("f.ts", expression + "\n")
+        view = view_of(expression + "\n")
         assert view.structural == expression + "\n", (
             f"division was treated as a regex: {view.structural!r}")
 
@@ -77,17 +147,17 @@ def test_template_expression_is_code_and_template_text_is_not() -> None:
     negative -- while keeping the text would let pseudo-code in the literal part
     become a member. Both halves are asserted here.
     """
-    view = gen.SourceView("f.ts", 'const s = `dir=${process.env.PI_REAL}/x`;\n')
+    view = view_of('const s = `dir=${process.env.PI_REAL}/x`;\n')
     assert "process.env.PI_REAL" in view.structural, "code inside ${} was blanked"
     assert "dir=" not in view.structural, "template TEXT was not blanked"
 
-    phantom = gen.SourceView("f.ts", 'const s = `export const createFakeTool = 1`;\n')
+    phantom = view_of('const s = `export const createFakeTool = 1`;\n')
     assert "createFakeTool" not in phantom.structural
 
 
 def test_nested_template_expression() -> None:
     """A template inside its own expression must not end the outer one early."""
-    view = gen.SourceView("f.ts", 'const s = `a${ `b${ process.env.PI_DEEP }c` }d`;\n')
+    view = view_of('const s = `a${ `b${ process.env.PI_DEEP }c` }d`;\n')
     assert "process.env.PI_DEEP" in view.structural
     for text in ("a", "b", "c", "d"):
         assert f"`{text}" not in view.structural.replace("PI_DEEP", "")
@@ -134,7 +204,7 @@ def test_harness_fixture_really_is_adversarial() -> None:
     If discovery is moved back to the extraction view, the assertions above turn
     red -- which is the property that makes them a control rather than decoration.
     """
-    view = gen.SourceView(HARNESS_PATH, HARNESS_FIXTURE)
+    view = view_of(HARNESS_FIXTURE, HARNESS_PATH)
     declaration = re.compile(
         r"\bexport\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
         r"(?:const|let|var|function\*?|class)\s+create([A-Z][A-Za-z]*)Tool\b"
@@ -190,7 +260,7 @@ def test_no_phantom_rpc_event_from_string_or_template() -> None:
 
 def test_rpc_fixture_really_is_adversarial() -> None:
     """The phantom calls are discoverable on the extraction view, and only there."""
-    view = gen.SourceView(RPC_MODE, RPC_FIXTURE[RPC_MODE])
+    view = view_of(RPC_FIXTURE[RPC_MODE], RPC_MODE)
     assert len(re.findall(r"\boutput\(", view.extraction)) == 6, "fixture lost a phantom"
     assert len(re.findall(r"\boutput\(", view.structural)) == 4, (
         "structural view must see only the four real calls")
@@ -276,14 +346,60 @@ def test_child_write_and_self_write_are_different_roles() -> None:
 
 
 def test_exposed_without_being_cleared_is_an_error() -> None:
-    """The clear-then-set pairing is a guarantee, so losing it must fail loudly."""
+    """In a FINAL map the clear-then-set pairing is a guarantee, so losing it fails."""
     unguarded = dict(ENV_FIXTURE)
     unguarded["packages/coding-agent/src/child.ts"] = (
         "const env = { ...getShellEnv() };\nenv.PI_LEAKY = ctx.one;\n")
     gen.errors.clear()
     gen.environment_names(EnvFakeSource(unguarded))
-    assert any("cleared first" in message for message in gen.errors), gen.errors
+    assert any("clearing that name first" in m for m in gen.errors), gen.errors
     gen.errors.clear()
+
+
+def test_write_before_delete_is_an_error() -> None:
+    """ORDER is part of the guarantee: deleting after writing does not protect it.
+
+    A check that compared name sets passed this, because both names were present
+    in both sets.
+    """
+    wrong_order = dict(ENV_FIXTURE)
+    wrong_order["packages/coding-agent/src/child.ts"] = (
+        "const env = { ...getShellEnv() };\n"
+        "env.PI_LATE = ctx.one;\n"
+        "delete env.PI_LATE;\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(wrong_order))
+    assert any("PI_LATE" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_an_override_map_needs_no_clearing() -> None:
+    """A fresh object merged OVER the inherited environment does not need deletes.
+
+    Assignment already wins there. Demanding a delete produced a false alarm
+    against a real site in the pinned source, so the rule is scoped by whether the
+    file seeds a final map -- read from the file, not from a list of exemptions.
+    """
+    override = dict(ENV_FIXTURE)
+    override["packages/coding-agent/src/overlay.ts"] = (
+        "const execution = { env: {} };\nexecution.env.PI_OVERRIDE = ctx.one;\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(override))
+    assert roles is not None and not gen.errors, gen.errors
+    assert "PI_OVERRIDE" in roles["exposed"], roles["exposed"]
+    gen.errors.clear()
+
+
+def test_a_written_name_outside_the_pi_namespace_is_still_counted() -> None:
+    """Writes are not prefix-limited: the product also sets `AI_AGENT=pi`.
+
+    A `PI_`-only scan missed it while the census prose listed it, so source and
+    documentation could not close against each other.
+    """
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/entry.ts"] = 'process.env.AI_AGENT = "pi";\n'
+    roles = gen.environment_names(EnvFakeSource(fixture))
+    assert "AI_AGENT" in roles["self"], roles["self"]
 
 
 def test_environment_fixture_really_is_adversarial() -> None:
@@ -293,7 +409,7 @@ def test_environment_fixture_really_is_adversarial() -> None:
     the wrong reason: no read pattern could ever match a bare name.
     """
     source = ENV_FIXTURE["packages/coding-agent/src/reads.ts"]
-    view = gen.SourceView("reads.ts", source)
+    view = view_of(source, "reads.ts")
     raw = re.compile(r"(?:process\.)?env\.(PI_[A-Z0-9_]+)")
     on_raw = set(raw.findall(source))
     assert {"PI_FROM_A_COMMENT", "PI_FROM_A_STRING", "PI_FROM_A_TEMPLATE"} <= on_raw, on_raw
@@ -380,7 +496,7 @@ def test_hook_fixture_really_is_adversarial() -> None:
     assert "session_before_switch" not in line_anchored, (
         "fixture's wrapped overload is not actually wrapped")
     assert len(line_anchored) == 2, line_anchored
-    view = gen.SourceView(EXT_PATH, source)
+    view = view_of(source, EXT_PATH)
     assert 'event: "phantom_hook"' in view.extraction
     assert 'phantom_hook' not in view.structural
 
@@ -509,7 +625,7 @@ def test_auth_fixture_really_is_adversarial() -> None:
     # act as delimiters and the span never terminates, so scanning the wrong view
     # is detectable. Without this the two views agree and the mutation survives.
     assert 'placeholder: "type ; then }"' in source
-    view = gen.SourceView(AUTH_PATH, source)
+    view = view_of(source, AUTH_PATH)
     declaration = view.structural.index("export type AuthPrompt")
     shallow = view.structural.index(";", declaration)
     deep = gen.type_alias_span(view, "AuthPrompt")
@@ -543,7 +659,7 @@ def test_quoted_after_ignores_a_key_written_inside_a_template() -> None:
 const doc = `type: "fake"`;
 const real = { type: "genuine" };
 '''
-    view = gen.SourceView("f.ts", source)
+    view = view_of(source)
     assert 'type: "fake"' in view.extraction, "fixture is toothless"
     assert view.quoted_after(r"type:\s*") == ["genuine"]
 
@@ -557,7 +673,7 @@ def test_quoted_in_ignores_quotes_that_live_inside_another_literal() -> None:
     quote and every value after it would shift.
     """
     source = 'const members = ["text", `tpl "inner" tail`, \'json\'];'
-    view = gen.SourceView("f.ts", source)
+    view = view_of(source)
     assert '"inner"' in view.extraction, "fixture is toothless"
     span = view.structural.index("["), len(view.structural)
     assert view.quoted_in(*span) == ["text", "json"]
@@ -565,7 +681,7 @@ def test_quoted_in_ignores_quotes_that_live_inside_another_literal() -> None:
 
 def test_regex_literal_does_not_hide_following_code() -> None:
     """A regex containing quotes and parens must not swallow the code after it."""
-    view = gen.SourceView("f.ts", '''
+    view = view_of('''
 const pattern = /output\\("[a-z]+"\\)/g;
 const divided = total / count;
 output({ type: "real_event" });
@@ -578,7 +694,7 @@ output({ type: "real_event" });
 
 def test_views_stay_offset_aligned() -> None:
     source = HARNESS_FIXTURE + RPC_FIXTURE[RPC_MODE] + "// trailing comment\n"
-    view = gen.SourceView("f.ts", source)
+    view = view_of(source)
     assert len(view.extraction) == len(view.structural) == len(source)
     for index, char in enumerate(source):
         if char == "\n":
