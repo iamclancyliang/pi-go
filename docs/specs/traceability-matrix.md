@@ -13,7 +13,7 @@ planned test → evidence/blocker.
 
 | A | Requirement | Contract | Issue | Owner | Planned test | Evidence / blocker |
 | --- | --- | --- | --- | --- | --- | --- |
-| **A1** two tools then answer; full trace | FR-1, FR-5 | C1, C4 | **none** (tracer bullet unticketed) | @cc | `conformance/a1_trace_test.go` | blocked: Go not installed; v0 ticket not yet opened (gate) |
+| **A1** two tools then answer; full trace | FR-1, FR-5 | C1, C4 | **#18** | @cc | `conformance/a1_trace_test.go` | ✅ **IMPLEMENTED AND PASSING.** Exact trace asserted (not a subsequence), tool events paired by `ToolCallID`, tool-result **content** asserted to reach the 2nd model call, session truth = 5 messages with 0 unmatched. Paired negative control: `TestA1NoToolsControl` |
 | **A2** steering during active tool round | FR-2 | **C1** | **#7** | @cc | `conformance/a2_steering_test.go` | contract verified in pi source; test blocked on Go |
 | **A3** follow-up queued during run | FR-2 | **C1** | **#8** | @cc | `conformance/a3_followup_test.go` | contract verified. Errored-turn case is covered separately by **A14** |
 | **A4** truncated msg, 3 parseable calls | FR-3 | **C2** | **#9** | @cc | `conformance/a4_truncation_test.go` | contract verified (agent-loop.ts:211-214) |
@@ -114,10 +114,10 @@ Ten conformance scenarios are now ticketed: **#7–#16** (A2, A3, A4, A5, A6, A7
 These are pure loop-behaviour contracts — valid whichever way ADR-0002 decides loop ownership, since
 only the subject under test changes, not the assertions.
 
-**Five remain unticketed, each for a stated reason — not oversight:**
+**Four remain unticketed, each for a stated reason — not oversight:**
 | A | Why not yet |
 | --- | --- |
-| A1 | the tracer bullet itself: product implementation, not released |
+| ~~A1~~ | ~~the tracer bullet itself~~ — **closed 2026-08-17**: implemented, ticketed as **#18** |
 | ~~A9~~ | ~~depends on spike #4~~ — **closed 2026-08-15**: spike #4 PASS, ticketed as **#17** |
 | A10–A12 | need the v1 session storage port |
 | A13 | v3, and just rewritten for wire decision C |
@@ -139,10 +139,11 @@ only the subject under test changes, not the assertions.
 | Scenarios blocked on a product decision | 1 (A13) |
 | Contracts with **no** scenario | **0** — C7/C4.0/C4b closed by A14/A15/A16 |
 | Surfaces with no contract at all | **1** — wire compatibility (G5) |
-| Scenarios with an issue | **11** (A2–A9, A14–A16 → #7–#17) |
-| Scenarios still without an issue | 4 (A1, A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
+| Scenarios with an issue | **12** (A1–A9, A14–A16 → #7–#18) |
+| Scenarios still without an issue | 3 (A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
+| Scenarios with a **passing** test | **1** (A1) — every other row is still contract-only |
 
-**Go is installed (1.26.6) and CI is green on 1.25.x + 1.26.x**, so the toolchain no longer blocks
-anything. What still blocks every conformance row is different and unchanged: **there is no product
-code to test.** The spike suite proves things about *eino*, not about pi-go. Do not read green gates
-as scenario coverage.
+**Product code now exists** (`internal/`, `cmd/`, `conformance/`) and **A1 passes**. That changes
+what the remaining blockers are, but not their severity: every other row is still contract-only, and
+a passing A1 is evidence about A1 alone. The spike suite proves things about *eino*, not pi-go. **Do
+not read green gates as scenario coverage.**

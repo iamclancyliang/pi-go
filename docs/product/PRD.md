@@ -120,7 +120,11 @@ prompt -> model boundary -> agent loop -> one read-only tool -> model answer -> 
 Required:
 
 - deterministic fake-model and fake-tool execution;
-- one read-only tool with explicit execution metadata;
+- tool registration that supports multiple tools, with **per-tool** execution metadata;
+- a v0 fixture registering **at least two** deterministic read-only tools whose execution metadata
+  differs — one tool cannot express A5 ("one tool in a three-call batch is sequential") or A15 ("the
+  same two tools run once sequentially and once in parallel"), both of which are v0 gates. This is a
+  floor on the test fixture, not a cap on the product;
 - the inner model/tool loop and the outer follow-up loop;
 - steering and follow-up as distinct inputs;
 - the C1-C8 behaviour-contract tests;

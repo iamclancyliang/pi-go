@@ -56,13 +56,40 @@ and other automation names or emails — must not appear as the author or commit
 Do not rewrite already-pushed history solely to change old identities unless the repository owner
 explicitly requests it.
 
-## Repository layout (Phase 0)
+## Repository layout
 
-Only `go.mod` and `spikes/` exist so far, and that is deliberate. `spikes/` holds **isolated
-capability experiments only** (issues #4–#6); no product module may import from it, and spike code
-must not become the architecture by default. Formal `internal/` packages, the public SDK facade,
-and `cmd/` composition roots are released only after the Phase 0 readiness gate — see
-`docs/architecture/architecture.md` and `docs/adr/0001-module-boundary.md`.
+Phase 0 is complete (PRD §5.1: PRD, architecture, parity denominator, ADR-0001, ADR-0002,
+traceability matrix, pinned toolchain/eino baselines), so v0 implementation is released.
+
+```
+internal/     product code — every module from architecture §1
+  events/       observable event contract; zero dependencies
+  tools/        tool registration seam + v0 fixture tools
+  ai/           model port; the ONLY place eino model types appear (edge E1)
+  session/      conversational truth vs projection
+  runtime/      agent loop on eino adk.TurnLoop (edge E2); owns events + seams
+cmd/          composition roots — assemble modules, no behaviour of their own
+conformance/  acceptance-scenario tests (A1…); inside the module by necessity
+spikes/       isolated capability experiments only
+```
+
+Rules that are enforced, not aspirational:
+
+- **No product module may import `spikes/`.** Spike code must not become the architecture by
+  default.
+- **eino types must not escape.** `internal/ai` hides eino's model types; `internal/runtime` hides
+  eino's loop types. Neither re-exports them (ADR-0001), which is what keeps ADR-0002 reversible.
+- **There is still no public SDK package.** ADR-0001 defers its name and contents until after the
+  v0 tracer bullet, so exports are justified by a real consumer rather than guessed.
+- **`conformance/` lives inside this module** because `internal/` is unimportable from outside it.
+
+### Handler order is a correctness constraint
+
+eino composes `WrapModel` handlers **lazily, outermost-first in registration order**. A handler that
+substitutes the model never calls through, so **every handler registered after it is never invoked —
+no error, no trace** (`spikes/einoprobe`, `TestWrapModelCompositionOrder`). pi's per-turn model
+selection is exactly such a substitution. Register model selection **last (innermost)**, and keep
+the `Handlers` slice in `internal/runtime/loop.go` the single place that order is decided.
 
 ## Agent skills
 
