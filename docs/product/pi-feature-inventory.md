@@ -219,8 +219,8 @@ Source of truth is `RpcExtensionUIRequest`, `packages/coding-agent/src/modes/rpc
 `select`(1182) · `confirm`(1199) · `input`(1216) · `editor`(1232) · `notify`(1248) ·
 `setStatus`(1264) · `setWidget`(1280) · `setTitle`(1297) · `set_editor_text`(1310)
 
-> Tranche 1 said "10". That was a miscount against a 9-item list; corrected here from the source
-> type rather than from the doc headings.
+> Counting the doc headings gives "10" against a 9-item list. The set is taken from the source type
+> rather than from the headings.
 
 **Events — 24 by SOURCE UNION, not the 21 the docs table lists** `Kind: event`
 
@@ -254,12 +254,12 @@ Added by RPC: `extension_error`
 | `coding-agent.rpc.event.session_info_changed` | `agent-session.ts:~153`; docs `none` | `source-only` |
 | `coding-agent.rpc.event.thinking_level_changed` | `agent-session.ts:~154`; docs `none` | `source-only` |
 
-> **Method correction this forced.** Tranche 1 enumerated RPC events by grepping the docs table.
+> **The method this rules out.** Enumerating RPC events by grepping the documentation table
 > That is docs-derived, not source-derived, and it silently dropped three real events. Event and
 > command enumeration must take the **source union first** and use docs only as a cross-check in
-> both directions. My own count of that same docs table was also off by one (21 rows, reported 22).
+> both directions. That docs table is also easy to miscount: it has 21 rows and is commonly cited as 22.
 
-> **Independent observation while verifying:** `auto_retry_end` is declared **twice** in the
+> **Worth knowing:** `auto_retry_end` is declared **twice** in the
 > `AgentSessionEvent` union (once after `auto_retry_start`, once after
 > `summarization_retry_finished`), with identical shape. Harmless in TypeScript (unions dedupe) but
 > it is a real duplication in Pi's source, and it is why a naive line-count of the union
@@ -273,7 +273,7 @@ Added by RPC: `extension_error`
 
 ### 7.1 Providers — `Kind: provider`
 
-**The authoritative source is the registry, not the file listing.** Tranche 2 said "44 providers";
+**The authoritative source is the registry, not the file listing.** Counting `.ts` files gives 44;
 that was a count of `.ts` filenames after an ad-hoc filter, which silently merged four different
 meanings. Split properly:
 
@@ -1982,12 +1982,23 @@ exist, and demanding the same discipline of both produces a false alarm:
 | **Override map** — a fresh `{}` merged over the inherited environment afterwards, via `inheritEnv` | `server/create-harness.ts:114-118`, applied by `harness/env/nodejs.ts:245-247` | **No.** Assignment already wins |
 
 Comparing name sets globally cannot express either claim: a delete in one file vouched for a write in
-another, and a write-then-delete ordering passed. **Aggregating per FILE is also wrong**, in both
-directions — an unrelated delete elsewhere in the file excuses a write, and a legitimate override that
-merely shares a file gets flagged. The obligation belongs to an OBJECT, so the check pairs writes and
-deletes by **receiver** (`env` versus `execution.env`) and requires the delete to come earlier on that
-same receiver. Which receivers are final maps is read from their binding
-(`const env = { ...getShellEnv() }`), so neither the mechanism nor the exemption is maintained by hand.
+another, and a write-then-delete ordering passed. Aggregating per FILE is wrong in both directions —
+an unrelated delete elsewhere in the file excuses a write, and a legitimate override that merely shares
+a file gets flagged. Pairing by the receiver's TEXT is also wrong, because two functions may each
+declare a local `env` and neither is the other.
+
+**The obligation belongs to an OBJECT, and objects are identified by their declaration.**
+`tools/ts-env-facts.mjs` resolves every access to the innermost binding that declares its receiver, so
+identity is that binding's position; parameters, destructured names and catch variables are declared in
+the scope they belong to, so an inner `env` shadows an outer one. A write is checked against deletes on
+**that same object** at an **earlier offset**. Whether an object is seeded from the inherited
+environment is read from its initialiser, following chains of local bindings.
+
+**Three states, not two.** An object whose seed cannot be classified — spread from a parameter, a
+property, or anything else this resolver does not follow — is neither obliged nor exempt: writing to it
+**fails the run**, because unknown is not exemption. An access whose receiver cannot be resolved to a
+binding at all is counted as a member and **explicitly not spoken for**; the emitted authority line
+carries how many such accesses exist, so the limit is visible rather than implied.
 
 **Why a literal grep could never close it — three separate reasons, each of which produced a wrong
 figure first.**

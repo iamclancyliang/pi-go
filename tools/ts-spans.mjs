@@ -9,8 +9,9 @@
  *     if (ready) /pattern/.test(s);     // `)` closes an if-head  -> regex
  *     const r = compute(x) / 2;        // `)` closes a call       -> division
  *
- * Two successive attempts at a heuristic each produced a false member, so the
- * disambiguation is delegated to the parser that defines the language. The AST
+ * A heuristic over local context produces a false member in one of the two cases
+ * above whichever way it is written, so the disambiguation is delegated to the
+ * parser that defines the language. The AST
  * gives exact spans for regular expressions, strings and the text parts of
  * templates; comment spans come from the scanner.
  *

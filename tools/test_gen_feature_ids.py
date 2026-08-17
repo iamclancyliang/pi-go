@@ -100,9 +100,9 @@ def test_regex_in_expression_position_is_blanked() -> None:
 def test_regex_after_a_closing_paren_is_position_dependent() -> None:
     """`)` does NOT settle it: an if-head is followed by a regex, a call by division.
 
-    Both lines below are legal. A previous-token rule treated every `)` as ending
-    a value, so the regex went unblanked and `harness_tool_names` produced a
-    member from its contents. Only the grammar decides this, which is why the
+    Both lines below are legal. Treating every `)` as ending a value leaves the
+    regex unblanked, and `harness_tool_names` then produces a member from its
+    contents. Only the grammar decides this, which is why the
     parser does.
     """
     regex_case = view_of("function f(s) {\n\tif (ready) /export const createGhostTool/.test(s);\n}\n")
@@ -334,6 +334,54 @@ def test_child_write_and_self_write_are_different_roles() -> None:
     assert roles["self"] == ["PI_SELF_SET"], roles["self"]
     assert "PI_SELF_SET" not in roles["exposed"]
     assert "PI_EXPOSED_ONE" not in roles["self"]
+
+
+def test_a_delete_on_this_process_is_not_a_child_clear() -> None:
+    """`delete process.env.X` clears OUR environment, not a child's.
+
+    Counting it as a child clear would let it satisfy the clear-then-set obligation
+    for a completely different object.
+    """
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/selfdelete.ts"] = (
+        "delete process.env.PI_SELF_CLEARED;\n"
+        "function f() {\n"
+        "  const env = { ...getShellEnv() };\n"
+        "  env.PI_SELF_CLEARED = value;\n"
+        "}\n")
+    gen.errors.clear()
+    roles = gen.environment_names(EnvFakeSource(fixture))
+    # The self-delete must not appear as a child clear, and must not excuse the write.
+    assert "PI_SELF_CLEARED" not in roles["cleared"], roles["cleared"]
+    assert any("PI_SELF_CLEARED" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_delete_on_this_process_is_not_an_input_read() -> None:
+    """A deletion is not a read, on `process.env` as much as on a child object."""
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/selfdel2.ts"] = "delete process.env.PI_ONLY_DELETED;\n"
+    roles = gen.environment_names(EnvFakeSource(fixture))
+    assert "PI_ONLY_DELETED" not in roles["input"], roles["input"]
+
+
+def test_a_spread_of_a_property_is_unknown_not_unseeded() -> None:
+    """`{ ...execution.env }` may or may not carry an inherited environment.
+
+    Reporting it as not seeded decides a question the resolver cannot answer, and
+    the write then passes with no obligation.
+    """
+    fixture = dict(ENV_FIXTURE)
+    fixture["packages/coding-agent/src/propspread.ts"] = (
+        "function f() {\n"
+        "  const env = { ...execution.env };\n"
+        "  env.PI_FROM_PROPERTY = value;\n"
+        "}\n")
+    gen.errors.clear()
+    gen.environment_names(EnvFakeSource(fixture))
+    assert any("could not be resolved" in m for m in gen.errors), gen.errors
+    assert any("PI_FROM_PROPERTY" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
 
 
 def test_a_parameter_shadows_an_outer_environment_object() -> None:

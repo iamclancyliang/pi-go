@@ -141,6 +141,13 @@ function analyse(path, source) {
 			if (!ts.isSpreadAssignment(property)) continue;
 			const spread = property.expression;
 			if (readsInheritedEnv(spread)) return { seeded: true };
+			// A spread of anything other than a resolvable local binding cannot be
+			// classified: `{ ...execution.env }` may or may not carry an inherited
+			// environment, and reporting it as not seeded decides a question this
+			// resolver cannot answer.
+			if (!ts.isIdentifier(spread)) {
+				return { seeded: false, unresolvedSeed: true };
+			}
 			if (ts.isIdentifier(spread)) {
 				const binding = resolve(spread.text);
 				if (binding && binding.__inherited) return { seeded: true };
