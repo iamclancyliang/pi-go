@@ -35,7 +35,7 @@ always get distinct IDs.
 | coding-agent RPC events | `enumerated` (**24**, source union; 3 are `source-only`) |
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | `enumerated` · input schemas `schema-needed` |
-| Providers | `enumerated` (44) |
+| Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
 | Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
 | Extension hooks | `enumerated` (names) · `semantics-needed` |
@@ -229,18 +229,36 @@ Added by RPC: `extension_error`
 
 ## 7. Models, providers, auth
 
-### 7.1 Providers — `Kind: provider`, `ai.provider.*` — 44 implementations
+### 7.1 Providers — `Kind: provider`
+
+**The authoritative source is the registry, not the file listing.** Tranche 2 said "44 providers";
+that was a count of `.ts` filenames after an ad-hoc filter, which silently merged four different
+meanings. Split properly:
+
+| Meaning | Count | Evidence |
+| --- | --- | --- |
+| **Built-in text providers** | **40** | `providers/all.ts`, `builtinProviders()` |
+| **Built-in image providers** | **1** (`openrouter-images`) | `providers/all.ts`, `builtinImagesProviders()` |
+| **Sanctioned fake provider** | **1** (`faux`) | `providers/faux.ts`; **deliberately NOT in `all.ts`** |
+| **Total provider feature IDs** | **42** | |
+| Supporting modules (NOT providers) | 3 | `cloudflare-auth.ts` · `cloudflare-stream.ts` · `radius-config.ts` |
+| Generated model wrappers | per provider | `<p>.models.ts` — see §7.2, counted as generated surface |
+
+**`ai.provider.builtin.*` — the 40 registered text providers** (`all.ts`, in registry order):
 
 `amazon-bedrock` · `ant-ling` · `anthropic` · `azure-openai-responses` · `baseten` · `cerebras` ·
-`cloudflare-ai-gateway` · `cloudflare-workers-ai` · `deepseek` · `faux` · `fireworks` ·
-`github-copilot` · `google` · `google-vertex` · `groq` · `huggingface` · `kimi-coding` · `minimax` ·
-`minimax-cn` · `mistral` · `moonshotai` · `moonshotai-cn` · `nvidia` · `openai` · `openai-codex` ·
-`opencode` · `opencode-go` · `openrouter` · `openrouter-images` · `qwen-token-plan` ·
-`qwen-token-plan-cn` · `qwen-token-plan-individual` · `radius` · `together` · `vercel-ai-gateway` ·
-`xai` · `xiaomi` · `xiaomi-token-plan-ams` · `xiaomi-token-plan-cn` · `xiaomi-token-plan-sgp` ·
-`zai` · `zai-coding-cn` (`packages/ai/src/providers/`)
+`cloudflare-ai-gateway` · `cloudflare-workers-ai` · `deepseek` · `fireworks` · `github-copilot` ·
+`google` · `google-vertex` · `groq` · `huggingface` · `kimi-coding` · `minimax` · `minimax-cn` ·
+`mistral` · `moonshotai` · `moonshotai-cn` · `nvidia` · `openai` · `openai-codex` · `opencode` ·
+`opencode-go` · `openrouter` · `qwen-token-plan` · `qwen-token-plan-cn` ·
+`qwen-token-plan-individual` · `radius` · `together` · `vercel-ai-gateway` · `xai` · `xiaomi` ·
+`xiaomi-token-plan-ams` · `xiaomi-token-plan-cn` · `xiaomi-token-plan-sgp` · `zai` · `zai-coding-cn`
 
-`ai.provider.faux` is Pi's own fake provider — directly relevant to pi-go's deterministic fixture.
+**`ai.provider.images.openrouter-images`** — the only registered image provider.
+
+**`ai.provider.faux`** — Pi's own fake provider, present in source but not registered as built-in.
+Directly relevant to pi-go: Pi already sanctions a deterministic fake, so pi-go's fixture model has
+an upstream counterpart rather than being a test-only invention.
 
 ### 7.2 Model catalogue — **`source-gap`, and this one matters**
 
@@ -397,6 +415,29 @@ test `test/git-update.test.ts`. `semantics-needed`.
 Each is a candidate parity area; none may be closed without its own row.
 
 ---
+
+## Counting discipline — learned the hard way
+
+Three counts in this document were wrong before review caught them, and **all three failed the same
+way: counting a convenient proxy instead of the authoritative source.**
+
+| Claim | Wrong | Right | Proxy I counted | Authority |
+| --- | --- | --- | --- | --- |
+| RPC events | 21/22 | **24** | the docs table | source union of `AgentEvent` + `AgentSessionEvent` + RPC |
+| RPC UI requests | 10 | **9** | doc headings | the `RpcExtensionUIRequest` type |
+| Providers | 44 | **42** | `.ts` filenames | `builtinProviders()` / `builtinImagesProviders()` |
+
+**Rules this imposes on the rest of the census:**
+
+1. **Enumerate from the source union first.** Docs are a two-way cross-check, never the source.
+   Docs-derived enumeration cannot find a source-only feature *by construction* — which is exactly
+   the omission class this gate exists to catch.
+2. **A file listing is not a registry.** If the product has a registration point (`all.ts`,
+   a union type, a command table), that is the count. File names are a proxy that silently merges
+   implementations, helpers, generated wrappers and test doubles.
+3. **State which meaning a number has.** "44 providers" merged four different things. Every count
+   here now names its authority.
+4. **A count that has not been re-derived from its authority is `semantics-needed`, not a fact.**
 
 ## Method and limits
 
