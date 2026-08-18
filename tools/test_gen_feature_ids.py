@@ -1533,6 +1533,35 @@ def test_a_class_static_block_is_its_own_var_scope() -> None:
     assert inside != after, f"both writes landed on {inside}"
 
 
+def test_a_catch_binding_ends_with_its_clause() -> None:
+    """`catch (env)` binds inside the clause and nowhere after it.
+
+    Both halves are asserted: a write inside must not reach the outer object, and a
+    write after must return to it. Testing only the first half cannot see a binding
+    that leaks past its clause and quietly takes every later write with it.
+    """
+    source = ("const env = { ...getShellEnv() };\n"
+              "delete env.PI_CATCH;\n"
+              "try { x(); } catch (env) { env.PI_CATCH = v; }\n"
+              "env.PI_AFTER = v;\n")
+    assert _write_receiver(source, "PI_CATCH") == "unresolved"
+    assert _write_receiver(source, "PI_AFTER").startswith("object")
+
+
+def test_a_function_declaration_in_a_block_ends_with_the_block() -> None:
+    """A function declared in a block is bound by that block, not by the function.
+
+    Hoisted to the enclosing function, the name outlives its block and a write after
+    it stops resolving to the object that block never touched.
+    """
+    source = ("const env = { ...getShellEnv() };\n"
+              "delete env.PI_BLOCKFN;\n"
+              "{ function env(){} env.PI_BLOCKFN = v; }\n"
+              "env.PI_AFTER = v;\n")
+    assert _write_receiver(source, "PI_BLOCKFN") == "unresolved"
+    assert _write_receiver(source, "PI_AFTER").startswith("object")
+
+
 def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
     """A file present in the CHECKOUT but not supplied must not resolve.
 

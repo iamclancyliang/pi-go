@@ -51,6 +51,23 @@ def expect(label: str, found: int | None, wanted: int) -> None:
         complain(f"{label}: document says {found}, generator says {wanted}")
 
 
+def expect_every(label: str, patterns: list[str], text: str, wanted: int) -> None:
+    """Fail unless the claim appears at least once and EVERY statement of it agrees.
+
+    A figure repeated in prose is repeated in full: reading only the first match
+    leaves every later copy free to drift, and the gate stays green while the
+    document contradicts itself. Requiring at least one match also catches the
+    other direction, where a rewording removes the claim and silently takes the
+    check with it.
+    """
+    found = [int(m) for pattern in patterns for m in re.findall(pattern, text)]
+    if not found:
+        complain(f"{label}: the document no longer states this figure in any known "
+                 f"phrasing, so nothing was checked")
+    elif any(value != wanted for value in found):
+        complain(f"{label}: document says {sorted(set(found))}, generator says {wanted}")
+
+
 def first_int(pattern: str, text: str) -> int | None:
     found = re.search(pattern, text)
     return int(found.group(1)) if found else None
@@ -133,12 +150,13 @@ def main() -> int:
                count)
 
     feature_list = FEATURE_LIST.read_text()
-    expect("feature list families",
-           first_int(r"\*\*已经可以机器校验的\*\*：(\d+) 类", feature_list), families)
+    expect_every("feature list families",
+                 [r"\*\*已经可以机器校验的\*\*：(\d+) 类", r"这 (\d+) 类没有漏项"],
+                 feature_list, families)
     expect("feature list members",
            first_int(r"共 (\d+) 个成员", feature_list), members)
-    expect("feature list environment names",
-           first_int(r"一共 \*\*(\d+) 个名字\*\*", feature_list), names)
+    expect_every("feature list environment names",
+                 [r"一共 \*\*(\d+) 个名字\*\*", r"只有 (\d+) 个名字"], feature_list, names)
     expect("feature list environment memberships",
            first_int(r"合计 (\d+) 个「用途条目」", feature_list), memberships)
 
@@ -165,8 +183,8 @@ def main() -> int:
     # the total as unchecked.
     defined = len(re.findall(r"^    Mutation\(",
                              (TOOLS / "mutation-sweep.py").read_text(), re.M))
-    expect("feature list mutation count",
-           first_int(r"(\d+) 种改法全部被抓到", feature_list), defined)
+    expect_every("feature list mutation count",
+                 [r"(\d+) 种改法全部被抓到", r"这 (\d+) 种针对"], feature_list, defined)
 
     caught = None
     if args.with_sweep:

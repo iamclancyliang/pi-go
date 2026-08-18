@@ -264,6 +264,16 @@ MUTATIONS = [
     Mutation("initializer walked twice",
              "\t\tif (!force && alreadyDescended.has(node)) return;",
              "\t\tif (!force && false) return;"),
+    Mutation("catch variable not bound",
+             "\t\tif (ts.isCatchClause(node) && node.variableDeclaration) {",
+             "\t\tif (false && node.variableDeclaration) {"),
+    Mutation("catch variable leaks to the enclosing scope",
+             "\t\t\tdeclarePattern(node.variableDeclaration.name, node.variableDeclaration);",
+             "\t\t\tscopes[scopes.length - 2].names.set(\n"
+             "\t\t\t\tnode.variableDeclaration.name.text, node.variableDeclaration);"),
+    Mutation("block function declaration hoisted to the function",
+             "\t\t\tif (ts.isFunctionDeclaration(child) && child.name) declare(child.name.text, child);",
+             "\t\t\tif (ts.isFunctionDeclaration(child) && child.name) declareVar(child.name.text, child);"),
     Mutation("directory view taken from the working tree",
              "\t\treturn suppliedDirectories.has(trimmed) ||\n"
              "\t\t\t(isLib(trimmed) && ts.sys.directoryExists(trimmed));",
