@@ -1161,7 +1161,8 @@ BARREL_FIXTURE = {
         # A namespace's own exports are not this module's exports.
         "namespace N { export const Hidden = 1; }",
         "export const Visible = 2;",
-        # A re-exported namespace belongs to neither declaration space.
+        # A namespace occupies its own space, and holding a value puts it in that
+        # one too -- the spaces are not alternatives.
         "export namespace Space { export const inner = 1; }",
         "",
     ]),
@@ -1434,6 +1435,102 @@ def test_a_local_module_that_exports_nothing_is_not_a_gap() -> None:
     assert result is not None, gen.errors
     assert not gen.errors, gen.errors
     gen.errors.clear()
+
+
+def test_a_supplied_file_resolves_from_a_directory_the_tree_lacks() -> None:
+    """The DIRECTORY view is part of failing closed.
+
+    Resolution asks whether a directory exists, and canonicalises paths, before
+    reading any file. Left to the real filesystem, a supplied input under a
+    directory absent from this machine reports unresolved, so the same pinned
+    inputs answer differently elsewhere.
+    """
+    facts = gen.MemberFacts(TS_REPO).of({
+        "index.ts": 'export * from "./virtual/wrapper.ts";\n',
+        "virtual/wrapper.ts": "export const Local = 1;\n",
+        # THE CONTROL: not supplied, so it must still fail to resolve.
+        "missing.ts": 'export * from "./nowhere/absent.ts";\n',
+    })
+    assert facts["index.ts"]["starExports"] == [
+        {"specifier": "./virtual/wrapper.ts", "resolved": True,
+         "target": "virtual/wrapper.ts"}], facts["index.ts"]["starExports"]
+    assert facts["missing.ts"]["starExports"] == [
+        {"specifier": "./nowhere/absent.ts", "resolved": False}], facts["missing.ts"]
+
+
+def test_a_cycle_of_star_re_exports_terminates_and_still_reports() -> None:
+    """Re-export cycles are legal, and the opaque star behind one must still surface.
+
+    Without the visited set the walk does not terminate; with it applied to the
+    wrong collection, the module carrying the opaque star is skipped and the set is
+    published short. Both are silent, so the cycle needs its own control.
+    """
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export * from "./ring-a.ts";\n'
+    barrel["packages/tui/src/ring-a.ts"] = ('export const A = 1;\n'
+                                            'export * from "./ring-b.ts";\n')
+    barrel["packages/tui/src/ring-b.ts"] = ('export const B = 2;\n'
+                                            'export * from "./ring-a.ts";\n'
+                                            'export * from "outside";\n')
+    gen.errors.clear()
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert result is None, result
+    assert any("outside" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_an_import_equals_binds_its_name() -> None:
+    """`import x = M.y` binds `x` like any other declaration.
+
+    Unregistered, a write through it resolves outward and borrows an unrelated
+    delete on the object of that name.
+    """
+    source = ("const env = { ...getShellEnv() };\n"
+              "delete env.PI_ALIAS;\n"
+              "namespace M { export const inner = {}; }\n"
+              "namespace N {\n  import env = M.inner;\n"
+              "  export function f(){ env.PI_ALIAS = v; }\n}\n")
+    assert _write_receiver(source, "PI_ALIAS") == "unresolved"
+
+    # THE CONTROL: same shape without the alias, where `env` really is the outer one.
+    control = ("const env = { ...getShellEnv() };\n"
+               "delete env.PI_ALIAS;\n"
+               "namespace N {\n  export function f(){ env.PI_ALIAS = v; }\n}\n")
+    assert _write_receiver(control, "PI_ALIAS").startswith("object")
+
+
+def test_using_is_block_scoped_like_let() -> None:
+    """`using` and `await using` end at their block.
+
+    Read as function-scoped, the binding outlives the block and a write AFTER it
+    stops resolving to the object that block never touched. `await using` carries
+    the const bit and so matches by accident; plain `using` does not.
+    """
+    for keyword in ("using", "await using"):
+        source = ("const env = { ...getShellEnv() };\n"
+                  "delete env.PI_USING;\n"
+                  "async function f() {\n"
+                  f"  {{ {keyword} env = resource; env.PI_USING = v; }}\n"
+                  "  env.PI_AFTER = v;\n}\n")
+        assert _write_receiver(source, "PI_USING") == "unresolved", keyword
+        assert _write_receiver(source, "PI_AFTER").startswith("object"), keyword
+
+
+def test_a_class_static_block_is_its_own_var_scope() -> None:
+    """`var` in a static block does not leave it; the class around it is no boundary.
+
+    Hoisted out, the static block's object captures the file-level delete and every
+    later write, so writes that never touched it are reported against it.
+    """
+    source = ("const env = { ...getShellEnv() };\n"
+              "delete env.PI_STATIC;\n"
+              "const C = class { static { var env = {}; env.PI_STATIC = v; } };\n"
+              "env.PI_AFTER = v;\n")
+    inside = _write_receiver(source, "PI_STATIC")
+    after = _write_receiver(source, "PI_AFTER")
+    assert inside.startswith("object"), inside
+    assert after.startswith("object"), after
+    assert inside != after, f"both writes landed on {inside}"
 
 
 def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:

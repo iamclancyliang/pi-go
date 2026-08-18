@@ -59,6 +59,17 @@ function readsInheritedEnv(node) {
 	);
 }
 
+/**
+ * Does this declaration list bind per BLOCK rather than per function?
+ *
+ * TypeScript names the set itself: `NodeFlags.BlockScoped` is Let|Const|Using, and
+ * `await using` is Const|Using, so it matches through its Const bit while a plain
+ * `using` does not. Re-deriving the set by listing flags reproduces that gap by
+ * hand: read as function-scoped, a `using` binding outlives its block and a write
+ * after the block stops resolving to the object the block never touched.
+ */
+const isBlockScoped = (list) => Boolean(list.flags & ts.NodeFlags.BlockScoped);
+
 /** Look through parentheses: they are punctuation, not part of the value. */
 function unwrapParens(node) {
 	let current = node;
@@ -117,7 +128,10 @@ function analyse(path, source) {
 		ts.isSourceFile(node) || ts.isFunctionDeclaration(node) ||
 		ts.isFunctionExpression(node) || ts.isArrowFunction(node) ||
 		ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) ||
-		ts.isGetAccessor(node) || ts.isSetAccessor(node) || ts.isModuleBlock(node);
+		ts.isGetAccessor(node) || ts.isSetAccessor(node) || ts.isModuleBlock(node) ||
+		// A `var` in a class static block does not leave it, so the block is a var
+		// boundary. The class around it is not one.
+		ts.isClassStaticBlockDeclaration(node);
 
 	const opensScope = (node) =>
 		ts.isSourceFile(node) || ts.isBlock(node) || ts.isFunctionDeclaration(node) ||
@@ -127,7 +141,7 @@ function analyse(path, source) {
 		ts.isCaseBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node) ||
 		ts.isConstructorDeclaration(node) || ts.isGetAccessor(node) ||
 		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node) ||
-		ts.isClassExpression(node);
+		ts.isClassExpression(node) || ts.isClassStaticBlockDeclaration(node);
 
 	/** Does this object literal spread an inherited environment, possibly via a chain? */
 	const seededFrom = (initializer) => {
@@ -229,7 +243,7 @@ function analyse(path, source) {
 
 		if (ownList(scopeNode)) {
 			const list = scopeNode.initializer;
-			const blockScoped = Boolean(list.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const));
+			const blockScoped = isBlockScoped(list);
 			for (const declaration of list.declarations) {
 				if (blockScoped) {
 					declarePattern(declaration.name, declaration);
@@ -253,8 +267,7 @@ function analyse(path, source) {
 		scopeStatements.forEach((child) => {
 			if (ownList(child)) return;   // the loop hoists its own header
 			for (const list of declarationLists(child)) {
-				const blockScoped = Boolean(list.flags &
-					(ts.NodeFlags.Let | ts.NodeFlags.Const));
+				const blockScoped = isBlockScoped(list);
 				if (!blockScoped) continue;
 				for (const declaration of list.declarations) {
 					declarePattern(declaration.name, declaration);
@@ -267,6 +280,12 @@ function analyse(path, source) {
 			// An enum or a namespace declares a name in the enclosing scope too;
 			// without them a reference resolves outward to something else entirely.
 			if (ts.isEnumDeclaration(child) && child.name) declare(child.name.text, child);
+			// `import x = M.y` and `import x = require("m")` bind `x` as well. What it
+			// aliases does not matter here, only that a reference to it is NOT the
+			// environment object declared outside.
+			if (ts.isImportEqualsDeclaration(child) && child.name) {
+				declare(child.name.text, child);
+			}
 			if (ts.isModuleDeclaration(child) && child.name && ts.isIdentifier(child.name)) {
 				declare(child.name.text, child);
 			}
@@ -275,8 +294,7 @@ function analyse(path, source) {
 		if (!functionLevel) return;
 		const collectVars = (node) => {
 			for (const list of declarationLists(node)) {
-				const blockScoped = Boolean(list.flags &
-					(ts.NodeFlags.Let | ts.NodeFlags.Const));
+				const blockScoped = isBlockScoped(list);
 				if (blockScoped) continue;
 				for (const declaration of list.declarations) {
 					if (ts.isIdentifier(declaration.name)) {

@@ -63,6 +63,12 @@ import { codePointMapper, loadTypeScript, requireParsed, scriptKindFor } from ".
 
 const ts = loadTypeScript(process.argv[2]);
 
+/** A supplied file's path as the caller keyed it, so a caller can look it up. */
+function relativeToRoot(fileName) {
+	const prefix = `${repoRoot}/`;
+	return fileName.startsWith(prefix) ? fileName.slice(prefix.length) : fileName;
+}
+
 /**
  * A Program over the supplied files, so exports come from the CHECKER.
  *
@@ -74,12 +80,6 @@ const ts = loadTypeScript(process.argv[2]);
  * outside them, so an alias into an unsupplied module resolves to nothing and comes
  * back with no meanings rather than a guessed one.
  */
-/** A supplied file's path as the caller keyed it, so a caller can look it up. */
-function relativeToRoot(fileName) {
-	const prefix = `${repoRoot}/`;
-	return fileName.startsWith(prefix) ? fileName.slice(prefix.length) : fileName;
-}
-
 function buildProgram(files, repoRoot) {
 	const options = {
 		target: ts.ScriptTarget.Latest,
@@ -122,6 +122,30 @@ function buildProgram(files, repoRoot) {
 	};
 	host.fileExists = (fileName) =>
 		supplied.has(fileName) || (isLib(fileName) && ts.sys.fileExists(fileName));
+	// THE DIRECTORY VIEW IS PART OF THE SAME GUARANTEE. Module resolution asks
+	// whether a directory exists, and canonicalises paths, before it reads any file.
+	// Left to the real filesystem those answers come from the working tree, so a
+	// supplied input under a directory that does not exist on this machine is
+	// reported unresolved -- and the same pinned inputs then answer differently
+	// somewhere else, which is exactly what reading from the tree was meant to stop.
+	const suppliedDirectories = new Set();
+	for (const fileName of supplied.keys()) {
+		for (let cut = fileName.lastIndexOf("/"); cut > 0;
+			cut = fileName.lastIndexOf("/", cut - 1)) {
+			suppliedDirectories.add(fileName.slice(0, cut));
+		}
+	}
+	host.directoryExists = (directoryName) => {
+		const trimmed = directoryName.replace(/\/+$/, "");
+		return suppliedDirectories.has(trimmed) ||
+			(isLib(trimmed) && ts.sys.directoryExists(trimmed));
+	};
+	host.getDirectories = (directoryName) =>
+		isLib(directoryName) ? ts.sys.getDirectories(directoryName) : [];
+	// Symlink canonicalisation is a working-tree question as well; supplied paths are
+	// already the identity the caller keyed them by.
+	host.realpath = (fileName) =>
+		isLib(fileName) && ts.sys.realpath ? ts.sys.realpath(fileName) : fileName;
 	host.readFile = (fileName) =>
 		supplied.get(fileName) ?? (isLib(fileName) ? ts.sys.readFile(fileName) : undefined);
 	const program = ts.createProgram([...supplied.keys()], options, host);

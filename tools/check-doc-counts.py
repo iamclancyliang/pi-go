@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import os
 import re
 import subprocess
 import sys
@@ -145,9 +146,15 @@ def main() -> int:
     expect("usage document environment names",
            first_int(r"环境变量（一共 (\d+) 个名字", usage), names)
 
+    # ONE checkout for every child. The generator is told which tree to read; a child
+    # left to the ambient environment answers about a different one, and the gate then
+    # prints a single verdict covering two trees.
+    child_env = dict(os.environ)
+    child_env["PI_REPO"] = args.pi_repo
+
     # The suites' own totals, since the feature list quotes them.
     tests = subprocess.run([sys.executable, "-B", str(TOOLS / "test_gen_feature_ids.py")],
-                           capture_output=True, text=True, cwd=ROOT)
+                           capture_output=True, text=True, cwd=ROOT, env=child_env)
     passed = first_int(r"(\d+)/\d+ passed", tests.stdout)
     expect("feature list test count",
            first_int(r"这样的测试共 (\d+) 个", feature_list), passed or -1)
@@ -168,7 +175,7 @@ def main() -> int:
         # whatever PI_REPO happens to be, and the combined gate has two inputs.
         sweep = subprocess.run([sys.executable, "-B", str(TOOLS / "mutation-sweep.py"),
                                 "--pi-repo", args.pi_repo],
-                               capture_output=True, text=True, cwd=ROOT)
+                               capture_output=True, text=True, cwd=ROOT, env=child_env)
         caught = first_int(r"(\d+)/\d+ mutations caught", sweep.stdout)
         if caught != defined:
             complain(f"the sweep caught {caught} of {defined} defined mutations")
