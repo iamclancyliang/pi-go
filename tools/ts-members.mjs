@@ -74,6 +74,12 @@ const ts = loadTypeScript(process.argv[2]);
  * outside them, so an alias into an unsupplied module resolves to nothing and comes
  * back with no meanings rather than a guessed one.
  */
+/** A supplied file's path as the caller keyed it, so a caller can look it up. */
+function relativeToRoot(fileName) {
+	const prefix = `${repoRoot}/`;
+	return fileName.startsWith(prefix) ? fileName.slice(prefix.length) : fileName;
+}
+
 function buildProgram(files, repoRoot) {
 	const options = {
 		target: ts.ScriptTarget.Latest,
@@ -119,10 +125,18 @@ function buildProgram(files, repoRoot) {
 	host.readFile = (fileName) =>
 		supplied.get(fileName) ?? (isLib(fileName) ? ts.sys.readFile(fileName) : undefined);
 	const program = ts.createProgram([...supplied.keys()], options, host);
-	return { program, checker: program.getTypeChecker() };
+	// Module resolution run through THE SAME fail-closed host, so "did this specifier
+	// resolve" is answered by the compiler rather than by re-implementing the lookup.
+	// It is a different question from "does the target export anything": a file with
+	// no exports is not a module and has no module symbol, yet it resolved and is
+	// fully visible, so the symbol table answers the wrong question.
+	const resolveSpecifier = (name, containingFile) =>
+		ts.resolveModuleName(name, containingFile, options, host)
+			.resolvedModule?.resolvedFileName;
+	return { program, checker: program.getTypeChecker(), resolveSpecifier };
 }
 
-function analyse(path, program, checker) {
+function analyse(path, program, checker, resolveSpecifier) {
 	const file = program.getSourceFile(path);
 	if (!file) {
 		process.stderr.write(`the program has no source file for ${path}\n`);
@@ -195,11 +209,13 @@ function analyse(path, program, checker) {
 			if (!ts.isExportDeclaration(statement) || statement.exportClause) continue;
 			const specifier = statement.moduleSpecifier;
 			if (!specifier || !ts.isStringLiteral(specifier)) continue;
-			const moduleSymbol = checker.getSymbolAtLocation(specifier);
+			const resolvedFileName = resolveSpecifier(specifier.text, file.fileName);
 			starExports.push({
 				specifier: specifier.text,
-				resolved: Boolean(moduleSymbol &&
-					checker.getExportsOfModule(moduleSymbol).length > 0),
+				resolved: Boolean(resolvedFileName),
+				// Named so a caller can follow the chain: an opaque star one module
+				// further out truncates the surface in exactly the same way.
+				...(resolvedFileName ? { target: relativeToRoot(resolvedFileName) } : {}),
 			});
 		}
 	}
@@ -489,9 +505,9 @@ function analyse(path, program, checker) {
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const repoRoot = process.argv[2].replace(/\/+$/, "");
-const { program, checker } = buildProgram(input, repoRoot);
+const { program, checker, resolveSpecifier } = buildProgram(input, repoRoot);
 const result = {};
 for (const path of Object.keys(input)) {
-	result[path] = analyse(`${repoRoot}/${path}`, program, checker);
+	result[path] = analyse(`${repoRoot}/${path}`, program, checker, resolveSpecifier);
 }
 process.stdout.write(JSON.stringify(result));

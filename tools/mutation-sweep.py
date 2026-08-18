@@ -12,19 +12,60 @@ the suite must go red. Two lessons are baked in:
     the suite green, because the wrapped overloads do start a line -- what
     truncates upstream is reading the event literal from the same line.
 
-Run from the repo root: python3 tools/mutation-sweep.py
+Run from the repo root: python3 tools/mutation-sweep.py [--pi-repo PATH]
+
+The checkout is named ONCE and passed to every child suite. Accepting an unknown
+argument silently would be worse than rejecting it: a run told to sweep one checkout
+while actually reading another reports a green result about a tree nobody asked
+about.
+
 Exit status is non-zero if any mutation survives.
 """
 from __future__ import annotations
 
-import atexit, os, pathlib, shutil, subprocess, sys, tempfile
+import argparse, atexit, os, pathlib, shutil, subprocess, sys, tempfile
 
 from collections import namedtuple
 
 # A bare triple leaves a reader counting positions to tell the searched text from
 # the replacement. Naming the fields makes each entry read as what it claims: this
 # label describes breaking `find` into `replace`.
-Mutation = namedtuple("Mutation", "label find replace")
+# An EDIT is one search paired with its replacement. Held as two parallel sequences
+# and zipped, a missing entry on one side silently drops the last edit, and the sweep
+# then reports a weaker mutation than the one written as caught. Pairing them at
+# construction makes that unrepresentable.
+Edit = namedtuple("Edit", "find replace")
+
+
+class Mutation:
+    """One named break, as the edits that produce it, applied together.
+
+    Several edits mean a guarantee held at several sites at once: reverting one of
+    them changes no answer because the others still hold the line, so mutated one
+    site at a time, redundancy scores as an untested guarantee.
+    """
+
+    def __init__(self, label: str, find, replace) -> None:
+        searches = find if isinstance(find, tuple) else (find,)
+        replacements = replace if isinstance(replace, tuple) else (replace,)
+        if len(searches) != len(replacements):
+            raise ValueError(
+                f"{label}: {len(searches)} search string(s) against "
+                f"{len(replacements)} replacement(s) -- every edit must be a pair")
+        self.label = label
+        self.edits = tuple(Edit(f, r) for f, r in zip(searches, replacements))
+
+parser = argparse.ArgumentParser(description="mutation sweep over the census tools")
+parser.add_argument("--pi-repo", default=os.environ.get("PI_REPO"),
+                    help="the pinned Pi checkout each suite run reads TypeScript from; "
+                         "defaults to $PI_REPO, then to the suite's own fallback")
+options = parser.parse_args()
+
+# One environment for every child, so the sweep and the suite cannot read different
+# trees. Unset means the suite applies its own documented fallback.
+CHILD_ENV = dict(os.environ)
+if options.pi_repo:
+    CHILD_ENV["PI_REPO"] = options.pi_repo
 
 MUTATIONS = [
     Mutation("discover reads extraction",
@@ -223,6 +264,18 @@ MUTATIONS = [
     Mutation("initializer walked twice",
              "\t\tif (!force && alreadyDescended.has(node)) return;",
              "\t\tif (!force && false) return;"),
+    Mutation("named expression does not bind its own name",
+             "\t\tif (scoped && (ts.isFunctionExpression(node) || ts.isClassExpression(node)) &&",
+             "\t\tif (false && (ts.isFunctionExpression(node) || ts.isClassExpression(node)) &&"),
+    Mutation("class expression opens no scope",
+             "\t\tts.isClassExpression(node);", "\t\tfalse;"),
+    Mutation("star guard stops at the barrel's own stars",
+             "                visited.add(target)\n                pending.append(target)",
+             "                visited.add(target)"),
+    Mutation("resolution decided by the symbol table",
+             "\t\t\t\tresolved: Boolean(resolvedFileName),",
+             "\t\t\t\tresolved: Boolean(resolvedFileName) && "
+             "Boolean(checker.getSymbolAtLocation(specifier)),"),
     Mutation("re-export specifier read at a fixed depth",
              "\t\t\t\tconst specifier = exportSpecifierOf(node);",
              "\t\t\t\tconst specifier = node.parent?.parent?.moduleSpecifier?.text;"),
@@ -265,26 +318,19 @@ atexit.register(lambda: shutil.rmtree(workspace.parent, ignore_errors=True))
 def run() -> str:
     shutil.rmtree(workspace / "__pycache__", ignore_errors=True)
     out = subprocess.run([sys.executable, "-B", str(workspace / "test_gen_feature_ids.py")],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, env=CHILD_ENV)
     return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "NO OUTPUT"
 
 
-def apply(old: str | tuple, new: str | tuple) -> tuple[str, int] | None:
-    """Put the mutation in whichever COPY contains it; None if nowhere does.
-
-    A guarantee may be held at SEVERAL sites at once, and reverting one of them
-    changes no answer because the others still hold the line. Such an entry pairs
-    a tuple of searches with a tuple of replacements and applies them together;
-    mutated one site at a time, redundancy scores as an untested guarantee.
-    """
-    edits = list(zip(old, new)) if isinstance(old, tuple) else [(old, new)]
+def apply(edits) -> tuple[str, int] | None:
+    """Put the mutation in whichever COPY contains it; None if nowhere does."""
     for name in COPIES:
         text = ORIGINALS[name]
-        if all(search in text for search, _ in edits):
+        if all(edit.find in text for edit in edits):
             count = 0
-            for search, replacement in edits:
-                count += text.count(search)
-                text = text.replace(search, replacement)
+            for edit in edits:
+                count += text.count(edit.find)
+                text = text.replace(edit.find, edit.replace)
             (workspace / name).write_text(text)
             return name, count
     return None
@@ -314,15 +360,14 @@ def preflight() -> list[str]:
         the first line of a multi-line call does exactly this.
     """
     problems = []
-    for label, old, new in MUTATIONS:
-        searches = old if isinstance(old, tuple) else (old,)
-        replacements = new if isinstance(new, tuple) else (new,)
+    for mutation in MUTATIONS:
+        label = mutation.label
         for name, text in ORIGINALS.items():
-            if not all(s in text for s in searches):
+            if not all(edit.find in text for edit in mutation.edits):
                 continue
             mutated = text
-            for search, replacement in zip(searches, replacements):
-                mutated = mutated.replace(search, replacement)
+            for edit in mutation.edits:
+                mutated = mutated.replace(edit.find, edit.replace)
             if name.endswith(".py"):
                 try:
                     compile(mutated, name, "exec")
@@ -349,13 +394,16 @@ if blocking:
     print(f"\n{len(blocking)} mutation(s) cannot test anything; nothing was run")
     sys.exit(1)
 
+checkout = CHILD_ENV.get("PI_REPO") or "the suite's own fallback"
+print(f"  {'checkout':<40} -> {checkout}")
 BASELINE = run()
 print(f"  {'BASELINE (must be green)':<40} -> {BASELINE}")
 assert "passed" in BASELINE and BASELINE.split("/")[0] == BASELINE.split("/")[1].split()[0], \
     f"baseline is not green: {BASELINE}"
 escaped = 0
-for label, old, new in MUTATIONS:
-    placed = apply(old, new)
+for mutation in MUTATIONS:
+    label = mutation.label
+    placed = apply(mutation.edits)
     if placed is None:
         print(f"  {label:<40} -> TARGET MISSING")
         escaped += 1

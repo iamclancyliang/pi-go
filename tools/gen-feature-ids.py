@@ -252,13 +252,14 @@ def generate(src: "Source", args: argparse.Namespace) -> int:
              "checker resolves it — not as the export syntax spells it",
              "the exported name",
              barrel["type"])
-        # A locally declared namespace is neither space. This barrel has none, and a
-        # zero-member set would state that as a family rather than as a fact, so it is
-        # emitted only when present.
+        # NAMESPACE IS ITS OWN SPACE, and occupying it excludes nothing: a symbol can
+        # be a namespace AND a value at the same time. A zero-member set would state
+        # an absence as a family, so it is emitted only when present.
         if barrel["namespace"]:
             emit("tui.export.namespace",
-                 "`tui/src/index.ts` barrel, exports whose symbol is a locally "
-                 "declared NAMESPACE; neither declaration space holds these",
+                 "`tui/src/index.ts` barrel, exports whose symbol occupies the "
+                 "NAMESPACE declaration space; a name here also appears in the value "
+                 "or type set when its symbol occupies those as well",
                  "the exported name",
                  barrel["namespace"])
         emit("tui.export.external",

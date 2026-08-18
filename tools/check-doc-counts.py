@@ -163,7 +163,11 @@ def main() -> int:
 
     caught = None
     if args.with_sweep:
-        sweep = subprocess.run([sys.executable, "-B", str(TOOLS / "mutation-sweep.py")],
+        # The same checkout the fast checks used. Left to the ambient environment, the
+        # generator answers about the pinned tree while the sweep answers about
+        # whatever PI_REPO happens to be, and the combined gate has two inputs.
+        sweep = subprocess.run([sys.executable, "-B", str(TOOLS / "mutation-sweep.py"),
+                                "--pi-repo", args.pi_repo],
                                capture_output=True, text=True, cwd=ROOT)
         caught = first_int(r"(\d+)/\d+ mutations caught", sweep.stdout)
         if caught != defined:

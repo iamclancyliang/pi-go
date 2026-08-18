@@ -126,7 +126,8 @@ function analyse(path, source) {
 		ts.isForOfStatement(node) || ts.isForInStatement(node) ||
 		ts.isCaseBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node) ||
 		ts.isConstructorDeclaration(node) || ts.isGetAccessor(node) ||
-		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node);
+		ts.isSetAccessor(node) || ts.isFunctionTypeNode(node) ||
+		ts.isClassExpression(node);
 
 	/** Does this object literal spread an inherited environment, possibly via a chain? */
 	const seededFrom = (initializer) => {
@@ -311,6 +312,16 @@ function analyse(path, source) {
 		const scoped = opensScope(node);
 		if (scoped) {
 			scopes.push({ names: new Map(), functionLevel: isFunctionLevel(node) });
+		}
+
+		// A NAMED FUNCTION OR CLASS EXPRESSION BINDS ITS OWN NAME, inside itself only.
+		// `const f = function env() { env.X = v; }` has an `env` that is the function,
+		// not whatever `env` means outside; unregistered, the write is attributed to an
+		// outer object and an unrelated delete on it reads as a guard. Declared before
+		// the parameters, so a parameter of the same name still shadows it.
+		if (scoped && (ts.isFunctionExpression(node) || ts.isClassExpression(node)) &&
+			node.name && ts.isIdentifier(node.name)) {
+			declare(node.name.text, node);
 		}
 
 		// PARAMETERS SHADOW. A parameter named `env` is a different object from an

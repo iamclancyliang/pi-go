@@ -259,7 +259,7 @@ python3 tools/gen-feature-ids.py --pi-repo /path/to/pi \
         --check-providers tools/expected-providers.txt
 python3 tools/test_gen_feature_ids.py     # 抽取器自身的负向控制
 python3 tools/check-doc-counts.py --pi-repo /path/to/pi   # 文档里的数字必须和生成器一致
-python3 tools/mutation-sweep.py           # 故意改坏抽取器，测试必须变红（较慢）
+python3 tools/mutation-sweep.py --pi-repo <pi>   # 故意改坏抽取器，测试必须变红（较慢）
 ```
 
 **退出码 0 只说明**：固定版本可读、抽取器没触发自身守卫（无法归类的调用 / ID 撞车 / 成员数不符）、

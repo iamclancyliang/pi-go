@@ -909,8 +909,8 @@ def test_an_override_map_needs_no_clearing() -> None:
 def test_a_written_name_outside_the_pi_namespace_is_still_counted() -> None:
     """Writes are not prefix-limited: the product also sets `AI_AGENT=pi`.
 
-    A `PI_`-only scan missed it while the census prose listed it, so source and
-    documentation could not close against each other.
+    A `PI_`-only scan cannot see it, so source and documentation cannot be closed
+    against each other: the document lists a name the scan reports as absent.
     """
     fixture = dict(ENV_FIXTURE)
     fixture["packages/coding-agent/src/entry.ts"] = 'process.env.AI_AGENT = "pi";\n'
@@ -1288,14 +1288,18 @@ def test_an_enum_declares_a_name_in_its_scope() -> None:
     assert _write_receiver(source, "PI_ENUM") == "unresolved"
 
 
-def test_a_namespace_keeps_its_own_space() -> None:
-    """A namespace is not a value that happens to hold things.
+def test_a_namespace_keeps_its_own_space_without_losing_the_others() -> None:
+    """The namespace space is its own, and occupying it excludes nothing.
 
-    Folded into another space, `export namespace X` reads as an ordinary binding
-    and the namespace space silently empties.
+    `namespace N { export const x = 1 }` occupies the namespace space AND the value
+    space. Folded into whichever other space it also occupies, the namespace set
+    empties and nothing in the output records that it ever had members.
     """
     result = gen.tui_barrel_names(FakeSource(dict(BARREL_FIXTURE)))
     assert "Space" in result["namespace"], result
+    # Both memberships are real. Asserting only the namespace one would also pass for
+    # a rule that MOVED the name there instead of adding it.
+    assert "Space" in result["value"], result
 
 
 def test_a_parenthesised_seed_is_still_a_seeded_map() -> None:
@@ -1358,6 +1362,77 @@ def test_a_star_export_that_cannot_be_enumerated_is_refused() -> None:
     result = gen.tui_barrel_names(FakeSource(barrel))
     assert result is None, result
     assert any("outside" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_named_function_or_class_expression_binds_its_own_name() -> None:
+    """The name of a named expression refers to the expression, inside it only.
+
+    `const f = function env() { env.X = v }` has an `env` that is the function, so a
+    write through it never touches the outer object -- and while it resolves outward,
+    an unrelated delete on that object reads as a guard.
+    """
+    outer = "const env = { ...getShellEnv() };\ndelete env.PI_NAMED;\n"
+    for inner in (
+        "const f = function env(){ env.PI_NAMED = v; };\n",
+        "const C = class env { m(){ env.PI_NAMED = v; } };\n",
+    ):
+        assert _write_receiver(outer + inner, "PI_NAMED") == "unresolved", inner
+
+    # Visible at any depth INSIDE the expression: a nested block, and a method body
+    # inside a named class expression.
+    for inner in (
+        "const f = function env(){ { if (x) { env.PI_NAMED = v; } } };\n",
+        "const C = class env { m(){ { env.PI_NAMED = v; } } };\n",
+    ):
+        assert _write_receiver(outer + inner, "PI_NAMED") == "unresolved", inner
+
+    # AND IT DOES NOT LEAVE. Declared one scope too high, the name would shadow the
+    # outer object for the rest of the file, so a write after the expression would
+    # stop resolving to the object its own delete guards.
+    escapes = outer + ("const f = function env(){};\n"
+                       "env.PI_NAMED = v;\n")
+    assert _write_receiver(escapes, "PI_NAMED").startswith("object"), escapes
+
+    # THE CONTROL: anonymous, so `env` really is the outer object and the delete
+    # really does guard it. Without this, the assertions above would also hold for a
+    # resolver that simply lost track of every write.
+    anonymous = outer + "const f = function (){ env.PI_NAMED = v; };\n"
+    assert _write_receiver(anonymous, "PI_NAMED").startswith("object"), anonymous
+
+
+def test_an_opaque_star_behind_a_local_module_still_fails() -> None:
+    """A resolved star can hide an unresolved one behind it.
+
+    `export * from "./local.ts"` resolves, so a guard that checks only the barrel's
+    own stars passes -- while the opaque star inside that module drops a whole
+    dependency surface, one level further out of sight.
+    """
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export * from "./wrapper.ts";\n'
+    barrel["packages/tui/src/wrapper.ts"] = ('export const Local = 1;\n'
+                                             'export * from "outside";\n')
+    gen.errors.clear()
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert result is None, result
+    assert any("outside" in m for m in gen.errors), gen.errors
+    gen.errors.clear()
+
+
+def test_a_local_module_that_exports_nothing_is_not_a_gap() -> None:
+    """Resolution and emptiness are different questions.
+
+    A file with no exports is not a module and has no module symbol, but it resolved
+    and is fully visible. Counting its exports to decide resolution reports a gap
+    that does not exist, and fails a set that is completely enumerable.
+    """
+    barrel = dict(BARREL_FIXTURE)
+    barrel[BARREL_PATH] += 'export * from "./nothing.ts";\n'
+    barrel["packages/tui/src/nothing.ts"] = "const unexported = 1;\n"
+    gen.errors.clear()
+    result = gen.tui_barrel_names(FakeSource(barrel))
+    assert result is not None, gen.errors
+    assert not gen.errors, gen.errors
     gen.errors.clear()
 
 

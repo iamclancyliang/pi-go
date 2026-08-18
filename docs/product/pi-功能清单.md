@@ -34,7 +34,7 @@ python3 tools/gen-feature-ids.py --pi-repo /path/to/pi \
         --check-providers tools/expected-providers.txt
 python3 tools/test_gen_feature_ids.py     # 抽取器自身的负向控制
 python3 tools/check-doc-counts.py --pi-repo /path/to/pi   # 文档里的数字必须和生成器一致
-python3 tools/mutation-sweep.py           # 故意改坏抽取器，测试必须变红（较慢）
+python3 tools/mutation-sweep.py --pi-repo <pi>   # 故意改坏抽取器，测试必须变红（较慢）
 ```
 
 **退出码 0 说明的只有这些：**
@@ -308,8 +308,8 @@ Go 版要为**这个包从未宣传过的名字**承担接口稳定性，而且�
 事件、界面请求、运行形态、厂商、设置项、环境变量四类、认证三类、扩展钩子、思考等级）。每一类都写明了「凭什么这么算」的权威来源。
 
 抽取器**自己也有负向控制**（`tools/test_gen_feature_ids.py`）：写在字符串或模板里的假代码
-（例如 `const s = "export const createPhantomTool = 1"`）**必须不被认成功能**。这样的测试共 99 个。
-另外还做了「故意改坏代码看测试会不会变红」的检验：64 种改法全部被抓到——否则测试只是好看，
+（例如 `const s = "export const createPhantomTool = 1"`）**必须不被认成功能**。这样的测试共 102 个。
+另外还做了「故意改坏代码看测试会不会变红」的检验：68 种改法全部被抓到——否则测试只是好看，
 并不能证明什么。（不是每个测试都单独配了一种改法；这 64 种针对的是各条保证。）
 
 **尚未完成**：

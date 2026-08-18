@@ -834,13 +834,37 @@ def tui_barrel_names(src: Source) -> dict[str, list[str]] | None:
             spaces[meaning].append(export["name"])
 
     # A star re-export names nothing, so an unresolved one removes members from the
-    # set with nothing left in the output to show that it did.
-    opaque = [star["specifier"] for star in facts["starExports"] if not star["resolved"]]
+    # set with nothing left in the output to show that it did. Checking only the
+    # barrel's OWN stars is not enough: `export * from "./local.ts"` resolves, and an
+    # opaque star INSIDE that module truncates the surface in exactly the same way,
+    # one level further out of sight. The guard therefore walks the whole closure of
+    # resolved star targets. Cycles are legal here, so visited modules are skipped.
+    opaque: list[str] = []
+    visited = {barrel}
+    pending = [barrel]
+    while pending:
+        current = pending.pop()
+        if current in graph:
+            stars = src.members_graph(graph, current)["starExports"]
+        else:
+            # Reachable but outside the parsed graph: its own stars are unreadable, so
+            # whether it truncates the surface cannot be answered. Not an assumption
+            # that it does not.
+            opaque.append(f"{current} (reached by a star re-export, not in the graph)")
+            continue
+        for star in stars:
+            if not star["resolved"]:
+                opaque.append(f"{current} -> {star['specifier']}")
+                continue
+            target = star.get("target")
+            if target and target not in visited:
+                visited.add(target)
+                pending.append(target)
     if opaque:
-        fail(f"the TUI barrel re-exports all of {sorted(opaque)} without naming any of "
-             f"it, and those modules are not in the pinned inputs - the surface is not "
-             f"enumerable from the baseline, and a set built anyway would be short by "
-             f"an unknown number of names")
+        fail(f"the TUI surface is not enumerable from the baseline: {sorted(opaque)} "
+             f"re-export a whole module without naming any of it, and those modules are "
+             f"not in the pinned inputs - a set built anyway would be short by an "
+             f"unknown number of names")
         return None
 
     if unknown:

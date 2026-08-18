@@ -2105,13 +2105,13 @@ property, or anything else this resolver does not follow — is neither obliged 
 binding at all is counted as a member and **explicitly not spoken for**; the emitted authority line
 carries how many such accesses exist, so the limit is visible rather than implied.
 
-**Why a literal grep could never close it — three separate reasons, each of which produced a wrong
-figure first.**
+**Why a literal grep cannot close this axis — three separate reasons, each of which yields a wrong
+figure.**
 
 1. **No left token boundary.** `PI_[A-Z_]+` matches inside other identifiers: `ANTHROPIC_API_KEY`
-   contains `PI_KEY`, and `CLOUDFLARE_API_HOST` contains `PI_HOST`. Earlier revisions of this very
-   section cited `PI_HOST` as an example of product configuration; **`PI_HOST` does not exist**. The
-   section that corrected the boundary bug still carried a member the bug had invented.
+   contains `PI_KEY`, and `CLOUDFLARE_API_HOST` contains `PI_HOST`. **`PI_HOST` is not a Pi
+   variable**; it exists only as a substring. A match without a boundary invents members, and prose
+   quoting those matches carries the invention forward even after the scan is fixed.
 2. **Two names are not literals at all.** `config.ts` builds them from the configurable app name:
 
    ```ts
@@ -2170,8 +2170,9 @@ The five names exposed to tool subprocesses (`PI_SESSION_ID`, `PI_SESSION_FILE`,
 **written** for children at `bash.ts:179-186` and deleted first at `:172-176`, so a stale value from
 the parent environment cannot leak into a tool call. `exposeSessionEnvironment: false` turns them off.
 
-Two process markers the document lists — `AI_AGENT` and `PI_CODING_AGENT` — were also missing from
-§17 and are recorded there now.
+Two process markers the document lists, `AI_AGENT` and `PI_CODING_AGENT`, are recorded in §17.
+Neither carries the `PI_` prefix in the form a prefix scan matches, which is why the authority is
+every write, not a spelling.
 
 ### 22.8 What the set list does not claim
 
@@ -2556,7 +2557,7 @@ satisfy itself that it is already following the rule while counting the proxy.
   the list is given without a count.
 - Generated surfaces record generator, generated artefact and data separately (§7.2).
 
-**Remaining work, as of this revision:**
+**Remaining work:**
 
 - **`schema-needed`:** per-command RPC
   response payload internals; the SDK's own API surface.
