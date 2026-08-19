@@ -223,7 +223,8 @@ func (r *Run) Wait() error {
 	// by cancelling it, so without reading the cause back a deliberate stop is
 	// reported as a broken run — the caller sees an error for the one outcome
 	// that was requested.
-	if exit != nil && exit.StopCause == stopCauseToolTerminate {
+	if (exit != nil && exit.StopCause == stopCauseToolTerminate) ||
+		errors.Is(exitErr, errToolTerminate) {
 		reason = stopCauseToolTerminate
 		exitErr = nil
 	}
@@ -359,8 +360,15 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 						if !batch.ShouldTerminate() {
 							return nil
 						}
+						// Stop() ends the LOOP, and it does so by cancelling:
+						// the cancellation is delivered asynchronously, so on
+						// its own it races the next model call and sometimes
+						// loses. Returning an error from this hook is what
+						// stops the round deterministically, because the hook
+						// runs synchronously at the point the graph would
+						// otherwise proceed to the model.
 						l.Stop(adk.WithImmediate(), adk.WithStopCause(stopCauseToolTerminate))
-						return nil
+						return errToolTerminate
 					}),
 				},
 				Consumed: items,
@@ -403,8 +411,9 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// is read back: reported as an error, a deliberate stop would
 			// surface as a broken run and would stop the agent for the wrong
 			// stated reason.
-			if tc != nil && tc.StopCause() == stopCauseToolTerminate {
-				reason = "tool_terminate"
+			if (tc != nil && tc.StopCause() == stopCauseToolTerminate) ||
+				errors.Is(failure, errToolTerminate) {
+				reason = stopCauseToolTerminate
 				failure = nil
 			} else if failure != nil {
 				reason = "error"
@@ -415,6 +424,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 					e.Detail.Err = failure.Error()
 				}
 			})
+
 			// A turn that failed or was cut short ends the agent WITHOUT
 			// looking for anything queued behind it. A message sent while a
 			// turn was failing is not consumed: the queue does not always
@@ -432,6 +442,11 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 // stopCauseToolTerminate marks a stop the tools asked for, so it can be told
 // apart from a cancellation or a failure when the turn is closed out.
 const stopCauseToolTerminate = "tool_terminate"
+
+// errToolTerminate cuts the round at the hook, which is the only synchronous
+// point before the next model call. It is pi-go's own signal and never reaches a
+// caller: it is normalised where the turn and the run are closed out.
+var errToolTerminate = errors.New("runtime: the round asked to stop")
 
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
