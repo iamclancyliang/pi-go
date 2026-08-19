@@ -39,6 +39,10 @@ type Session struct {
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
+	// overflowAttempts counts recoveries tried against the current input. It is
+	// rebuilt from the store, so a restart cannot hand the run a fresh budget.
+	overflowAttempts int
+
 	mu sync.RWMutex
 
 	// system is held separately from the transcript because it is not a
@@ -87,6 +91,15 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 	s.messages = append(s.messages, msgs...)
 	if s.checkpoint != nil {
 		s.sinceCheckpoint = append(s.sinceCheckpoint, msgs...)
+	}
+	for _, m := range msgs {
+		// New input from the user starts a new recovery budget. The previous
+		// attempts were spent trying to answer a different question, and
+		// charging them against this one would leave a conversation unable to
+		// recover from its first overflow.
+		if m.Role == ai.RoleUser {
+			s.overflowAttempts = 0
+		}
 	}
 	return nil
 }
@@ -153,6 +166,39 @@ func (s *Session) Project() Projection {
 
 	out = append(out, cloneMessages(s.messages)...)
 	return Projection{Messages: out, Complete: true}
+}
+
+// RecordOverflowAttempt durably notes that the provider refused the request for
+// being too large, and counts it against this input's recovery budget.
+//
+// The attempt is recorded but never projected. Sending it back would resend the
+// thing that was rejected, and offering it to a summariser would let a provider
+// error be written into the conversation as something that was said.
+func (s *Session) RecordOverflowAttempt(detail string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.store != nil {
+		if err := s.store.Append(context.Background(), Entry{
+			Overflow: &OverflowAttempt{Detail: detail},
+		}); err != nil {
+			return fmt.Errorf("session: recording an overflow attempt: %w", err)
+		}
+	}
+	s.overflowAttempts++
+	return nil
+}
+
+// OverflowAttempts reports how many recoveries have been tried for the current
+// input.
+//
+// Read from durable state rather than from a counter in memory, so a process that
+// died mid-recovery does not come back believing it has a full budget and repeat
+// work the user already paid for.
+func (s *Session) OverflowAttempts() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.overflowAttempts
 }
 
 // Compact publishes a checkpoint: a summary of everything so far, and the

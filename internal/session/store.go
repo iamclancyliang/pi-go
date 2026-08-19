@@ -38,6 +38,20 @@ type Store interface {
 type Entry struct {
 	Message    *ai.Message
 	Checkpoint *Checkpoint
+	Overflow   *OverflowAttempt
+}
+
+// OverflowAttempt records that the provider refused a request because the context
+// was too large.
+//
+// It is durable and it is NOT part of the conversation. Both halves matter: the
+// attempt happened, was paid for, and has to be auditable — and feeding it back
+// would resend the very thing that was rejected, or invite a summariser to
+// describe a provider error as something the conversation said.
+type OverflowAttempt struct {
+	// Detail is what the provider reported, kept for auditing rather than for
+	// the model to read.
+	Detail string
 }
 
 // Checkpoint is a compaction: a summary of what came before it, and the messages
@@ -93,6 +107,10 @@ func cloneEntry(e Entry) Entry {
 		cp.RetainedTail = cloneMessages(e.Checkpoint.RetainedTail)
 		return Entry{Checkpoint: &cp}
 	}
+	if e.Overflow != nil {
+		attempt := *e.Overflow
+		return Entry{Overflow: &attempt}
+	}
 	return Entry{}
 }
 
@@ -113,6 +131,14 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 		switch {
 		case e.Message != nil:
 			s.messages = append(s.messages, *e.Message)
+			if e.Message.Role == ai.RoleUser {
+				s.overflowAttempts = 0
+			}
+		case e.Overflow != nil:
+			// Durable, and deliberately not part of the conversation: it is
+			// counted against the recovery budget and never projected.
+			s.overflowAttempts++
+			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary
 			// already stands in for everything before it, including the older

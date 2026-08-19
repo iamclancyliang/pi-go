@@ -140,3 +140,71 @@ func (f *failAfterFirst) Append(_ context.Context, entries ...Entry) error {
 func (f *failAfterFirst) Load(context.Context) ([]Entry, error) {
 	return append([]Entry(nil), f.entries...), nil
 }
+
+// TestOverflowAttemptIsDurableButNotProjected pins both halves at once.
+//
+// The attempt happened and was paid for, so it must survive for auditing. It must
+// also never reach the provider again: sending it back resends the very thing
+// that was rejected, and offering it to a summariser lets a provider error be
+// written into the conversation as something that was said.
+func TestOverflowAttemptIsDurableButNotProjected(t *testing.T) {
+	store := &MemoryStore{}
+	s := WithStore("You are pi-go.", store)
+
+	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "a long question"}))
+	if err := s.RecordOverflowAttempt("context window exceeded"); err != nil {
+		t.Fatalf("RecordOverflowAttempt: %v", err)
+	}
+
+	if got := s.OverflowAttempts(); got != 1 {
+		t.Errorf("attempts = %d, want 1", got)
+	}
+	for _, m := range s.Project().Messages {
+		if m.Content == "context window exceeded" {
+			t.Error("the overflow attempt reached the projection")
+		}
+	}
+	for _, m := range s.Truth() {
+		if m.Content == "context window exceeded" {
+			t.Error("the overflow attempt was written into the conversation")
+		}
+	}
+
+	// It survives a restart: a process that died mid-recovery must not come back
+	// believing it has a full budget and repeat work the user already paid for.
+	reopened, err := Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := reopened.OverflowAttempts(); got != 1 {
+		t.Errorf("attempts after restart = %d, want 1: the budget was handed back", got)
+	}
+}
+
+// TestNewUserInputStartsAFreshBudget pins the boundary the budget belongs to.
+//
+// The spent attempts were trying to answer a different question. Charging them
+// against a new one leaves a conversation unable to recover from its first
+// overflow, which is the recovery the budget exists to allow.
+func TestNewUserInputStartsAFreshBudget(t *testing.T) {
+	store := &MemoryStore{}
+	s := WithStore("You are pi-go.", store)
+
+	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "first question"}))
+	if err := s.RecordOverflowAttempt("too large"); err != nil {
+		t.Fatalf("RecordOverflowAttempt: %v", err)
+	}
+	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "second question"}))
+
+	if got := s.OverflowAttempts(); got != 0 {
+		t.Errorf("attempts after new input = %d, want 0", got)
+	}
+	reopened, err := Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := reopened.OverflowAttempts(); got != 0 {
+		t.Errorf("attempts after new input, reopened = %d, want 0: the rebuilt "+
+			"budget disagrees with the live one", got)
+	}
+}
