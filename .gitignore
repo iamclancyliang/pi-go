@@ -1,0 +1,5 @@
+# Editor workspace files are personal, not project configuration.
+*.code-workspace
+
+# Finder metadata, created by the OS rather than by anyone working here.
+.DS_Store

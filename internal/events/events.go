@@ -29,6 +29,11 @@ const (
 
 	KindToolStart Kind = "tool_start"
 	KindToolEnd   Kind = "tool_end"
+	// KindToolResult is the RESULT becoming history, which is a different
+	// moment from the call finishing: ends follow completion, results follow
+	// the order the model asked for them. Folding the two together makes the
+	// difference between sequential and parallel execution inexpressible.
+	KindToolResult Kind = "tool_result"
 
 	KindTurnEnd  Kind = "turn_end"
 	KindAgentEnd Kind = "agent_end"
@@ -110,3 +115,24 @@ type ObserverFunc func(Event)
 
 // OnEvent implements Observer.
 func (f ObserverFunc) OnEvent(e Event) { f(e) }
+
+// AllKinds lists every kind this package defines, in emission order.
+//
+// A consumer that switches on Kind needs to know when a new one appears;
+// otherwise the event is delivered and silently rendered as nothing. Keeping the
+// list here, checked against the declarations, means adding a kind without
+// telling the consumers fails a test rather than shipping a blank line.
+func AllKinds() []Kind {
+	return []Kind{
+		KindAgentStart,
+		KindTurnStart,
+		KindModelRequest,
+		KindModelResponse,
+		KindModelChanged,
+		KindToolStart,
+		KindToolEnd,
+		KindToolResult,
+		KindTurnEnd,
+		KindAgentEnd,
+	}
+}

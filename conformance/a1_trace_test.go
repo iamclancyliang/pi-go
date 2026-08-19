@@ -51,6 +51,12 @@ func TestA1TracerBullet(t *testing.T) {
 	}
 
 	// --- the trace is complete and correctly ordered ---
+	//
+	// This round runs SEQUENTIALLY: it contains a tool that declared it cannot
+	// overlap, and one such tool makes the whole round sequential. The shape that
+	// proves it is each call finishing -- start, end, result -- before the next
+	// one starts. A round of parallel-safe tools emits a different shape, which
+	// TestParallelRoundOrdering covers.
 	assertOrder(t, kinds,
 		events.KindAgentStart,
 		events.KindTurnStart,
@@ -58,8 +64,10 @@ func TestA1TracerBullet(t *testing.T) {
 		events.KindModelResponse,
 		events.KindToolStart,
 		events.KindToolEnd,
+		events.KindToolResult,
 		events.KindToolStart,
 		events.KindToolEnd,
+		events.KindToolResult,
 		events.KindModelRequest,
 		events.KindModelResponse,
 		events.KindTurnEnd,
@@ -281,5 +289,38 @@ func fixedClock() func() time.Time {
 	return func() time.Time {
 		n++
 		return base.Add(time.Duration(n) * time.Millisecond)
+	}
+}
+
+// TestSystemPromptEntersContextOnce guards the prompt the model actually sees.
+//
+// The session projection carries the system message, and the framework can be
+// given its own instruction; supplying both puts it in twice. Nothing else in the
+// suite notices, because every assertion about behaviour still holds when the
+// prompt is duplicated — the model is simply asked something different from what
+// the session says.
+func TestSystemPromptEntersContextOnce(t *testing.T) {
+	_, sess, model, _, _ := runA1(t)
+
+	requests := model.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the model received no requests")
+	}
+	for index, req := range requests {
+		var system []string
+		for _, m := range req.Messages {
+			if m.Role == ai.RoleSystem {
+				system = append(system, m.Content)
+			}
+		}
+		if len(system) != 1 {
+			t.Errorf("request %d carried %d system messages, want 1: %q",
+				index, len(system), system)
+			continue
+		}
+		if system[0] != sess.System() {
+			t.Errorf("request %d system message = %q, want the session's %q",
+				index, system[0], sess.System())
+		}
 	}
 }

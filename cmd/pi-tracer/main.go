@@ -16,6 +16,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/events"
+	"github.com/iamclancyliang/pi-go/internal/render"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
@@ -82,78 +83,8 @@ func run() error {
 		}{rec.Events(), sess.Snapshot(), agent.Capabilities()})
 	}
 
-	printTrace(rec.Events())
-	printSession(sess.Snapshot())
-	printCapabilities(agent.Capabilities())
+	fmt.Print(render.Trace(rec.Events()))
+	fmt.Print(render.Session(sess.Snapshot()))
+	fmt.Print(render.Capabilities(agent.Capabilities()))
 	return nil
-}
-
-func printTrace(evs []events.Event) {
-	fmt.Println("=== EVENT TRACE ===")
-	fmt.Printf("%-4s %-6s %-16s %s\n", "seq", "turn", "kind", "detail")
-	for _, e := range evs {
-		fmt.Printf("%-4d %-6d %-16s %s\n", e.Seq, e.TurnIndex, e.Kind, describe(e))
-	}
-}
-
-func describe(e events.Event) string {
-	switch e.Kind {
-	case events.KindModelRequest:
-		return fmt.Sprintf("model=%s messages=%d", e.Detail.Model, e.Detail.MessageCount)
-	case events.KindModelResponse:
-		if len(e.Detail.ToolCallIDs) > 0 {
-			return fmt.Sprintf("model=%s toolCalls=%v", e.Detail.Model, e.Detail.ToolCallIDs)
-		}
-		return fmt.Sprintf("model=%s text=%q", e.Detail.Model, e.Detail.Text)
-	case events.KindModelChanged:
-		return fmt.Sprintf("%s -> %s", e.Detail.From, e.Detail.To)
-	case events.KindToolStart:
-		return fmt.Sprintf("%s id=%s args=%s", e.ToolName, e.ToolCallID, e.Detail.Args)
-	case events.KindToolEnd:
-		if e.Detail.Err != "" {
-			return fmt.Sprintf("%s id=%s err=%s", e.ToolName, e.ToolCallID, e.Detail.Err)
-		}
-		return fmt.Sprintf("%s id=%s result=%q", e.ToolName, e.ToolCallID, truncate(e.Detail.Result, 40))
-	case events.KindTurnEnd, events.KindAgentEnd:
-		if e.Detail.Err != "" {
-			return fmt.Sprintf("reason=%s err=%s", e.Detail.Reason, e.Detail.Err)
-		}
-		return fmt.Sprintf("reason=%s", e.Detail.Reason)
-	default:
-		return ""
-	}
-}
-
-func printSession(s session.Snapshot) {
-	fmt.Println("\n=== SESSION TRUTH ===")
-	fmt.Printf("system: %q\n", s.System)
-	for i, m := range s.Messages {
-		line := fmt.Sprintf("%2d %-9s %q", i, m.Role, truncate(m.Content, 48))
-		for _, tc := range m.ToolCalls {
-			line += fmt.Sprintf(" [call %s %s %s]", tc.ID, tc.Name, tc.Args)
-		}
-		if m.ToolCallID != "" {
-			line += fmt.Sprintf(" [result for %s]", m.ToolCallID)
-		}
-		fmt.Println(line)
-	}
-	if len(s.Unmatched) > 0 {
-		fmt.Printf("unmatched tool calls: %v\n", s.Unmatched)
-	} else {
-		fmt.Println("unmatched tool calls: none")
-	}
-}
-
-func printCapabilities(c runtime.Capabilities) {
-	fmt.Println("\n=== DECLARED HOST CAPABILITIES ===")
-	fmt.Printf("streaming=%v durableStorage=%v toolDenial=%v extensionTransport=%q\n",
-		c.Streaming, c.DurableStorage, c.ToolDenial, c.ExtensionTransport)
-}
-
-func truncate(s string, n int) string {
-	s = string([]rune(s))
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n]) + "…"
 }

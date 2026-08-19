@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -59,6 +60,21 @@ type Config struct {
 
 	// Now overrides the clock, for deterministic traces in tests.
 	Now func() time.Time
+
+	// PrepareNextTurn runs after each turn and may change what the turns AFTER
+	// it use. Optional.
+	//
+	// It never applies to the turn that just ran: a turn's model is the one it
+	// was executed with, and changing that afterwards would describe a
+	// conversation that did not happen.
+	PrepareNextTurn func(ctx context.Context) NextTurn
+}
+
+// NextTurn is what one turn may change for the turns that follow it.
+type NextTurn struct {
+	// ModelName selects the model from the next turn onward. Empty leaves it
+	// unchanged.
+	ModelName string
 }
 
 // Agent runs prompts through the loop.
@@ -219,6 +235,15 @@ func (r *Run) Wait() error {
 		reason = "error"
 		exitErr = exit.ExitReason
 	}
+	// A stop the tools asked for is a normal ending. The framework ends the run
+	// by cancelling it, so without reading the cause back a deliberate stop is
+	// reported as a broken run — the caller sees an error for the one outcome
+	// that was requested.
+	if (exit != nil && exit.StopCause == stopCauseToolTerminate) ||
+		errors.Is(exitErr, errToolTerminate) {
+		reason = stopCauseToolTerminate
+		exitErr = nil
+	}
 	// Cancellation outranks a reported error: when the context is done, the
 	// error is usually just the cancellation surfacing, and reporting it as
 	// "error" would hide a deliberate abort.
@@ -242,14 +267,21 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// adapted to eino. Emission therefore belongs to the runtime, and the
 	// ai package stays free of event concerns — the event observation seam
 	// is owned here.
+	// One coordinator for this loop. Each model response opens a new round in
+	// it, so the order of a round is decided in one place instead of inside the
+	// tools, which cannot see each other.
+	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall)
+
 	observed := &observingPort{
-		inner:     a.cfg.Model,
-		emitter:   a.emitter,
-		session:   a.cfg.Session,
-		modelName: a.cfg.ModelName,
+		inner:         a.cfg.Model,
+		emitter:       a.emitter,
+		session:       a.cfg.Session,
+		modelName:     a.cfg.ModelName,
+		batch:         batch,
+		sequentialFor: a.sequentialFor,
 	}
 
-	einoTools, err := a.einoTools()
+	einoTools, err := a.einoTools(batch)
 	if err != nil {
 		return nil, err
 	}
@@ -257,26 +289,25 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "pi-go",
 		Description: "pi-go v0 tracer bullet agent",
-		Instruction: a.cfg.Session.System(),
-		Model:       ai.NewEinoChatModel(observed, a.cfg.ModelName),
+		// No instruction is given to the framework. The session projection
+		// already carries the system message, and it is what pi-go feeds in on
+		// every request; passing it here as well puts it in the context twice,
+		// which is a change to the prompt the model actually sees.
+		Instruction: "",
+		Model:       newEinoChatModel(observed, observed.currentModel),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,
-				// Sequential execution is a NODE-level setting in
-				// eino, fixed when the agent is built. pi-go's
-				// contract is per-tool, so the two do not line
-				// up exactly, and the gap is closed
-				// conservatively: if ANY registered tool
-				// declares Sequential, the whole node runs
-				// sequentially.
+				// The node always runs calls concurrently; pi-go's own
+				// coordinator serialises a round when that round contains
+				// a tool that declared it cannot tolerate concurrency.
 				//
-				// The deviation is deliberate and one-directional
-				// — a batch may run sequentially when it did not
-				// strictly need to, but a tool that declared it
-				// cannot tolerate concurrency is never run in
-				// parallel. Erring the other way would break the
-				// declaring tool.
-				ExecuteSequentially: a.sequentialRequired(),
+				// This setting is fixed when the agent is built, so using it
+				// to express a PER-CALL contract forces one answer for the
+				// whole process: a single sequential tool anywhere in the
+				// registry then serialises every batch, including batches
+				// that never call it.
+				ExecuteSequentially: false,
 			},
 		},
 		// Handlers is intentionally empty at v0.
@@ -322,7 +353,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 					continue
 				}
 				a.cfg.Session.Append(ai.Message{
-					Role:    fromEinoRoleLocal(item.Role),
+					Role:    fromEinoRole(item.Role),
 					Content: item.Content,
 				})
 			}
@@ -334,7 +365,28 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// so continuity has to come from truth we hold.
 			proj := a.cfg.Session.Project()
 			return &adk.GenInputResult[*schema.Message, *schema.Message]{
-				Input:    &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				Input: &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				RunOpts: []adk.AgentRunOption{
+					// Fires after a round of tool calls completes and BEFORE
+					// the next model call. That is the only point where a
+					// round can end the conversation without a further call:
+					// the results are already recorded, and the graph has not
+					// yet reached the model.
+					adk.WithAfterToolCallsHook(func(context.Context) error {
+						if !batch.ShouldTerminate() {
+							return nil
+						}
+						// Stop() ends the LOOP, and it does so by cancelling:
+						// the cancellation is delivered asynchronously, so on
+						// its own it races the next model call and sometimes
+						// loses. Returning an error from this hook is what
+						// stops the round deterministically, because the hook
+						// runs synchronously at the point the graph would
+						// otherwise proceed to the model.
+						l.Stop(adk.WithImmediate(), adk.WithStopCause(stopCauseToolTerminate))
+						return errToolTerminate
+					}),
+				},
 				Consumed: items,
 			}, nil
 		},
@@ -342,9 +394,18 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			return agent, nil
 		},
 		OnAgentEvents: func(_ context.Context, tc *adk.TurnContext[*schema.Message, *schema.Message], evs *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
+			// The FIRST failure decides the turn. Draining without looking
+			// leaves a failed turn indistinguishable from a successful one,
+			// so the loop goes on to the next turn and consumes whatever was
+			// queued while this one was failing.
+			var failure error
 			for {
-				if _, ok := evs.Next(); !ok {
+				event, ok := evs.Next()
+				if !ok {
 					break
+				}
+				if event != nil && event.Err != nil && failure == nil {
+					failure = event.Err
 				}
 			}
 			// Stopped is a channel closed only when a Stop actually
@@ -360,28 +421,101 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				default:
 				}
 			}
+			// A round that asked to stop is a normal ending, not a failure.
+			// The framework reports it by cancelling the turn, which is
+			// indistinguishable from any other cancellation unless the cause
+			// is read back: reported as an error, a deliberate stop would
+			// surface as a broken run and would stop the agent for the wrong
+			// stated reason.
+			if (tc != nil && tc.StopCause() == stopCauseToolTerminate) ||
+				errors.Is(failure, errToolTerminate) {
+				reason = stopCauseToolTerminate
+				failure = nil
+			} else if failure != nil {
+				reason = "error"
+			}
 			a.emitter.emit(events.KindTurnEnd, func(e *events.Event) {
 				e.Detail.Reason = reason
+				if failure != nil {
+					e.Detail.Err = failure.Error()
+				}
 			})
+
+			// The model for the FOLLOWING turns is chosen here, once this turn
+			// is closed out. A change is ANNOUNCED, because the framework
+			// reports none: without an event of pi-go's own, a run that
+			// switched models halfway looks identical to one that did not, and
+			// nothing afterwards can explain why the later answers differ.
+			if failure == nil && a.cfg.PrepareNextTurn != nil {
+				next := a.cfg.PrepareNextTurn(ctx)
+				if from, to, changed := observed.selectModel(next.ModelName); changed {
+					a.emitter.emit(events.KindModelChanged, func(e *events.Event) {
+						e.Detail.From = from
+						e.Detail.To = to
+					})
+				}
+			}
+
+			// A turn that failed or was cut short ends the agent WITHOUT
+			// looking for anything queued behind it. A message sent while a
+			// turn was failing is not consumed: the queue does not always
+			// drain, and a caller that assumes it does acts on that message
+			// a turn later than the sender believes, or not at all.
+			if failure != nil {
+				return failure
+			}
 			return nil
 		},
 	})
 	return loop, nil
 }
 
+// stopCauseToolTerminate marks a stop the tools asked for, so it can be told
+// apart from a cancellation or a failure when the turn is closed out.
+const stopCauseToolTerminate = "tool_terminate"
+
+// errToolTerminate cuts the round at the hook, which is the only synchronous
+// point before the next model call. It is pi-go's own signal and never reaches a
+// caller: it is normalised where the turn and the run are closed out.
+var errToolTerminate = errors.New("runtime: the round asked to stop")
+
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
-	inner     ai.Port
-	emitter   *emitter
-	session   *session.Session
-	modelName string
+	mu            sync.Mutex
+	inner         ai.Port
+	emitter       *emitter
+	session       *session.Session
+	modelName     string
+	batch         *toolBatch
+	sequentialFor func(name string) bool
+}
+
+// selectModel changes the model used from the next request onward, and reports
+// whether that was a change.
+func (o *observingPort) selectModel(name string) (from, to string, changed bool) {
+	if name == "" {
+		return "", "", false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if name == o.modelName {
+		return "", "", false
+	}
+	from, o.modelName = o.modelName, name
+	return from, name, true
+}
+
+func (o *observingPort) currentModel() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.modelName
 }
 
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
 	requested := req.Model
 	if requested == "" {
-		requested = o.modelName
+		requested = o.currentModel()
 	}
 
 	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
@@ -423,6 +557,14 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		Content:   resp.Content,
 		ToolCalls: resp.ToolCalls,
 	})
+
+	// The round opens HERE, where the calls are still in the order the model
+	// asked for them and before the tools node has dispatched any of them.
+	// Source order is not recoverable later: once execution starts, the only
+	// order anything can observe is the order things happened to finish.
+	if len(resp.ToolCalls) > 0 && o.batch != nil {
+		o.batch.register(ctx, resp.ToolCalls, o.sequentialFor, resp.Truncated)
+	}
 	return resp, nil
 }
 
@@ -443,26 +585,6 @@ func toEinoMessages(in []ai.Message) []*schema.Message {
 		out = append(out, msg)
 	}
 	return out
-}
-
-// fromEinoRoleLocal maps a pushed item's role back to pi-go's.
-//
-// Pushed items are user messages in practice, but the role is read rather than
-// assumed: silently relabelling something we did not produce would corrupt
-// truth, which is the one thing this runtime must not do.
-func fromEinoRoleLocal(r schema.RoleType) ai.Role {
-	switch r {
-	case schema.System:
-		return ai.RoleSystem
-	case schema.User:
-		return ai.RoleUser
-	case schema.Assistant:
-		return ai.RoleAssistant
-	case schema.Tool:
-		return ai.RoleTool
-	default:
-		return ai.Role(r)
-	}
 }
 
 func toEinoRole(r ai.Role) schema.RoleType {

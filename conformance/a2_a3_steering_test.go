@@ -39,16 +39,16 @@ func (g *gatedTool) Execution() tools.Execution {
 	return tools.Execution{ReadOnly: true}
 }
 
-func (g *gatedTool) Call(ctx context.Context, _ string) (string, error) {
+func (g *gatedTool) Call(ctx context.Context, _ string) (tools.Result, error) {
 	select {
 	case g.entered <- struct{}{}:
 	default:
 	}
 	select {
 	case <-g.release:
-		return g.result, nil
+		return tools.Result{Content: g.result}, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return tools.Result{}, ctx.Err()
 	}
 }
 
