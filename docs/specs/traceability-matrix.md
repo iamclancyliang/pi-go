@@ -157,11 +157,16 @@ model. A host that recovers a durable session and collects the answer is not bui
 | Scenarios blocked on a product decision | 1 (A13) |
 | Contracts with **no** scenario | **0** — C7/C4.0/C4b closed by A14/A15/A16 |
 | Surfaces with no contract at all | **1** — wire compatibility (G5) |
-| Scenarios with an issue | **12** (A1–A9, A14–A16 → #7–#18) |
-| Scenarios still without an issue | 3 (A10, A11, A12 — plus A13 at v3; each blocked, see §2) |
-| Scenarios with a **passing** test | **3** (A1, A2, A3) — every other row is still contract-only |
+| Scenarios with an issue | **15** (A1–A9, A14–A16 → #7–#18; A10, A11, A12 → #22, #23 + #24, #21) |
+| Scenarios still without an issue | 1 (A13 — v3, blocked on the wire decision, see §2) |
+| Scenarios with a **passing** test | **15** (A1–A12, A14–A16) — A13 is the exception |
 
-**Product code now exists** (`internal/`, `cmd/`, `conformance/`) and **A1 passes**. That changes
-what the remaining blockers are, but not their severity: every other row is still contract-only, and
-a passing A1 is evidence about A1 alone. The spike suite proves things about *eino*, not pi-go. **Do
-not read green gates as scenario coverage.**
+**Every scenario except A13 now has a passing conformance test**, and A13 is blocked on the wire
+decision rather than on implementation. What that does and does not mean:
+
+- A passing test is evidence about the contract it asserts, not about the scenario as a whole. Where a
+  row's contract is partial — A1 — the test is partial with it.
+- The spike suite proves things about *eino*, not about pi-go. **Do not read green gates as scenario
+  coverage.**
+- One known intermittent failure remains in the spike suite (`TestC1bSteeringContract`), observed once
+  in roughly 110 executions and not reproduced since. It is unexplained, not fixed.
