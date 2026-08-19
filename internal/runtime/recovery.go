@@ -40,6 +40,19 @@ var ErrAlreadySettled = errors.New("runtime: this call already has an outcome")
 // reserved slot.
 var ErrNoAttemptWaiting = errors.New("runtime: no attempt is waiting for a decision")
 
+// ErrToolGone reports that the tool an attempt used is no longer registered.
+//
+// Distinct from ErrTermsChanged, which the terms comparison would also raise for
+// an absent tool — an absent tool has declared nothing, so it fails every
+// comparison. Told only that the terms differ, a caller would go looking for a
+// declaration that changed when the tool is simply not there.
+var ErrToolGone = errors.New("runtime: the tool this call used is no longer registered")
+
+// ErrTermsChanged reports that the tool no longer offers what the attempt was made
+// under, so repeating it would not be the same act.
+var ErrTermsChanged = errors.New(
+	"runtime: the tool no longer offers the terms this call was attempted under")
+
 // Recover resolves what a previous process left unfinished, and reports what
 // still needs an answer.
 //
@@ -73,16 +86,14 @@ func (a *Agent) Repeat(ctx context.Context, resultID string) error {
 
 	policy, version, known := a.cfg.Tools.Declaration(intent.Tool)
 	if !known {
-		return fmt.Errorf("runtime: %s is no longer registered, so nothing can "+
-			"repeat this call", intent.Tool)
+		return fmt.Errorf("%w: %s", ErrToolGone, intent.Tool)
 	}
 	// The same rule recovery used to ask the question: both sides must say safe,
 	// and the version must match. Asked once and answered later, the terms could
 	// have changed in between.
 	if policy != tools.ReplaySafe || intent.Replay != tools.ReplaySafe ||
 		version != intent.ToolVersion {
-		return fmt.Errorf("runtime: %s no longer offers the terms this call was "+
-			"attempted under, so repeating it is not the same act", intent.Tool)
+		return fmt.Errorf("%w: %s", ErrTermsChanged, intent.Tool)
 	}
 
 	registered, _ := a.cfg.Tools.Lookup(intent.Tool)
