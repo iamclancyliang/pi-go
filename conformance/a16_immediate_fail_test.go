@@ -58,10 +58,12 @@ func TestA16RefusedCallEndsBeforeTheNextStarts(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	deniedEnd, otherStart := -1, -1
+	deniedStart, deniedEnd, otherStart := -1, -1, -1
 	var results []string
 	for index, e := range rec.Events() {
 		switch {
+		case e.Kind == events.KindToolStart && e.ToolCallID == "call-denied":
+			deniedStart = index
 		case e.Kind == events.KindToolEnd && e.ToolCallID == "call-denied":
 			deniedEnd = index
 		case e.Kind == events.KindToolStart && e.ToolCallID == "call-slow":
@@ -70,11 +72,16 @@ func TestA16RefusedCallEndsBeforeTheNextStarts(t *testing.T) {
 			results = append(results, e.ToolCallID)
 		}
 	}
-	if deniedEnd < 0 || otherStart < 0 {
-		t.Fatalf("expected both calls in the trace, got %v", rec.Kinds())
+	if deniedStart < 0 || deniedEnd < 0 || otherStart < 0 {
+		t.Fatalf("expected a start and end for both calls, got %v", rec.Kinds())
 	}
-	if deniedEnd > otherStart {
-		t.Errorf("the refused call ended after the next one started: %v", rec.Kinds())
+	// The whole shape, in order. Asserting only that the refusal ends before the
+	// next call starts leaves out the announcement: a refused call that never
+	// emitted a start at all satisfies that half while telling a reader the call
+	// was never requested.
+	if !(deniedStart < deniedEnd && deniedEnd < otherStart) {
+		t.Errorf("want startA < endA < startB, got start=%d end=%d nextStart=%d in %v",
+			deniedStart, deniedEnd, otherStart, rec.Kinds())
 	}
 	if want := []string{"call-denied", "call-slow"}; !equal(results, want) {
 		t.Errorf("results = %v, want source order %v", results, want)
