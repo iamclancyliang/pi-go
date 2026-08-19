@@ -43,8 +43,8 @@ type Session struct {
 	// intents are tool calls that were about to run, by call id.
 	intents map[string]ToolIntent
 
-	// settled marks call ids whose outcome is known.
-	settled map[string]bool
+	// settled holds the recorded outcome of each call, by call id.
+	settled map[string]ToolSettlement
 
 	// failure is the terminal state of the current input, if it has one.
 	failure *OperationFailure
@@ -69,7 +69,7 @@ type Session struct {
 func New(system string) *Session {
 	return &Session{
 		intents: map[string]ToolIntent{},
-		settled: map[string]bool{}, system: system}
+		settled: map[string]ToolSettlement{}, system: system}
 }
 
 // Append records a message as having happened. It is never removed.
@@ -244,7 +244,7 @@ func (s *Session) Settle(settlement ToolSettlement) error {
 			return fmt.Errorf("session: settling a tool call: %w", err)
 		}
 	}
-	s.settled[settlement.CallID] = true
+	s.settled[settlement.CallID] = settlement
 	return nil
 }
 
@@ -259,12 +259,20 @@ func (s *Session) UnsettledIntents() []ToolIntent {
 
 	var out []ToolIntent
 	for id, intent := range s.intents {
-		if !s.settled[id] {
+		if _, done := s.settled[id]; !done {
 			out = append(out, intent)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })
 	return out
+}
+
+// Settlement reports the recorded outcome of a call, if it has one.
+func (s *Session) Settlement(callID string) (ToolSettlement, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	settled, ok := s.settled[callID]
+	return settled, ok
 }
 
 // RecordOverflowAttempt durably notes that the provider refused the request for

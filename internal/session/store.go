@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
 // Store is where conversation history outlives the process that produced it.
@@ -185,7 +186,7 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			s.intents[e.Intent.CallID] = *e.Intent
 			continue
 		case e.Settlement != nil:
-			s.settled[e.Settlement.CallID] = true
+			s.settled[e.Settlement.CallID] = *e.Settlement
 			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary
@@ -215,17 +216,29 @@ func WithStore(system string, store Store) *Session {
 // Without an intent, a transcript cannot distinguish a call that never ran from
 // one that ran and lost its answer, and the second is the dangerous reading.
 type ToolIntent struct {
-	// CallID identifies the model's request, and reserves where the result goes.
+	// OperationID names the run this call belongs to, so a settlement can be
+	// matched to its operation and not merely to a call id that a later run
+	// might reuse.
+	OperationID string
+
+	// CallID identifies the model's request.
 	CallID string
 
-	// Tool and Args are exactly what was about to run.
-	Tool string
-	Args string
+	// ResultID reserves where the answer will go. Reserved before the call so
+	// that recovery has somewhere to write a synthetic outcome without
+	// inventing an identity the transcript never had.
+	ResultID string
+
+	// Tool, ToolVersion and Args are exactly what was about to run. The version
+	// is recorded because a tool that changed while the process was down is not
+	// the tool that agreed to be repeated.
+	Tool        string
+	ToolVersion string
+	Args        string
 
 	// Replay is the policy as declared WHEN THE INTENT WAS WRITTEN. Recovery
-	// compares it with what the tool declares now: a tool whose policy changed
-	// between the crash and the restart has not agreed to be repeated.
-	Replay string
+	// compares it with what the tool declares now.
+	Replay tools.ReplayPolicy
 }
 
 // ToolSettlement records what a tool call actually produced.
@@ -233,8 +246,10 @@ type ToolIntent struct {
 // Its absence is not evidence that nothing happened. It means the outcome is
 // unknown, which is a different and more dangerous state than failure.
 type ToolSettlement struct {
-	CallID string
-	Result string
+	CallID   string
+	ResultID string
+	Result   string
+
 	// Interrupted marks a settlement written by recovery rather than by the
 	// tool: the effect was never confirmed either way.
 	Interrupted bool
@@ -250,19 +265,37 @@ type ToolSettlement struct {
 // the code running now.
 //
 // Everything else is settled as interrupted — the effect is unknown, not absent.
-// Reporting it as "did not happen" is what would repeat a destructive action.
-func RecoverUnsettled(ctx context.Context, s *Session, declaredNow func(tool string) (string, bool)) ([]string, error) {
-	var replayable []string
+// Reporting it as "did not happen" is what would repeat a destructive action. The
+// synthetic outcome is also appended to the conversation, because a model that is
+// never told anything about the call waits for an answer that is not coming.
+//
+// The intents themselves are returned, not their ids: a caller handed only ids
+// has to look the details up again, and the lookup is where the decision made
+// here can quietly be bypassed.
+func RecoverUnsettled(ctx context.Context, s *Session, declaredNow func(tool string) (tools.ReplayPolicy, string, bool)) ([]ToolIntent, error) {
+	var replayable []ToolIntent
 	for _, intent := range s.UnsettledIntents() {
-		now, known := declaredNow(intent.Tool)
-		if known && now == "safe" && intent.Replay == "safe" {
-			replayable = append(replayable, intent.CallID)
+		policy, version, known := declaredNow(intent.Tool)
+		sameTool := known && version == intent.ToolVersion
+		if sameTool && policy == tools.ReplaySafe && intent.Replay == tools.ReplaySafe {
+			replayable = append(replayable, intent)
 			continue
 		}
+
+		const unknownEffect = "interrupted: the process stopped before this call " +
+			"reported its outcome, so whether it took effect is unknown"
 		if err := s.Settle(ToolSettlement{
 			CallID:      intent.CallID,
-			Result:      "interrupted: the process stopped before this call reported its outcome",
+			ResultID:    intent.ResultID,
+			Result:      unknownEffect,
 			Interrupted: true,
+		}); err != nil {
+			return nil, err
+		}
+		if err := s.Append(ai.Message{
+			Role:       ai.RoleTool,
+			Content:    unknownEffect,
+			ToolCallID: intent.CallID,
 		}); err != nil {
 			return nil, err
 		}

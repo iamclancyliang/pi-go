@@ -22,16 +22,18 @@ import (
 func TestA11UnsettledCallsAreNotAssumedNotToHaveHappened(t *testing.T) {
 	cases := []struct {
 		name        string
-		recorded    string
-		declaredNow string
+		recorded    tools.ReplayPolicy
+		declaredNow tools.ReplayPolicy
+		version     string
 		known       bool
 		wantReplay  bool
 	}{
-		{"both say safe", "safe", "safe", true, true},
-		{"recorded safe, now forbidden", "safe", "never", true, false},
-		{"recorded forbidden, now safe", "never", "safe", true, false},
-		{"neither says safe", "never", "never", true, false},
-		{"tool no longer registered", "safe", "", false, false},
+		{"both say safe", tools.ReplaySafe, tools.ReplaySafe, "v1", true, true},
+		{"recorded safe, now forbidden", tools.ReplaySafe, tools.ReplayNever, "v1", true, false},
+		{"recorded forbidden, now safe", tools.ReplayNever, tools.ReplaySafe, "v1", true, false},
+		{"neither says safe", tools.ReplayNever, tools.ReplayNever, "v1", true, false},
+		{"tool no longer registered", tools.ReplaySafe, tools.ReplaySafe, "v1", false, false},
+		{"tool changed while down", tools.ReplaySafe, tools.ReplaySafe, "v2", true, false},
 	}
 
 	for _, c := range cases {
@@ -39,7 +41,8 @@ func TestA11UnsettledCallsAreNotAssumedNotToHaveHappened(t *testing.T) {
 			store := &session.MemoryStore{}
 			live := session.WithStore("You are pi-go.", store)
 			if err := live.RecordIntent(session.ToolIntent{
-				CallID: "call-1", Tool: "delete_files", Args: `{"path":"/tmp/x"}`,
+				OperationID: "op-1", CallID: "call-1", ResultID: "result-1",
+				Tool: "delete_files", ToolVersion: "v1", Args: `{"path":"/tmp/x"}`,
 				Replay: c.recorded,
 			}); err != nil {
 				t.Fatalf("RecordIntent: %v", err)
@@ -55,14 +58,23 @@ func TestA11UnsettledCallsAreNotAssumedNotToHaveHappened(t *testing.T) {
 			}
 
 			replayable, err := session.RecoverUnsettled(context.Background(), reopened,
-				func(string) (string, bool) { return c.declaredNow, c.known })
+				func(string) (tools.ReplayPolicy, string, bool) {
+					return c.declaredNow, c.version, c.known
+				})
 			if err != nil {
 				t.Fatalf("RecoverUnsettled: %v", err)
 			}
 
 			if c.wantReplay {
 				if len(replayable) != 1 {
-					t.Errorf("replayable = %v, want the call to be repeatable", replayable)
+					t.Fatalf("replayable = %v, want the call to be repeatable", replayable)
+				}
+				// The caller gets everything needed to repeat the exact work,
+				// rather than an id it must look up again — the lookup is where
+				// this decision can quietly be bypassed.
+				if got := replayable[0]; got.Args == "" || got.ResultID == "" {
+					t.Errorf("replayable intent = %+v, want the exact args and the "+
+						"reserved result id", got)
 				}
 				return
 			}
@@ -74,6 +86,26 @@ func TestA11UnsettledCallsAreNotAssumedNotToHaveHappened(t *testing.T) {
 			// is unknown rather than waiting forever.
 			if got := len(reopened.UnsettledIntents()); got != 0 {
 				t.Errorf("%d intents left unsettled after recovery, want 0", got)
+			}
+			// The outcome is recorded AND told to the model. A model that hears
+			// nothing about the call waits for an answer that is not coming.
+			settled, ok := reopened.Settlement("call-1")
+			if !ok || !settled.Interrupted {
+				t.Errorf("settlement = %+v (found=%v), want a synthetic interrupted "+
+					"outcome", settled, ok)
+			}
+			if settled.ResultID != "result-1" {
+				t.Errorf("settlement wrote to %q, want the id reserved before the "+
+					"call", settled.ResultID)
+			}
+			var told bool
+			for _, m := range reopened.Project().Messages {
+				if m.ToolCallID == "call-1" {
+					told = true
+				}
+			}
+			if !told {
+				t.Error("the model was never told the call's outcome is unknown")
 			}
 		})
 	}
@@ -89,12 +121,13 @@ func TestA11AnAlreadySettledCallIsAuthoritative(t *testing.T) {
 	live := session.WithStore("You are pi-go.", store)
 
 	if err := live.RecordIntent(session.ToolIntent{
-		CallID: "call-1", Tool: "delete_files", Replay: "never",
+		OperationID: "op-1", CallID: "call-1", ResultID: "result-1",
+		Tool: "delete_files", ToolVersion: "v1", Replay: tools.ReplayNever,
 	}); err != nil {
 		t.Fatalf("RecordIntent: %v", err)
 	}
 	if err := live.Settle(session.ToolSettlement{
-		CallID: "call-1", Result: "REAL-RESULT",
+		CallID: "call-1", ResultID: "result-1", Result: "REAL-RESULT",
 	}); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
@@ -107,12 +140,18 @@ func TestA11AnAlreadySettledCallIsAuthoritative(t *testing.T) {
 		t.Fatalf("a settled call was reported unsettled: %v", got)
 	}
 	replayable, err := session.RecoverUnsettled(context.Background(), reopened,
-		func(string) (string, bool) { return "safe", true })
+		func(string) (tools.ReplayPolicy, string, bool) {
+			return tools.ReplaySafe, "v1", true
+		})
 	if err != nil {
 		t.Fatalf("RecoverUnsettled: %v", err)
 	}
 	if len(replayable) != 0 {
 		t.Errorf("recovery offered to repeat a call that already has an answer: %v", replayable)
+	}
+	// And the real answer is still the answer.
+	if settled, ok := reopened.Settlement("call-1"); !ok || settled.Result != "REAL-RESULT" {
+		t.Errorf("settlement = %+v, want the real result kept", settled)
 	}
 }
 
