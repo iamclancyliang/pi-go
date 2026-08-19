@@ -1,35 +1,35 @@
-package ai
+package runtime
 
 import (
 	"context"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// This file is the ONLY place the framework's model types appear.
+// The adapter lives HERE, not in the model port's package.
 //
-// Everything else in this package speaks pi-go's own model port; the framework
-// and its provider adapters stay hidden behind it, and none of this reaches
-// pi-go's public surface.
-
-// NewEinoChatModel adapts a pi-go Port to the chat-model interface eino
-// consumes.
+// The port describes what pi-go needs from a model. A constructor that returns a
+// framework type puts that framework in the signature every caller compiles
+// against, so the dependency is re-exported rather than hidden — the port then
+// carries the framework in its own API while claiming to abstract it. This
+// package already depends on the framework; the port does not, and must not.
 //
-// The Port stays in charge: this is translation only. If pi-go ever stops
-// using this framework, this file is what gets deleted — not the port, and not
-// any caller of it.
-func NewEinoChatModel(p Port, defaultModel string) model.BaseChatModel {
+// If pi-go ever stops using this framework, this file is what gets deleted —
+// not the port, and not any caller of it.
+func newEinoChatModel(p ai.Port, defaultModel string) model.BaseChatModel {
 	return &einoChatModel{port: p, defaultModel: defaultModel}
 }
 
 type einoChatModel struct {
-	port         Port
+	port         ai.Port
 	defaultModel string
 }
 
 func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	req := Request{
+	req := ai.Request{
 		Messages: fromEinoMessages(input),
 		Tools:    toolSpecsFromOptions(opts),
 		Model:    m.defaultModel,
@@ -65,19 +65,19 @@ func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 
 var _ model.BaseChatModel = (*einoChatModel)(nil)
 
-func fromEinoMessages(in []*schema.Message) []Message {
-	out := make([]Message, 0, len(in))
+func fromEinoMessages(in []*schema.Message) []ai.Message {
+	out := make([]ai.Message, 0, len(in))
 	for _, m := range in {
 		if m == nil {
 			continue
 		}
-		msg := Message{
+		msg := ai.Message{
 			Role:       fromEinoRole(m.Role),
 			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 		}
 		for _, tc := range m.ToolCalls {
-			msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+			msg.ToolCalls = append(msg.ToolCalls, ai.ToolCall{
 				ID:   tc.ID,
 				Name: tc.Function.Name,
 				Args: tc.Function.Arguments,
@@ -88,7 +88,7 @@ func fromEinoMessages(in []*schema.Message) []Message {
 	return out
 }
 
-func toEinoMessage(r Response) *schema.Message {
+func toEinoMessage(r ai.Response) *schema.Message {
 	calls := make([]schema.ToolCall, 0, len(r.ToolCalls))
 	for _, tc := range r.ToolCalls {
 		calls = append(calls, schema.ToolCall{
@@ -105,36 +105,36 @@ func toEinoMessage(r Response) *schema.Message {
 	return schema.AssistantMessage(r.Content, calls)
 }
 
-func fromEinoRole(r schema.RoleType) Role {
+func fromEinoRole(r schema.RoleType) ai.Role {
 	switch r {
 	case schema.System:
-		return RoleSystem
+		return ai.RoleSystem
 	case schema.User:
-		return RoleUser
+		return ai.RoleUser
 	case schema.Assistant:
-		return RoleAssistant
+		return ai.RoleAssistant
 	case schema.Tool:
-		return RoleTool
+		return ai.RoleTool
 	default:
 		// Unknown roles are reported as-is rather than coerced to a
 		// plausible one: silently relabelling a message we do not
 		// understand would corrupt session truth.
-		return Role(r)
+		return ai.Role(r)
 	}
 }
 
 // toolSpecsFromOptions reports the tools eino bound to this call.
-func toolSpecsFromOptions(opts []model.Option) []ToolSpec {
+func toolSpecsFromOptions(opts []model.Option) []ai.ToolSpec {
 	common := model.GetCommonOptions(&model.Options{}, opts...)
 	if common == nil || len(common.Tools) == 0 {
 		return nil
 	}
-	out := make([]ToolSpec, 0, len(common.Tools))
+	out := make([]ai.ToolSpec, 0, len(common.Tools))
 	for _, t := range common.Tools {
 		if t == nil {
 			continue
 		}
-		out = append(out, ToolSpec{Name: t.Name, Description: t.Desc})
+		out = append(out, ai.ToolSpec{Name: t.Name, Description: t.Desc})
 	}
 	return out
 }

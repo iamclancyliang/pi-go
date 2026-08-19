@@ -258,7 +258,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		Name:        "pi-go",
 		Description: "pi-go v0 tracer bullet agent",
 		Instruction: a.cfg.Session.System(),
-		Model:       ai.NewEinoChatModel(observed, a.cfg.ModelName),
+		Model:       newEinoChatModel(observed, a.cfg.ModelName),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,
@@ -322,7 +322,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 					continue
 				}
 				a.cfg.Session.Append(ai.Message{
-					Role:    fromEinoRoleLocal(item.Role),
+					Role:    fromEinoRole(item.Role),
 					Content: item.Content,
 				})
 			}
@@ -443,26 +443,6 @@ func toEinoMessages(in []ai.Message) []*schema.Message {
 		out = append(out, msg)
 	}
 	return out
-}
-
-// fromEinoRoleLocal maps a pushed item's role back to pi-go's.
-//
-// Pushed items are user messages in practice, but the role is read rather than
-// assumed: silently relabelling something we did not produce would corrupt
-// truth, which is the one thing this runtime must not do.
-func fromEinoRoleLocal(r schema.RoleType) ai.Role {
-	switch r {
-	case schema.System:
-		return ai.RoleSystem
-	case schema.User:
-		return ai.RoleUser
-	case schema.Assistant:
-		return ai.RoleAssistant
-	case schema.Tool:
-		return ai.RoleTool
-	default:
-		return ai.Role(r)
-	}
 }
 
 func toEinoRole(r ai.Role) schema.RoleType {

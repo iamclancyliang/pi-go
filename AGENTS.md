@@ -89,7 +89,9 @@ is not evidence that a contract, module boundary or release gate is accepted.
 internal/     product code — every module from architecture §1
   events/       observable event contract; zero dependencies
   tools/        tool registration seam + v0 fixture tools
-  ai/           model port; the ONLY place eino model types appear (edge E1)
+  ai/           model port; eino-free. The framework is HIDDEN BEHIND it (edge E1),
+                so no signature here may name an eino type -- a constructor that
+                returns one moves the dependency into every caller instead
   session/      conversational truth vs projection
   runtime/      agent loop on eino adk.TurnLoop (edge E2); owns events + seams
 cmd/          composition roots — assemble modules, no behaviour of their own
