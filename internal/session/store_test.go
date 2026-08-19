@@ -217,3 +217,43 @@ func TestNewUserInputStartsAFreshBudget(t *testing.T) {
 		t.Errorf("usage after new input = %+v, want the earlier 500 tokens kept", got)
 	}
 }
+
+// TestLoadedEntriesDoNotShareStorageWithTheStore pins that a store hands out
+// copies.
+//
+// A caller that can reach into a returned entry and change what the store holds
+// can rewrite what happened, which is the one capability an append-only record
+// must not have. The checkpoint is where this is easiest to get wrong: copying the
+// struct copies the summary but leaves the retained tail sharing the caller's
+// slice, so the copy looks defensive and is not.
+func TestLoadedEntriesDoNotShareStorageWithTheStore(t *testing.T) {
+	store := &MemoryStore{}
+	tail := []ai.Message{{Role: ai.RoleUser, Content: "KEPT"}}
+	if err := store.Append(context.Background(), Entry{Checkpoint: &Checkpoint{
+		Summary:      "SUMMARY",
+		RetainedTail: tail,
+	}}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	// The caller mutates the slice it passed in, and the copy it was given back.
+	tail[0].Content = "MUTATED-VIA-CALLER-SLICE"
+	loaded, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	loaded[0].Checkpoint.RetainedTail[0].Content = "MUTATED-VIA-LOADED-ENTRY"
+	loaded[0].Checkpoint.Summary = "MUTATED-SUMMARY"
+
+	again, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := again[0].Checkpoint.RetainedTail[0].Content; got != "KEPT" {
+		t.Errorf("retained tail in the store = %q, want %q: the record was rewritten "+
+			"from outside, so what it reports is no longer what happened", got, "KEPT")
+	}
+	if got := again[0].Checkpoint.Summary; got != "SUMMARY" {
+		t.Errorf("summary in the store = %q, want %q", got, "SUMMARY")
+	}
+}

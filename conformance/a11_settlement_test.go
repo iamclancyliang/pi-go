@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -804,8 +805,13 @@ func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
 		registry.MustRegister(tool)
 		agent, _ := recoveringAgent(t, store, registry)
 
-		if err := agent.Repeat(context.Background(), intent.ResultID); err == nil {
-			t.Error("a tool that changed since the attempt was allowed to repeat it")
+		err := agent.Repeat(context.Background(), intent.ResultID)
+		if !errors.Is(err, runtime.ErrTermsChanged) {
+			t.Errorf("repeat after the tool changed = %v, want it to say the terms "+
+				"no longer match", err)
+		}
+		if errors.Is(err, runtime.ErrToolGone) {
+			t.Error("a registered tool that changed was reported as missing")
 		}
 		if tool.runs != 0 {
 			t.Errorf("the changed tool ran %d times, want 0", tool.runs)
@@ -845,4 +851,262 @@ func TestA11OnlyRecordedAttemptsCanBeDecidedAbout(t *testing.T) {
 	if got := sess.UnsettledIntents(); len(got) != 1 {
 		t.Errorf("unsettled = %+v, want the one real attempt still waiting", got)
 	}
+}
+
+// failingTool reports an error, which is an outcome rather than a crash.
+type failingTool struct {
+	version string
+	runs    int
+}
+
+func (f *failingTool) Name() string        { return "read_files" }
+func (f *failingTool) Description() string { return "test tool" }
+func (f *failingTool) Version() string     { return f.version }
+func (f *failingTool) Execution() tools.Execution {
+	return tools.Execution{ReadOnly: true, Replay: tools.ReplaySafe}
+}
+
+func (f *failingTool) Call(context.Context, string) (tools.Result, error) {
+	f.runs++
+	return tools.Result{}, errors.New("the file moved")
+}
+
+// TestA11ARepeatThatFailsIsStillAnAnswer pins what happens when the repeated call
+// reports an error.
+//
+// A failing tool is an outcome the model can react to, so the failure becomes the
+// recorded result: the attempt is answered and the conversation continues. Leaving
+// it unsettled instead would keep offering a decision that has already been made,
+// and the model would still be waiting for a call it will never hear about.
+func TestA11ARepeatThatFailsIsStillAnAnswer(t *testing.T) {
+	store := &session.MemoryStore{}
+	intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+	tool := &failingTool{version: "v7"}
+	registry := tools.NewRegistry()
+	registry.MustRegister(tool)
+
+	sess, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     &ai.Scripted{Name: "fake-1", Final: ai.AssistantText("done")},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
+	if err := agent.Repeat(context.Background(), intent.ResultID); err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if tool.runs != 1 {
+		t.Fatalf("the tool ran %d times, want 1", tool.runs)
+	}
+	settled, ok := sess.Settlement(intent.ResultID)
+	if !ok {
+		t.Fatal("a repeat that failed left the attempt unanswered, so the decision " +
+			"would be offered again and the model would still be waiting")
+	}
+	if !strings.Contains(settled.Result, "the file moved") {
+		t.Errorf("settled result = %q, want the failure the tool reported: a model "+
+			"told nothing cannot react to it", settled.Result)
+	}
+	if settled.Interrupted {
+		t.Error("a call that reported its own failure was settled as interrupted, " +
+			"which says the outcome is unknown when it is known")
+	}
+	// The failure is on the end event, where it says HOW the call finished.
+	var reported string
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindToolEnd && e.ToolCallID == intent.CallID {
+			reported = e.Detail.Err
+		}
+	}
+	if !strings.Contains(reported, "the file moved") {
+		t.Errorf("tool_end error = %q, want the failure: the event stream is what a "+
+			"client renders, so a failure missing from it is invisible", reported)
+	}
+}
+
+// TestA11ARepeatCanBeRefusedWithoutAnsweringTheAttempt pins the two ways a repeat
+// cannot proceed.
+//
+// Neither settles the attempt. A refusal says the repeat did not happen, and that
+// is not an answer to whether the FIRST attempt took effect — so the decision is
+// still owed, and abandoning it stays available.
+func TestA11ARepeatCanBeRefusedWithoutAnsweringTheAttempt(t *testing.T) {
+	t.Run("the policy denies it", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "sync_files", "v1", tools.ReplaySafe)
+
+		// A mutation whose repeat is harmless — an idempotent write is exactly
+		// that — so the replay terms permit a repeat and the policy still does
+		// not. The two decisions are separate, and this is where they disagree.
+		tool := &idempotentWriteTool{version: "v1"}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+		agent, sess := recoveringAgent(t, store, registry)
+
+		if err := agent.Repeat(context.Background(), intent.ResultID); err == nil {
+			t.Error("a repeat the policy denies was allowed")
+		}
+		if tool.runs != 0 {
+			t.Errorf("a denied repeat ran the tool %d times, want 0", tool.runs)
+		}
+		if _, settled := sess.Settlement(intent.ResultID); settled {
+			t.Error("a denied repeat answered the attempt, reporting the refusal as " +
+				"the outcome of a call that ran before the refusal existed")
+		}
+		// Still answerable the other way.
+		if err := agent.Abandon(intent.ResultID); err != nil {
+			t.Errorf("Abandon after a denied repeat: %v", err)
+		}
+	})
+
+	t.Run("the tool is gone", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+		// Registered under a different name: nothing can run this call now.
+		registry := tools.NewRegistry()
+		registry.MustRegister(&repeatableTool{name: "list_files", version: "v7",
+			replay: tools.ReplaySafe})
+		agent, sess := recoveringAgent(t, store, registry)
+
+		// The reason has to be distinguishable. An absent tool has declared
+		// nothing, so it also fails the terms comparison — told only that the
+		// terms changed, a caller would hunt for a declaration that moved when
+		// the tool is simply not there.
+		err := agent.Repeat(context.Background(), intent.ResultID)
+		if !errors.Is(err, runtime.ErrToolGone) {
+			t.Errorf("repeat with the tool unregistered = %v, want it to say the "+
+				"tool is gone", err)
+		}
+		if errors.Is(err, runtime.ErrTermsChanged) {
+			t.Error("an absent tool was reported as one whose terms changed")
+		}
+		if _, settled := sess.Settlement(intent.ResultID); settled {
+			t.Error("the attempt was answered by the tool's absence")
+		}
+		if got := sess.UnsettledIntents(); len(got) != 1 {
+			t.Errorf("unsettled = %+v, want the attempt still waiting", got)
+		}
+	})
+}
+
+// idempotentWriteTool mutates and declares a repeat harmless.
+//
+// Not a contradiction: "ensure this file says X" changes the world and can be run
+// twice with the same result. It is the case where the replay terms and the policy
+// give different answers, which is why they are asked separately.
+type idempotentWriteTool struct {
+	version string
+	runs    int
+}
+
+func (i *idempotentWriteTool) Name() string        { return "sync_files" }
+func (i *idempotentWriteTool) Description() string { return "test tool" }
+func (i *idempotentWriteTool) Version() string     { return i.version }
+func (i *idempotentWriteTool) Execution() tools.Execution {
+	return tools.Execution{ReadOnly: false, Replay: tools.ReplaySafe}
+}
+
+func (i *idempotentWriteTool) Call(context.Context, string) (tools.Result, error) {
+	i.runs++
+	return tools.Result{Content: "synced"}, nil
+}
+
+// refusesIntents fails the write that records an attempt, and accepts the rest.
+type refusesIntents struct {
+	inner session.MemoryStore
+}
+
+func (r *refusesIntents) Append(ctx context.Context, entries ...session.Entry) error {
+	for _, e := range entries {
+		if e.Intent != nil {
+			return errors.New("store unavailable")
+		}
+	}
+	return r.inner.Append(ctx, entries...)
+}
+
+func (r *refusesIntents) Load(ctx context.Context) ([]session.Entry, error) {
+	return r.inner.Load(ctx)
+}
+
+// TestA11ACallWhoseAttemptCannotBeRecordedDoesNotRun pins the rule that makes the
+// record worth having.
+//
+// Running anyway would produce exactly what the record exists to prevent: an
+// effect with nothing saying it was attempted. A restart would then read an
+// untouched conversation and be free to do it again. The model is told the call
+// failed, which is true — it never ran — rather than being left with no answer.
+func TestA11ACallWhoseAttemptCannotBeRecordedDoesNotRun(t *testing.T) {
+	store := &refusesIntents{}
+	tool := &repeatableTool{name: "read_files", version: "v7", replay: tools.ReplaySafe}
+	registry := tools.NewRegistry()
+	registry.MustRegister(tool)
+
+	sess := session.WithStore("You are pi-go.", store)
+	agent, err := runtime.New(runtime.Config{
+		Model: &ai.Scripted{
+			Name: "fake-1",
+			Replies: []ai.Response{ai.AssistantToolCalls(
+				ai.ToolCall{ID: "call-1", Name: "read_files", Args: `{}`},
+			)},
+			StopWhenToolsSettled: true,
+			Final:                ai.AssistantText("done"),
+		},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "read the file"); err == nil {
+		t.Fatal("a turn that could not record what it was about to do reported success")
+	}
+
+	if tool.runs != 0 {
+		t.Errorf("the tool ran %d times with no durable record of the attempt, want "+
+			"0: a restart would read an untouched conversation and do it again",
+			tool.runs)
+	}
+	if !carries(sess.Project().Messages, "not attempted") {
+		t.Error("the model was told nothing about the call it asked for")
+	}
+}
+
+// TestRestoreReportsAStoreItCannotRead is the paired control for reopening.
+//
+// A conversation that cannot be read back is not an empty conversation. Returning
+// one would hand the caller a fresh, blank history and let it carry on writing into
+// a record whose earlier contents are unknown.
+func TestRestoreReportsAStoreItCannotRead(t *testing.T) {
+	_, err := session.Restore(context.Background(), "You are pi-go.", unreadableStore{})
+	if err == nil {
+		t.Fatal("a store that could not be read produced a session, which reads as " +
+			"a conversation that never happened")
+	}
+}
+
+type unreadableStore struct{}
+
+func (unreadableStore) Append(context.Context, ...session.Entry) error { return nil }
+func (unreadableStore) Load(context.Context) ([]session.Entry, error) {
+	return nil, errors.New("store unavailable")
 }
