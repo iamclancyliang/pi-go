@@ -231,6 +231,29 @@ func TestA8SequentialAbortDoesNotHang(t *testing.T) {
 // The tool IGNORES cancellation, deliberately. One that honours it would stop by
 // itself and prove nothing about whether the round prevented the call.
 func TestA8CutCallIsNotExecuted(t *testing.T) {
+	// REPEATED, and that is the point rather than paranoia.
+	//
+	// The framework ALSO declines to dispatch after a cut, most of the time. So
+	// most interleavings never reach pi-go's own check, and a single run that
+	// passes says almost nothing: with the check deleted, one attempt still
+	// passes roughly nine times in ten. Repetition is what turns this from a
+	// control that looks like one into a control that is one.
+	//
+	// Relying on the framework instead is not an option: eino is an
+	// implementation detail of the runtime, and a contract that holds only
+	// because of what the current version happens to do is not a contract.
+	const attempts = 50
+	for attempt := 0; attempt < attempts; attempt++ {
+		cutCallIsNotExecuted(t)
+		if t.Failed() {
+			t.Fatalf("a cut call executed on attempt %d of %d", attempt+1, attempts)
+		}
+	}
+}
+
+func cutCallIsNotExecuted(t *testing.T) {
+	t.Helper()
+
 	gate := newGatedTool("FIRST-RESULT")
 	stubborn := &stubbornTool{}
 	registry := tools.NewRegistry()
@@ -277,7 +300,7 @@ func TestA8CutCallIsNotExecuted(t *testing.T) {
 
 	// Give a tool that ignores cancellation every chance to run before asserting
 	// that it did not.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(2 * time.Millisecond)
 	if got := stubborn.ran(); got != 0 {
 		t.Errorf("a call cut by the abort still executed %d time(s); the round must "+
 			"prevent it, not merely decline to report it", got)
