@@ -8,37 +8,32 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/iamclancyliang/pi-go/internal/ai"
-	"github.com/iamclancyliang/pi-go/internal/events"
-	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
-// sequentialRequired reports whether any registered tool declares that it
-// cannot run concurrently.
+// sequentialFor reports whether a named tool declares it cannot run concurrently.
 //
-// Registered rather than per-batch because eino decides sequencing at the tools
-// node, which is built once. See the ExecuteSequentially comment in loop.go for
-// why the coarser answer is the safe one.
-func (a *Agent) sequentialRequired() bool {
+// Asked per call, so the answer applies to the batch that contains it. Asking it
+// of the whole registry made one sequential tool serialise every batch for the
+// life of the process, including batches that never call it.
+func (a *Agent) sequentialFor(name string) bool {
 	for _, t := range a.cfg.Tools.All() {
-		if t.Execution().Sequential {
-			return true
+		if t.Name() == name {
+			return t.Execution().Sequential
 		}
 	}
 	return false
 }
 
 // einoTools adapts the registry to the tool type eino executes.
-func (a *Agent) einoTools() ([]tool.BaseTool, error) {
+func (a *Agent) einoTools(batch *toolBatch) ([]tool.BaseTool, error) {
 	registered := a.cfg.Tools.All()
 	out := make([]tool.BaseTool, 0, len(registered))
 	for _, t := range registered {
 		out = append(out, &observedTool{
-			inner:   t,
-			emitter: a.emitter,
-			session: a.cfg.Session,
-			policy:  a.cfg.Policy,
+			inner:  t,
+			batch:  batch,
+			policy: a.cfg.Policy,
 		})
 	}
 	return out, nil
@@ -51,10 +46,9 @@ func (a *Agent) einoTools() ([]tool.BaseTool, error) {
 // author cannot forget them — and so a third-party tool cannot skip the policy
 // check by not calling it.
 type observedTool struct {
-	inner   tools.Tool
-	emitter *emitter
-	session *session.Session
-	policy  Policy
+	inner  tools.Tool
+	batch  *toolBatch
+	policy Policy
 }
 
 // Info implements tool.BaseTool.
@@ -69,11 +63,9 @@ func (t *observedTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (string, error) {
 	callID := toolCallIDFrom(ctx)
 
-	t.emitter.emit(events.KindToolStart, func(e *events.Event) {
-		e.ToolCallID = callID
-		e.ToolName = t.inner.Name()
-		e.Detail.Args = args
-	})
+	// The batch decides when this call may run and when its start is
+	// announced; a tool cannot know where it sits in a round.
+	t.batch.begin(callID)
 
 	decision := t.policy.Before(ctx, PolicyCall{
 		ToolCallID: callID,
@@ -86,7 +78,7 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 		// the call was refused and why, or it will retry forever. It is
 		// also recorded as truth, so the denial survives in history.
 		msg := fmt.Sprintf("denied: %s", decision.Reason)
-		t.finish(callID, msg, nil)
+		t.batch.finish(callID, msg, nil)
 		return msg, nil
 	}
 
@@ -97,32 +89,12 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 		// because aborting the run would make a recoverable tool error
 		// indistinguishable from a harness crash.
 		msg := fmt.Sprintf("error: %v", err)
-		t.finish(callID, msg, err)
+		t.batch.finish(callID, msg, err)
 		return msg, nil
 	}
 
-	t.finish(callID, result, nil)
+	t.batch.finish(callID, result, nil)
 	return result, nil
-}
-
-// finish records the tool result as truth and emits tool_end.
-//
-// Truth is appended BEFORE the event is emitted so that any observer reacting
-// to tool_end already sees a consistent session.
-func (t *observedTool) finish(callID, result string, err error) {
-	t.session.Append(ai.Message{
-		Role:       ai.RoleTool,
-		Content:    result,
-		ToolCallID: callID,
-	})
-	t.emitter.emit(events.KindToolEnd, func(e *events.Event) {
-		e.ToolCallID = callID
-		e.ToolName = t.inner.Name()
-		e.Detail.Result = result
-		if err != nil {
-			e.Detail.Err = err.Error()
-		}
-	})
 }
 
 var _ tool.InvokableTool = (*observedTool)(nil)

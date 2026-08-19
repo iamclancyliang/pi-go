@@ -29,6 +29,11 @@ const (
 
 	KindToolStart Kind = "tool_start"
 	KindToolEnd   Kind = "tool_end"
+	// KindToolResult is the RESULT becoming history, which is a different
+	// moment from the call finishing: ends follow completion, results follow
+	// the order the model asked for them. Folding the two together makes the
+	// difference between sequential and parallel execution inexpressible.
+	KindToolResult Kind = "tool_result"
 
 	KindTurnEnd  Kind = "turn_end"
 	KindAgentEnd Kind = "agent_end"

@@ -51,6 +51,12 @@ func TestA1TracerBullet(t *testing.T) {
 	}
 
 	// --- the trace is complete and correctly ordered ---
+	//
+	// This round runs SEQUENTIALLY: it contains a tool that declared it cannot
+	// overlap, and one such tool makes the whole round sequential. The shape that
+	// proves it is each call finishing -- start, end, result -- before the next
+	// one starts. A round of parallel-safe tools emits a different shape, which
+	// TestParallelRoundOrdering covers.
 	assertOrder(t, kinds,
 		events.KindAgentStart,
 		events.KindTurnStart,
@@ -58,8 +64,10 @@ func TestA1TracerBullet(t *testing.T) {
 		events.KindModelResponse,
 		events.KindToolStart,
 		events.KindToolEnd,
+		events.KindToolResult,
 		events.KindToolStart,
 		events.KindToolEnd,
+		events.KindToolResult,
 		events.KindModelRequest,
 		events.KindModelResponse,
 		events.KindTurnEnd,

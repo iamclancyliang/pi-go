@@ -242,14 +242,21 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// adapted to eino. Emission therefore belongs to the runtime, and the
 	// ai package stays free of event concerns — the event observation seam
 	// is owned here.
+	// One coordinator for this loop. Each model response opens a new round in
+	// it, so the order of a round is decided in one place instead of inside the
+	// tools, which cannot see each other.
+	batch := newToolBatch(a.emitter, a.cfg.Session)
+
 	observed := &observingPort{
-		inner:     a.cfg.Model,
-		emitter:   a.emitter,
-		session:   a.cfg.Session,
-		modelName: a.cfg.ModelName,
+		inner:         a.cfg.Model,
+		emitter:       a.emitter,
+		session:       a.cfg.Session,
+		modelName:     a.cfg.ModelName,
+		batch:         batch,
+		sequentialFor: a.sequentialFor,
 	}
 
-	einoTools, err := a.einoTools()
+	einoTools, err := a.einoTools(batch)
 	if err != nil {
 		return nil, err
 	}
@@ -262,21 +269,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,
-				// Sequential execution is a NODE-level setting in
-				// eino, fixed when the agent is built. pi-go's
-				// contract is per-tool, so the two do not line
-				// up exactly, and the gap is closed
-				// conservatively: if ANY registered tool
-				// declares Sequential, the whole node runs
-				// sequentially.
+				// The node always runs calls concurrently; pi-go's own
+				// coordinator serialises a round when that round contains
+				// a tool that declared it cannot tolerate concurrency.
 				//
-				// The deviation is deliberate and one-directional
-				// — a batch may run sequentially when it did not
-				// strictly need to, but a tool that declared it
-				// cannot tolerate concurrency is never run in
-				// parallel. Erring the other way would break the
-				// declaring tool.
-				ExecuteSequentially: a.sequentialRequired(),
+				// This setting is fixed when the agent is built, so using it
+				// to express a PER-CALL contract forces one answer for the
+				// whole process: a single sequential tool anywhere in the
+				// registry then serialises every batch, including batches
+				// that never call it.
+				ExecuteSequentially: false,
 			},
 		},
 		// Handlers is intentionally empty at v0.
@@ -372,10 +374,12 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
-	inner     ai.Port
-	emitter   *emitter
-	session   *session.Session
-	modelName string
+	inner         ai.Port
+	emitter       *emitter
+	session       *session.Session
+	modelName     string
+	batch         *toolBatch
+	sequentialFor func(name string) bool
 }
 
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
@@ -423,6 +427,14 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		Content:   resp.Content,
 		ToolCalls: resp.ToolCalls,
 	})
+
+	// The round opens HERE, where the calls are still in the order the model
+	// asked for them and before the tools node has dispatched any of them.
+	// Source order is not recoverable later: once execution starts, the only
+	// order anything can observe is the order things happened to finish.
+	if len(resp.ToolCalls) > 0 && o.batch != nil {
+		o.batch.register(resp.ToolCalls, o.sequentialFor)
+	}
 	return resp, nil
 }
 

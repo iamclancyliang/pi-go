@@ -26,13 +26,10 @@ type Execution struct {
 	// Sequential declares that this tool cannot tolerate running
 	// concurrently with other calls.
 	//
-	// ENFORCEMENT IS COARSER THAN THIS DECLARATION. The runtime hands
-	// sequencing to eino, which decides it per tools-node at construction
-	// rather than per batch. So if any REGISTERED tool declares Sequential,
-	// every batch runs sequentially — including batches that do not involve
-	// this tool. The deviation is one-directional and deliberate: a
-	// declaring tool is never run in parallel, at the cost of sometimes
-	// serialising calls that did not need it. See internal/runtime/loop.go.
+	// Enforced per ROUND of calls: a round that contains such a tool runs one
+	// call at a time, in the order the model asked for them, and a round that
+	// does not runs them concurrently. A tool that declares this is never run
+	// in parallel; rounds that never call it are unaffected.
 	Sequential bool
 
 	// ReadOnly declares the tool performs no mutation. v0 ships read-only
