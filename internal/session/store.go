@@ -295,10 +295,7 @@ func RecoverUnsettled(ctx context.Context, s *Session, declaredNow func(tool str
 			ResultID:    intent.ResultID,
 			Result:      unknownEffect,
 			Interrupted: true,
-		}); err != nil {
-			return nil, err
-		}
-		if err := s.Append(ai.Message{
+		}, ai.Message{
 			Role:       ai.RoleTool,
 			Content:    unknownEffect,
 			ToolCallID: intent.CallID,

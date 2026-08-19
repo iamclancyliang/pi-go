@@ -108,6 +108,13 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 			return fmt.Errorf("session: recording messages: %w", err)
 		}
 	}
+	s.rememberLocked(msgs...)
+	return nil
+}
+
+// rememberLocked makes messages visible in memory. The caller holds the lock and
+// has already recorded them.
+func (s *Session) rememberLocked(msgs ...ai.Message) {
 	s.messages = append(s.messages, msgs...)
 	if s.checkpoint != nil {
 		s.sinceCheckpoint = append(s.sinceCheckpoint, msgs...)
@@ -123,7 +130,6 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 			s.operations++
 		}
 	}
-	return nil
 }
 
 func (s *Session) Truth() []ai.Message {
@@ -251,18 +257,35 @@ func (s *Session) RecordIntent(intent ToolIntent) error {
 	return nil
 }
 
-// Settle durably records what a call produced.
-func (s *Session) Settle(settlement ToolSettlement) error {
+// Settle durably records what a call produced, together with what the model is
+// shown about it, as ONE all-or-none write.
+//
+// One write, because the two halves are the same transition. Recording the
+// settlement first and the message second lets a failure in between leave a call
+// that nothing will ever revisit: it is settled, so recovery passes over it,
+// while the conversation the model reads has no result for it at all. That is a
+// worse state than either write failing outright, because nothing afterwards can
+// tell that anything is missing.
+//
+// told may be empty, for a call whose result was already recorded on its own.
+func (s *Session) Settle(settlement ToolSettlement, told ...ai.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.store != nil {
+		entries := make([]Entry, 0, len(told)+1)
+		for i := range told {
+			recorded := told[i]
+			entries = append(entries, Entry{Message: &recorded})
+		}
 		recorded := settlement
-		if err := s.store.Append(context.Background(), Entry{Settlement: &recorded}); err != nil {
+		entries = append(entries, Entry{Settlement: &recorded})
+		if err := s.store.Append(context.Background(), entries...); err != nil {
 			return fmt.Errorf("session: settling a tool call: %w", err)
 		}
 	}
 	s.settled[settlement.CallID] = settlement
+	s.rememberLocked(told...)
 	return nil
 }
 

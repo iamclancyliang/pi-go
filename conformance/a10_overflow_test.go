@@ -188,7 +188,8 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := agent.Run(ctx, "a very long question"); err == nil {
+	runErr := agent.Run(ctx, "a very long question")
+	if runErr == nil {
 		t.Fatal("the run reported success")
 	}
 
@@ -234,6 +235,18 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	if !errors.Is(outcome.Err(), ai.ErrContextOverflow) {
 		t.Errorf("reopened error = %v, want the same error the original call "+
 			"raised, so the two ways of learning this cannot disagree", outcome.Err())
+	}
+	// Both errors must render the recorded code and detail identically. They
+	// differ only in their tail — the mid-run one keeps the provider's own
+	// message, which the durable record does not store — and the shared head is
+	// what a second rendering site would be free to drift away from.
+	recorded := "runtime: " + failure.Code + ": " + failure.Detail
+	if !strings.Contains(runErr.Error(), recorded) {
+		t.Errorf("mid-run error %q does not render the record as %q", runErr, recorded)
+	}
+	if !strings.Contains(outcome.Err().Error(), recorded) {
+		t.Errorf("reopened error %q does not render the record as %q",
+			outcome.Err(), recorded)
 	}
 	if got := reopenedModel.calls(); got != 0 {
 		t.Errorf("model calls while reopening = %d, want 0: the answer is already "+

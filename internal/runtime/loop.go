@@ -535,11 +535,11 @@ func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request,
 		}
 		// Recorded before it is returned, so reopening finds the same terminal
 		// state instead of starting the same losing attempt again.
-		if err := o.session.Fail(CodeContextOverflow, detail); err != nil {
+		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
+		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
 			return ai.Response{}, err
 		}
-		return ai.Response{}, fmt.Errorf("runtime: %s: %s: %w",
-			CodeContextOverflow, detail, cause)
+		return ai.Response{}, failureError(recorded, cause)
 	}
 
 	summary, retained, err := o.summarize(ctx, o.session.Truth())
@@ -617,7 +617,7 @@ func (o Outcome) Err() error {
 	if o.Failure == nil {
 		return nil
 	}
-	return failureError(o.Failure)
+	return failureError(o.Failure, nil)
 }
 
 // Reopen returns the operation's outcome without submitting input.
@@ -638,15 +638,23 @@ func (a *Agent) Reopen() Outcome {
 
 // failureError renders a recorded failure as an error.
 //
-// One site, so a failure raised mid-run and the same failure read back after a
-// restart cannot describe themselves differently. Overflow keeps its sentinel
-// wrapped for callers that already branch on it.
-func failureError(failure *session.OperationFailure) error {
-	if failure.Code == CodeContextOverflow {
-		return fmt.Errorf("runtime: %s: %s: %w",
-			failure.Code, failure.Detail, ai.ErrContextOverflow)
+// Every path that reports a failure comes through here — the one that raises it
+// as it happens and the one that reads it back after a restart — so the two
+// cannot describe the same failure differently.
+//
+// cause is what actually went wrong, when the caller still has it: the provider's
+// own error at the moment of refusal carries detail the durable record does not
+// keep. A caller reading the failure back later has no cause to offer, so the
+// class is recovered from the code instead, which is what keeps the wrapped
+// sentinel the same either way.
+func failureError(failure *session.OperationFailure, cause error) error {
+	if cause == nil && failure.Code == CodeContextOverflow {
+		cause = ai.ErrContextOverflow
 	}
-	return fmt.Errorf("runtime: %s: %s", failure.Code, failure.Detail)
+	if cause == nil {
+		return fmt.Errorf("runtime: %s: %s", failure.Code, failure.Detail)
+	}
+	return fmt.Errorf("runtime: %s: %s: %w", failure.Code, failure.Detail, cause)
 }
 
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
@@ -655,7 +663,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	// conclusion, and the caller would see a fresh failure rather than the one
 	// that was already recorded.
 	if failure := o.session.Failure(); failure != nil {
-		return ai.Response{}, failureError(failure)
+		return ai.Response{}, failureError(failure, nil)
 	}
 
 	requested := req.Model

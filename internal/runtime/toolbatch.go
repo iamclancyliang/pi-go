@@ -472,31 +472,35 @@ func (b *toolBatch) recordingFailure() error {
 // it is emitted — source order. `tool_end` therefore reports that a call
 // finished, not that the session already contains it.
 func (b *toolBatch) commit(call *batchCall) {
-	// A result that could not be recorded is remembered rather than dropped.
-	// commit runs while the round holds its lock and cannot return, so the
-	// failure is carried out to the turn, which ends rather than continuing with
-	// a history that is missing a result the model was told about.
-	if err := b.session.Append(ai.Message{
+	// The result the model reads and the settlement of the attempt go down as ONE
+	// write, because they are the same transition. Settling first and recording
+	// the message second would leave a call that recovery passes over — it is
+	// settled — while the conversation the model reads has no result for it.
+	//
+	// A write that fails is remembered rather than dropped. commit runs while the
+	// round holds its lock and cannot return, so the failure is carried out to
+	// the turn, which ends rather than continuing with a history that is missing
+	// a result the model was told about.
+	told := ai.Message{
 		Role:       ai.RoleTool,
 		Content:    call.result,
 		ToolCallID: call.id,
-	}); err != nil && b.storeErr == nil {
-		b.storeErr = err
 	}
-
-	// The attempt is settled here, with the result, because an outcome and the
-	// record that the outcome is known are the same fact. A call left unsettled
-	// while its result is in history reads as an effect nobody confirmed, and
-	// recovery would offer to repeat work that has already been reported.
-	if call.resultID != "" {
-		if err := b.session.Settle(session.ToolSettlement{
+	var err error
+	if call.resultID == "" {
+		// Nothing was attempted, so there is nothing to settle: this is a call
+		// the round refused before it could run.
+		err = b.session.Append(told)
+	} else {
+		err = b.session.Settle(session.ToolSettlement{
 			CallID:    call.id,
 			ResultID:  call.resultID,
 			Result:    call.result,
 			Terminate: call.terminate,
-		}); err != nil && b.storeErr == nil {
-			b.storeErr = err
-		}
+		}, told)
+	}
+	if err != nil && b.storeErr == nil {
+		b.storeErr = err
 	}
 	b.emitter.emit(events.KindToolResult, func(e *events.Event) {
 		e.ToolCallID = call.id

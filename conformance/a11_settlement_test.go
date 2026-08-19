@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -420,6 +421,102 @@ func TestA11ReplayTermsComeFromTheToolItself(t *testing.T) {
 		if policy != tools.ReplayNever || version != "" {
 			t.Errorf("declaration = (%v, %q), want (never, \"\"): nothing about a "+
 				"tool that is not there may be assumed", policy, version)
+		}
+	})
+}
+
+// refusesToolResults fails any write carrying a tool result, and accepts the
+// rest.
+//
+// Selective, because a store that fails everything cannot tell the two shapes
+// apart: the conversation never gets far enough to settle anything. Failing only
+// the write that carries the result is what distinguishes one all-or-none write
+// from a settlement and a message recorded separately.
+type refusesToolResults struct {
+	inner session.MemoryStore
+}
+
+func (r *refusesToolResults) Append(ctx context.Context, entries ...session.Entry) error {
+	for _, e := range entries {
+		if e.Message != nil && e.Message.Role == ai.RoleTool {
+			return errors.New("store unavailable")
+		}
+	}
+	return r.inner.Append(ctx, entries...)
+}
+
+func (r *refusesToolResults) Load(ctx context.Context) ([]session.Entry, error) {
+	return r.inner.Load(ctx)
+}
+
+// TestA11AnOutcomeAndItsResultAreOneWrite pins that settling a call and telling
+// the model about it cannot come apart.
+//
+// Settling first and recording the result second leaves the worst reachable
+// state when the second write fails: the call is settled, so recovery passes over
+// it, while the conversation the model reads has no result for it. Nothing
+// afterwards can tell that anything is missing — which is worse than either
+// write failing outright.
+func TestA11AnOutcomeAndItsResultAreOneWrite(t *testing.T) {
+	t.Run("recovery", func(t *testing.T) {
+		store := &refusesToolResults{}
+		sess := session.WithStore("You are pi-go.", store)
+		if err := sess.RecordIntent(session.ToolIntent{
+			OperationID: "op-1", CallID: "call-1", ResultID: "op-1.call-1",
+			Tool: "delete_files", ToolVersion: "v1", Replay: tools.ReplayNever,
+		}); err != nil {
+			t.Fatalf("RecordIntent: %v", err)
+		}
+
+		declared := func(string) (tools.ReplayPolicy, string, bool) {
+			return tools.ReplayNever, "v1", true
+		}
+		if _, err := session.RecoverUnsettled(context.Background(), sess, declared); err == nil {
+			t.Fatal("a settlement that could not be recorded was reported as done")
+		}
+		if _, settled := sess.Settlement("call-1"); settled {
+			t.Error("the call was settled while the result the model reads was not " +
+				"recorded, so nothing will revisit it and nothing says it is missing")
+		}
+		if got := sess.UnsettledIntents(); len(got) != 1 {
+			t.Errorf("unsettled = %d, want 1: the outcome is still unknown", len(got))
+		}
+	})
+
+	t.Run("a call that ran", func(t *testing.T) {
+		store := &refusesToolResults{}
+		tool := &recordReadingTool{name: "read_files", version: "v7",
+			replay: tools.ReplaySafe, store: store}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+
+		sess := session.WithStore("You are pi-go.", store)
+		agent, err := runtime.New(runtime.Config{
+			Model: &ai.Scripted{
+				Name: "fake-1",
+				Replies: []ai.Response{ai.AssistantToolCalls(
+					ai.ToolCall{ID: "call-1", Name: "read_files", Args: `{}`},
+				)},
+				StopWhenToolsSettled: true,
+				Final:                ai.AssistantText("done"),
+			},
+			ModelName: "fake-1",
+			Tools:     registry,
+			Session:   sess,
+			Policy:    runtime.DenyWrites,
+			Observers: []events.Observer{runtime.NewRecorder()},
+			Now:       fixedClock(),
+		})
+		if err != nil {
+			t.Fatalf("runtime.New: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := agent.Run(ctx, "read the file"); err == nil {
+			t.Fatal("a turn whose result could not be recorded reported success")
+		}
+		if _, settled := sess.Settlement("call-1"); settled {
+			t.Error("the call was settled while its result was not recorded")
 		}
 	})
 }
