@@ -22,6 +22,25 @@ import (
 // This is per-tool metadata, not a global mode: one tool in a multi-call batch
 // may need to run alone while the others do not care. A single global flag
 // cannot express that.
+// Result is what one call produced.
+type Result struct {
+	// Content is what the model sees.
+	Content string
+
+	// Terminate asks the loop to stop after this round, without another model
+	// call.
+	//
+	// It is a REQUEST, not a decision: the round stops only if every call in it
+	// asks. One tool cannot end the conversation on its own, because it cannot
+	// know what the others were asked to do. Reading this as "any call may
+	// terminate" is the inverse of the rule and ends runs that should continue.
+	//
+	// It is carried explicitly rather than inferred from the content, because
+	// no text or event can distinguish "this tool is done" from "this tool
+	// believes the whole task is done".
+	Terminate bool
+}
+
 type Execution struct {
 	// Sequential declares that this tool cannot tolerate running
 	// concurrently with other calls.
@@ -52,7 +71,7 @@ type Tool interface {
 	// Call runs the tool. args is the raw argument payload as the model
 	// produced it; returning an error is a normal, observable outcome
 	// rather than a crash.
-	Call(ctx context.Context, args string) (string, error)
+	Call(ctx context.Context, args string) (Result, error)
 }
 
 // ErrDuplicateName is returned when two tools claim the same name.

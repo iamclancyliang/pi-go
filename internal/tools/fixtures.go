@@ -55,15 +55,15 @@ func (f *FileRead) Execution() Execution {
 }
 
 // Call implements Tool.
-func (f *FileRead) Call(ctx context.Context, args string) (string, error) {
+func (f *FileRead) Call(ctx context.Context, args string) (Result, error) {
 	var in struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(args), &in); err != nil {
-		return "", fmt.Errorf("file_read: invalid arguments %q: %w", args, err)
+		return Result{}, fmt.Errorf("file_read: invalid arguments %q: %w", args, err)
 	}
 	if in.Path == "" {
-		return "", fmt.Errorf("file_read: path is required")
+		return Result{}, fmt.Errorf("file_read: path is required")
 	}
 
 	f.mu.Lock()
@@ -75,16 +75,16 @@ func (f *FileRead) Call(ctx context.Context, args string) (string, error) {
 		case <-ctx.Done():
 			// Cancellation is an observable outcome, not a panic:
 			// a cancelled tool must still produce an event.
-			return "", ctx.Err()
+			return Result{}, ctx.Err()
 		case <-time.After(f.Delay):
 		}
 	}
 
 	content, ok := f.Files[in.Path]
 	if !ok {
-		return "", fmt.Errorf("file_read: no such file: %s", in.Path)
+		return Result{}, fmt.Errorf("file_read: no such file: %s", in.Path)
 	}
-	return content, nil
+	return Result{Content: content}, nil
 }
 
 // Calls returns the paths this tool was asked for, in invocation order.
@@ -124,14 +124,14 @@ func (l *ListFiles) Execution() Execution {
 }
 
 // Call implements Tool.
-func (l *ListFiles) Call(ctx context.Context, args string) (string, error) {
+func (l *ListFiles) Call(ctx context.Context, args string) (Result, error) {
 	var in struct {
 		Prefix string `json:"prefix"`
 	}
 	// An empty payload is a legitimate "no arguments" call.
 	if strings.TrimSpace(args) != "" {
 		if err := json.Unmarshal([]byte(args), &in); err != nil {
-			return "", fmt.Errorf("list_files: invalid arguments %q: %w", args, err)
+			return Result{}, fmt.Errorf("list_files: invalid arguments %q: %w", args, err)
 		}
 	}
 
@@ -140,7 +140,7 @@ func (l *ListFiles) Call(ctx context.Context, args string) (string, error) {
 	l.mu.Unlock()
 
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return Result{}, err
 	}
 
 	paths := make([]string, 0, len(l.Files))
@@ -151,7 +151,7 @@ func (l *ListFiles) Call(ctx context.Context, args string) (string, error) {
 	}
 	// Sorted: map order would make the golden trace nondeterministic.
 	sort.Strings(paths)
-	return strings.Join(paths, "\n"), nil
+	return Result{Content: strings.Join(paths, "\n")}, nil
 }
 
 // Calls returns how many times this tool ran.

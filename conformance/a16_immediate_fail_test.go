@@ -117,7 +117,7 @@ func (deniedTool) Execution() tools.Execution {
 	return tools.Execution{Sequential: false, ReadOnly: false}
 }
 
-func (deniedTool) Call(context.Context, string) (string, error) {
+func (deniedTool) Call(context.Context, string) (tools.Result, error) {
 	deniedRuns++
-	return "wrote", nil
+	return tools.Result{Content: "wrote"}, nil
 }

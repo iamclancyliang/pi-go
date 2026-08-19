@@ -29,12 +29,12 @@ func (t *timedTool) Execution() tools.Execution {
 	return tools.Execution{Sequential: t.sequential, ReadOnly: true}
 }
 
-func (t *timedTool) Call(ctx context.Context, _ string) (string, error) {
+func (t *timedTool) Call(ctx context.Context, _ string) (tools.Result, error) {
 	select {
 	case <-time.After(t.delay):
-		return t.name + " finished", nil
+		return tools.Result{Content: t.name + " finished"}, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return tools.Result{}, ctx.Err()
 	}
 }
 

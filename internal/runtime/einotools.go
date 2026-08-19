@@ -74,12 +74,12 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 		// because aborting the run would make a recoverable tool error
 		// indistinguishable from a harness crash.
 		msg := fmt.Sprintf("error: %v", err)
-		t.batch.finish(callID, msg, err)
+		t.batch.finish(callID, msg, false, err)
 		return msg, nil
 	}
 
-	t.batch.finish(callID, result, nil)
-	return result, nil
+	t.batch.finish(callID, result.Content, result.Terminate, nil)
+	return result.Content, nil
 }
 
 var _ tool.InvokableTool = (*observedTool)(nil)

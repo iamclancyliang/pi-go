@@ -219,6 +219,14 @@ func (r *Run) Wait() error {
 		reason = "error"
 		exitErr = exit.ExitReason
 	}
+	// A stop the tools asked for is a normal ending. The framework ends the run
+	// by cancelling it, so without reading the cause back a deliberate stop is
+	// reported as a broken run — the caller sees an error for the one outcome
+	// that was requested.
+	if exit != nil && exit.StopCause == stopCauseToolTerminate {
+		reason = stopCauseToolTerminate
+		exitErr = nil
+	}
 	// Cancellation outranks a reported error: when the context is done, the
 	// error is usually just the cancellation surfacing, and reporting it as
 	// "error" would hide a deliberate abort.
@@ -340,7 +348,21 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// so continuity has to come from truth we hold.
 			proj := a.cfg.Session.Project()
 			return &adk.GenInputResult[*schema.Message, *schema.Message]{
-				Input:    &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				Input: &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				RunOpts: []adk.AgentRunOption{
+					// Fires after a round of tool calls completes and BEFORE
+					// the next model call. That is the only point where a
+					// round can end the conversation without a further call:
+					// the results are already recorded, and the graph has not
+					// yet reached the model.
+					adk.WithAfterToolCallsHook(func(context.Context) error {
+						if !batch.ShouldTerminate() {
+							return nil
+						}
+						l.Stop(adk.WithImmediate(), adk.WithStopCause(stopCauseToolTerminate))
+						return nil
+					}),
+				},
 				Consumed: items,
 			}, nil
 		},
@@ -375,7 +397,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				default:
 				}
 			}
-			if failure != nil {
+			// A round that asked to stop is a normal ending, not a failure.
+			// The framework reports it by cancelling the turn, which is
+			// indistinguishable from any other cancellation unless the cause
+			// is read back: reported as an error, a deliberate stop would
+			// surface as a broken run and would stop the agent for the wrong
+			// stated reason.
+			if tc != nil && tc.StopCause() == stopCauseToolTerminate {
+				reason = "tool_terminate"
+				failure = nil
+			} else if failure != nil {
 				reason = "error"
 			}
 			a.emitter.emit(events.KindTurnEnd, func(e *events.Event) {
@@ -397,6 +428,10 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	})
 	return loop, nil
 }
+
+// stopCauseToolTerminate marks a stop the tools asked for, so it can be told
+// apart from a cancellation or a failure when the turn is closed out.
+const stopCauseToolTerminate = "tool_terminate"
 
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.

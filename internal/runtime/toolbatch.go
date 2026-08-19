@@ -52,6 +52,8 @@ type batchCall struct {
 	// settled marks a call refused during preparation: it has already ended
 	// and must not run.
 	settled bool
+	// terminate records that this call asked the loop to stop.
+	terminate bool
 }
 
 func newToolBatch(emitter *emitter, sess *session.Session,
@@ -214,7 +216,7 @@ func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 // Observers are notified from inside the critical section, so an observer that
 // calls back into this batch would deadlock. They are event sinks; they receive
 // the stream and do not drive it.
-func (b *toolBatch) finish(callID, result string, err error) {
+func (b *toolBatch) finish(callID, result string, terminate bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -222,7 +224,7 @@ func (b *toolBatch) finish(callID, result string, err error) {
 	if !known {
 		return
 	}
-	call.result, call.err = result, err
+	call.result, call.err, call.terminate = result, err, terminate
 	b.remaining--
 
 	// The end is the execution event: emitted the moment this call finished,
@@ -244,6 +246,28 @@ func (b *toolBatch) finish(callID, result string, err error) {
 			b.commit(entry)
 		}
 	}
+}
+
+// ShouldTerminate reports whether every call in this round asked to stop.
+//
+// Every, not any: a call cannot know what the others were asked to do, so one of
+// them ending the conversation would discard work the model is still waiting on.
+// An empty round terminates nothing — there was no request to honour.
+//
+// A call refused before it ran did not ask for anything, so a round containing one
+// does not terminate.
+func (b *toolBatch) ShouldTerminate() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.calls) == 0 {
+		return false
+	}
+	for _, call := range b.calls {
+		if !call.terminate {
+			return false
+		}
+	}
+	return true
 }
 
 // commit makes the result session truth and emits it.

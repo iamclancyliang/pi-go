@@ -86,7 +86,7 @@ type countingTool struct {
 	calls int
 }
 
-func (c *countingTool) Call(ctx context.Context, args string) (string, error) {
+func (c *countingTool) Call(ctx context.Context, args string) (tools.Result, error) {
 	c.mu.Lock()
 	c.calls++
 	c.mu.Unlock()
