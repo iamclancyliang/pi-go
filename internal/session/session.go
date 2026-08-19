@@ -49,6 +49,11 @@ type Session struct {
 	// failure is the terminal state of the current input, if it has one.
 	failure *OperationFailure
 
+	// operations counts the inputs this conversation has been asked to answer.
+	// It is rebuilt from the store, so the operation a record names is the same
+	// one before and after a restart.
+	operations int
+
 	// overflowUsage accumulates what the refused attempts cost.
 	overflowUsage ai.Usage
 
@@ -115,6 +120,7 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 		if m.Role == ai.RoleUser {
 			s.overflowAttempts = 0
 			s.failure = nil
+			s.operations++
 		}
 	}
 	return nil
@@ -213,6 +219,18 @@ func (s *Session) Failure() *OperationFailure {
 	}
 	copied := *s.failure
 	return &copied
+}
+
+// OperationID names the input currently being answered.
+//
+// Derived from the count of inputs rather than generated, because a generated id
+// is lost with the process that generated it: a record written before a crash
+// would then name an operation the restarted process cannot recognise. Counting
+// inputs reaches the same name again because the inputs themselves are durable.
+func (s *Session) OperationID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return fmt.Sprintf("op-%d", s.operations)
 }
 
 // RecordIntent durably notes that a tool is about to run.

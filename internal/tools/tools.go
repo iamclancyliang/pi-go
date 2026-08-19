@@ -177,3 +177,41 @@ func (r *Registry) All() []Tool {
 // unused: eino decides sequencing per tools-node at construction, so a
 // per-batch API would advertise a granularity the runtime cannot deliver.
 // Sequencing is resolved in internal/runtime — see Execution.Sequential.
+
+// Versioned is implemented by a tool whose behaviour changes between builds.
+//
+// A tool that permits a repeat is making a promise about the code that runs on
+// the repeat, and only the tool knows when that code stopped matching the
+// promise. Declaring a version is how it says so.
+type Versioned interface {
+	// Version identifies this tool's behaviour. Any change to it means a
+	// record written earlier no longer describes the tool running now.
+	Version() string
+}
+
+// Declaration reports what a tool currently says about repeating a call.
+//
+// Read when deciding whether a call whose outcome was lost may be run again.
+// The comparison is against what the tool declares NOW, because a tool that was
+// changed or swapped while the process was down is not the tool the earlier
+// record agreed to repeat.
+//
+// A tool that declares no version gets one derived from what it does declare —
+// its name, description and scheduling metadata. That is deliberately
+// conservative: it can report a change that did not alter behaviour, which costs
+// an unnecessary refusal, and it cannot notice a behaviour change behind
+// identical declarations, which is why a tool that permits repeats should
+// implement Versioned rather than rely on this.
+func (r *Registry) Declaration(name string) (ReplayPolicy, string, bool) {
+	t, ok := r.Lookup(name)
+	if !ok {
+		return ReplayNever, "", false
+	}
+	execution := t.Execution()
+	if versioned, declares := t.(Versioned); declares {
+		return execution.Replay, versioned.Version(), true
+	}
+	return execution.Replay, fmt.Sprintf("derived:%s/%s/%v/%v/%s",
+		t.Name(), execution.Replay, execution.Sequential, execution.ReadOnly,
+		t.Description()), true
+}

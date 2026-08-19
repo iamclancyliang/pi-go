@@ -277,7 +277,8 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// One coordinator for this loop. Each model response opens a new round in
 	// it, so the order of a round is decided in one place instead of inside the
 	// tools, which cannot see each other.
-	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall)
+	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall,
+		a.cfg.Tools.Declaration)
 
 	observed := &observingPort{
 		inner:         a.cfg.Model,

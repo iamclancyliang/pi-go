@@ -3,7 +3,11 @@ package conformance
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/events"
+	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
@@ -164,4 +168,258 @@ func TestA11DefaultPolicyForbidsRepeating(t *testing.T) {
 			"policy must not permit repeating a destructive call",
 			declaredNothing.Replay)
 	}
+}
+
+// recordReadingTool reads the durable record from inside its own call.
+//
+// Reading it afterwards cannot tell the two orderings apart: the record exists
+// either way by then. Only a tool that looks while it is running can say the
+// attempt was durable BEFORE the effect, which is the whole ordering the contract
+// is about.
+type recordReadingTool struct {
+	name      string
+	version   string
+	replay    tools.ReplayPolicy
+	terminate bool
+	store     session.Store
+
+	seen []session.ToolIntent
+}
+
+func (t *recordReadingTool) Name() string        { return t.name }
+func (t *recordReadingTool) Description() string { return "test tool" }
+func (t *recordReadingTool) Version() string     { return t.version }
+func (t *recordReadingTool) Execution() tools.Execution {
+	return tools.Execution{ReadOnly: true, Sequential: true, Replay: t.replay}
+}
+
+func (t *recordReadingTool) Call(ctx context.Context, _ string) (tools.Result, error) {
+	reopened, err := session.Restore(ctx, "You are pi-go.", t.store)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	t.seen = reopened.UnsettledIntents()
+	return tools.Result{Content: t.name + " finished", Terminate: t.terminate}, nil
+}
+
+// TestA11TheAttemptIsRecordedBeforeTheEffect pins the ordering a real call gets.
+//
+// A record written after the tool returns is missing in exactly the case it
+// exists for. If the process dies during the call, a restart reads a conversation
+// where nothing was attempted, so it is free to run the call again — against a
+// world the first attempt may already have changed.
+//
+// The settlement is written WITH the result, because an outcome and the record
+// that the outcome is known are the same fact. Splitting them leaves a call whose
+// result is in history but which recovery would still offer to repeat.
+func TestA11TheAttemptIsRecordedBeforeTheEffect(t *testing.T) {
+	store := &session.MemoryStore{}
+	tool := &recordReadingTool{
+		name: "read_files", version: "v7",
+		replay: tools.ReplaySafe, terminate: true, store: store,
+	}
+	registry := tools.NewRegistry()
+	registry.MustRegister(tool)
+
+	sess := session.WithStore("You are pi-go.", store)
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(
+			ai.ToolCall{ID: "call-1", Name: "read_files", Args: `{"path":"/tmp/x"}`},
+		)},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "read the file"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(tool.seen) != 1 {
+		t.Fatalf("the running call saw %d recorded attempts, want its own: a record "+
+			"written after the effect cannot survive a crash during it", len(tool.seen))
+	}
+	intent := tool.seen[0]
+	want := session.ToolIntent{
+		OperationID: "op-1",
+		CallID:      "call-1",
+		ResultID:    "op-1.call-1",
+		Tool:        "read_files",
+		ToolVersion: "v7",
+		Args:        `{"path":"/tmp/x"}`,
+		Replay:      tools.ReplaySafe,
+	}
+	if intent != want {
+		t.Errorf("recorded attempt = %+v, want %+v", intent, want)
+	}
+
+	// The terms are the ones the tool offered when it ran. Reading them back at
+	// recovery time instead would judge the decision against whatever the tool
+	// says later, which is the code that has not agreed to be repeated.
+	settlement, settled := sess.Settlement("call-1")
+	if !settled {
+		t.Fatal("the call ran and reported, and is still unsettled: recovery would " +
+			"offer to repeat work already in history")
+	}
+	if settlement.Result != "read_files finished" {
+		t.Errorf("settled result = %q, want what the call produced", settlement.Result)
+	}
+	if settlement.ResultID != want.ResultID {
+		t.Errorf("settled slot = %q, want the %q the attempt reserved",
+			settlement.ResultID, want.ResultID)
+	}
+	if !settlement.Terminate {
+		t.Error("the settlement forgot that this call asked the conversation to " +
+			"stop, so nothing on record says why the run ended")
+	}
+	if settlement.Interrupted {
+		t.Error("a call that reported its own outcome was settled as interrupted")
+	}
+	if got := sess.UnsettledIntents(); len(got) != 0 {
+		t.Errorf("unsettled after the round = %+v, want none", got)
+	}
+}
+
+// writingTool declares a mutation, so the policy refuses it before it runs.
+type writingTool struct{ ran bool }
+
+func (w *writingTool) Name() string               { return "delete_files" }
+func (w *writingTool) Description() string        { return "test tool" }
+func (w *writingTool) Execution() tools.Execution { return tools.Execution{} }
+func (w *writingTool) Call(context.Context, string) (tools.Result, error) {
+	w.ran = true
+	return tools.Result{Content: "deleted"}, nil
+}
+
+// TestA11ARefusalIsNotAnAttempt pins that a call which never ran leaves no
+// attempt on record.
+//
+// Recording one anyway would make recovery treat a refusal as an outcome that
+// might have happened, and for a tool declaring itself unsafe to repeat that is
+// the reading that leaves a user unable to be told anything definite about their
+// files.
+func TestA11ARefusalIsNotAnAttempt(t *testing.T) {
+	store := &session.MemoryStore{}
+	tool := &writingTool{}
+	registry := tools.NewRegistry()
+	registry.MustRegister(tool)
+
+	sess := session.WithStore("You are pi-go.", store)
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(
+			ai.ToolCall{ID: "call-1", Name: "delete_files", Args: `{}`},
+		)},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "delete the file"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if tool.ran {
+		t.Fatal("a refused call ran")
+	}
+	reopened, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := reopened.UnsettledIntents(); len(got) != 0 {
+		t.Errorf("recorded attempts = %+v, want none: nothing was attempted", got)
+	}
+	if _, settled := reopened.Settlement("call-1"); settled {
+		t.Error("a call that never ran was settled, which reads as an outcome")
+	}
+}
+
+// silentTool declares no version, so one has to be derived from what it does
+// declare.
+type silentTool struct {
+	name        string
+	description string
+	replay      tools.ReplayPolicy
+}
+
+func (s *silentTool) Name() string               { return s.name }
+func (s *silentTool) Description() string        { return s.description }
+func (s *silentTool) Execution() tools.Execution { return tools.Execution{Replay: s.replay} }
+func (s *silentTool) Call(context.Context, string) (tools.Result, error) {
+	return tools.Result{}, nil
+}
+
+// TestA11ReplayTermsComeFromTheToolItself pins where the replay decision reads
+// its inputs.
+//
+// The version is what makes "the same tool" answerable at all. Without one, a
+// binary rebuilt with different behaviour behind the same tool name inherits an
+// earlier agreement to be repeated — which is the case a repeat must not be
+// allowed to slip through.
+func TestA11ReplayTermsComeFromTheToolItself(t *testing.T) {
+	t.Run("a tool that declares a version reports it", func(t *testing.T) {
+		registry := tools.NewRegistry()
+		registry.MustRegister(&recordReadingTool{
+			name: "read_files", version: "v7", replay: tools.ReplaySafe,
+		})
+		policy, version, known := registry.Declaration("read_files")
+		if !known || policy != tools.ReplaySafe || version != "v7" {
+			t.Errorf("declaration = (%v, %q, %v), want (safe, \"v7\", true)",
+				policy, version, known)
+		}
+	})
+
+	t.Run("changed declarations derive a different version", func(t *testing.T) {
+		before := tools.NewRegistry()
+		before.MustRegister(&silentTool{name: "grep", description: "search files"})
+		after := tools.NewRegistry()
+		after.MustRegister(&silentTool{name: "grep", description: "search files and directories"})
+
+		_, first, _ := before.Declaration("grep")
+		_, second, _ := after.Declaration("grep")
+		if first == "" {
+			t.Fatal("a tool with no declared version got no version at all, so a " +
+				"record written before a change still matches the changed tool")
+		}
+		if first == second {
+			t.Error("a tool whose declarations changed kept the same version, so an " +
+				"earlier agreement to repeat carries over to code that never made it")
+		}
+	})
+
+	t.Run("an unregistered tool has declared nothing", func(t *testing.T) {
+		policy, version, known := tools.NewRegistry().Declaration("gone")
+		if known {
+			t.Error("a tool that is not registered was reported as known")
+		}
+		if policy != tools.ReplayNever || version != "" {
+			t.Errorf("declaration = (%v, %q), want (never, \"\"): nothing about a "+
+				"tool that is not there may be assumed", policy, version)
+		}
+	})
 }

@@ -171,6 +171,7 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 				// NOT reset: it was really paid, and the ledger is cumulative.
 				s.overflowAttempts = 0
 				s.failure = nil
+				s.operations++
 			}
 		case e.Overflow != nil:
 			// Durable, and deliberately not part of the conversation: it is
@@ -253,6 +254,11 @@ type ToolSettlement struct {
 	// Interrupted marks a settlement written by recovery rather than by the
 	// tool: the effect was never confirmed either way.
 	Interrupted bool
+
+	// Terminate is what this call asked the conversation to do next. Recorded
+	// with the result because it is part of the outcome: a transcript that keeps
+	// the result and forgets the request cannot say why the run stopped.
+	Terminate bool
 }
 
 // RecoverUnsettled decides what to do about calls whose outcome was lost, and

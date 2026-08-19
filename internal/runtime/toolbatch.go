@@ -7,6 +7,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/events"
 	"github.com/iamclancyliang/pi-go/internal/session"
+	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
 // toolBatch owns the ORDER of one round of tool calls.
@@ -34,6 +35,12 @@ type toolBatch struct {
 	// the round begins. It reports the refusal text when it may not.
 	prepare func(ctx context.Context, name, callID, args string) (string, bool)
 
+	// declare reports what a tool currently says about repeating a call. Read
+	// when the attempt is recorded, so the record carries the terms the tool
+	// offered at the time rather than whatever it offers when the record is
+	// read back.
+	declare func(name string) (tools.ReplayPolicy, string, bool)
+
 	mu         sync.Mutex
 	calls      []*batchCall
 	byID       map[string]*batchCall
@@ -58,14 +65,20 @@ type batchCall struct {
 	terminate bool
 	// dropped marks a call the abort cut: it produces no result at all.
 	dropped bool
+	// resultID is the slot the recorded attempt reserved for this call's
+	// result. Non-empty means an attempt is on record, so the outcome owes a
+	// settlement.
+	resultID string
 }
 
 func newToolBatch(emitter *emitter, sess *session.Session,
-	prepare func(ctx context.Context, name, callID, args string) (string, bool)) *toolBatch {
+	prepare func(ctx context.Context, name, callID, args string) (string, bool),
+	declare func(name string) (tools.ReplayPolicy, string, bool)) *toolBatch {
 	return &toolBatch{
 		emitter: emitter,
 		session: sess,
 		prepare: prepare,
+		declare: declare,
 		byID:    map[string]*batchCall{},
 	}
 }
@@ -134,20 +147,7 @@ func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
 		if !refused {
 			continue
 		}
-		b.mu.Lock()
-		call.settled, call.result = true, refusal
-		b.remaining--
-		b.emitEnd(call)
-		finished := b.remaining == 0
-		ordered := append([]*batchCall(nil), b.calls...)
-		b.mu.Unlock()
-		if finished {
-			b.mu.Lock()
-			for _, entry := range ordered {
-				b.commit(entry)
-			}
-			b.mu.Unlock()
-		}
+		b.settleWithoutRunning(call, refusal)
 	}
 }
 
@@ -171,6 +171,57 @@ func (b *toolBatch) prepareCall(ctx context.Context, call *batchCall) (string, b
 		return "", false
 	}
 	return b.prepare(ctx, call.name, call.id, call.args)
+}
+
+// admit records the attempt before the call can take effect.
+//
+// The record has to be durable BEFORE the tool runs. Written afterwards it would
+// be missing in exactly the case it exists for: a process that dies during the
+// call leaves nothing saying an attempt was made, so the restarted process reads
+// an untouched conversation and is free to run the call again — against a world
+// the first attempt may already have changed.
+//
+// A call whose attempt cannot be recorded DOES NOT RUN. Running it anyway would
+// produce precisely the effect-without-a-record this exists to prevent, and the
+// model is told the call failed rather than being left with no answer.
+//
+// The declared replay terms are captured here rather than looked up during
+// recovery, so the decision is judged against what the tool offered when it ran.
+func (b *toolBatch) admit(call *batchCall) (string, bool) {
+	policy, version, known := tools.ReplayNever, "", false
+	if b.declare != nil {
+		policy, version, known = b.declare(call.name)
+	}
+	if !known {
+		// An unregistered tool has declared nothing, so nothing about it may be
+		// assumed. Never is the reading that cannot be undone by a repeat.
+		policy, version = tools.ReplayNever, ""
+	}
+
+	operation := b.session.OperationID()
+	resultID := operation + "." + call.id
+	if err := b.session.RecordIntent(session.ToolIntent{
+		OperationID: operation,
+		CallID:      call.id,
+		ResultID:    resultID,
+		Tool:        call.name,
+		ToolVersion: version,
+		Args:        call.args,
+		Replay:      policy,
+	}); err != nil {
+		b.mu.Lock()
+		if b.storeErr == nil {
+			b.storeErr = err
+		}
+		b.mu.Unlock()
+		return "failed: this call was not attempted, because the record that " +
+			"it was about to run could not be written", false
+	}
+
+	b.mu.Lock()
+	call.resultID = resultID
+	b.mu.Unlock()
+	return "", true
 }
 
 // beginResult is what the round has already decided about a call.
@@ -221,12 +272,16 @@ func (b *toolBatch) begin(ctx context.Context, callID string) beginResult {
 	}
 	if !sequential {
 		b.mu.Lock()
-		defer b.mu.Unlock()
-		return beginResult{
+		decided := beginResult{
 			Refusal: call.result,
 			Settled: call.settled,
 			Dropped: call.dropped,
 		}
+		b.mu.Unlock()
+		if decided.Settled || decided.Dropped {
+			return decided
+		}
+		return b.admitOrSettle(call)
 	}
 
 	// The wait must be cancellable. A sequential round hands the turn from one
@@ -250,19 +305,49 @@ func (b *toolBatch) begin(ctx context.Context, callID string) beginResult {
 	b.emitStart(call)
 	refusal, refused := b.prepareCall(ctx, call)
 	if !refused {
-		return beginResult{}
+		return b.admitOrSettle(call)
 	}
 
+	b.settleWithoutRunning(call, refusal)
+	return beginResult{Refusal: refusal, Settled: true}
+}
+
+// admitOrSettle records the attempt and reports whether the call may proceed.
+//
+// One site for both modes. Recording the attempt separately in each would let
+// the two drift, and the mode that drifted would run tools with no record of the
+// attempt — which looks exactly like a tool that was never called.
+func (b *toolBatch) admitOrSettle(call *batchCall) beginResult {
+	refusal, admitted := b.admit(call)
+	if admitted {
+		return beginResult{}
+	}
+	b.settleWithoutRunning(call, refusal)
+	return beginResult{Refusal: refusal, Settled: true}
+}
+
+// settleWithoutRunning ends a call that never ran, in the round's order.
+func (b *toolBatch) settleWithoutRunning(call *batchCall, result string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	call.settled, call.result = true, refusal
+
+	call.settled, call.result = true, result
 	b.remaining--
 	b.emitEnd(call)
-	b.commit(call)
-	if index >= 0 && index+1 < len(b.gates) {
-		close(b.gates[index+1])
+	if b.sequential {
+		b.commit(call)
+		if index := b.indexOf(call.id); index >= 0 && index+1 < len(b.gates) {
+			close(b.gates[index+1])
+		}
+		return
 	}
-	return beginResult{Refusal: refusal, Settled: true}
+	if b.remaining == 0 {
+		for _, entry := range b.calls {
+			if !entry.dropped {
+				b.commit(entry)
+			}
+		}
+	}
 }
 
 // finish records the outcome and emits whatever the mode says comes next.
@@ -397,6 +482,21 @@ func (b *toolBatch) commit(call *batchCall) {
 		ToolCallID: call.id,
 	}); err != nil && b.storeErr == nil {
 		b.storeErr = err
+	}
+
+	// The attempt is settled here, with the result, because an outcome and the
+	// record that the outcome is known are the same fact. A call left unsettled
+	// while its result is in history reads as an effect nobody confirmed, and
+	// recovery would offer to repeat work that has already been reported.
+	if call.resultID != "" {
+		if err := b.session.Settle(session.ToolSettlement{
+			CallID:    call.id,
+			ResultID:  call.resultID,
+			Result:    call.result,
+			Terminate: call.terminate,
+		}); err != nil && b.storeErr == nil {
+			b.storeErr = err
+		}
 	}
 	b.emitter.emit(events.KindToolResult, func(e *events.Event) {
 		e.ToolCallID = call.id
