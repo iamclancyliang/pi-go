@@ -310,3 +310,98 @@ func (s *stubbornTool) ran() int {
 	defer s.mu.Unlock()
 	return s.calls
 }
+
+// TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall pins the EARLIEST cut point.
+//
+// A parallel round announces and prepares its calls in one serial pass before any
+// of them runs. A cut can land part-way through that pass, so a call may be cut
+// before it was ever announced — earlier than the point A8's other cases cover,
+// which is after the call was already dispatched.
+//
+// Such a call gets no start, no end and no result. Announcing it would describe an
+// attempt that was never made, and a client rendering the stream would show a call
+// beginning that nothing ever ran.
+func TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	// The first call cancels the round from inside its own preparation, so the
+	// calls after it meet an already-cancelled context in the same pass.
+	registry.MustRegister(&timedTool{name: "slow_tool", delay: 50 * time.Millisecond})
+
+	sess := session.New("You are pi-go.")
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(
+			ai.ToolCall{ID: "call-1", Name: "slow_tool", Args: `{}`},
+			ai.ToolCall{ID: "call-2", Name: "slow_tool", Args: `{}`},
+			ai.ToolCall{ID: "call-3", Name: "slow_tool", Args: `{}`},
+		)},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+
+	rec := runtime.NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+		// Cancelling from the policy cuts the round DURING the preparation pass:
+		// the first call has been announced and the rest have not.
+		Policy: runtime.PolicyFunc(func(_ context.Context, c runtime.PolicyCall) runtime.Decision {
+			if c.ToolCallID == "call-1" {
+				cancel()
+			}
+			return runtime.Decision{}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	// A cut round ends as an abort. The error is asserted rather than discarded:
+	// swallowing it would let a panic inside the code under test pass unnoticed,
+	// which is exactly what happened to an earlier version of this test.
+	runErr := agent.Run(ctx, "run the tools")
+	cancel()
+	if runErr == nil {
+		t.Fatal("a cut round reported success")
+	}
+
+	announced := map[string]bool{}
+	for _, id := range idsOf(rec, events.KindToolStart) {
+		announced[id] = true
+	}
+	settled := map[string]bool{}
+	for _, id := range idsOf(rec, events.KindToolResult) {
+		settled[id] = true
+	}
+
+	// The first call was announced — the cut had not landed yet when its turn
+	// came. Without this the assertions below are satisfied by a round that
+	// announced nothing at all, which is a different defect.
+	if !announced["call-1"] {
+		t.Error("the call whose turn came before the cut was never announced")
+	}
+	// The calls whose turn came after the cut are absent from the stream
+	// ENTIRELY. Not announced, because announcing describes an attempt that was
+	// never made; and not reported, because there is no outcome to report.
+	for _, id := range []string{"call-2", "call-3"} {
+		if announced[id] {
+			t.Errorf("%s was announced although the round was already cut, so the "+
+				"stream shows a call beginning that nothing ever ran", id)
+		}
+		if settled[id] {
+			t.Errorf("%s produced a result although it was cut before it was even "+
+				"announced", id)
+		}
+	}
+	// Their ids stay in the assistant message with nothing matching them, which
+	// is the state anything reading the transcript afterwards has to tolerate.
+	unmatched := sess.UnmatchedToolCalls()
+	if len(unmatched) == 0 {
+		t.Error("calls were cut yet nothing is unmatched, so the transcript claims " +
+			"every call was answered")
+	}
+}
