@@ -460,7 +460,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	// Source order is not recoverable later: once execution starts, the only
 	// order anything can observe is the order things happened to finish.
 	if len(resp.ToolCalls) > 0 && o.batch != nil {
-		o.batch.register(ctx, resp.ToolCalls, o.sequentialFor)
+		o.batch.register(ctx, resp.ToolCalls, o.sequentialFor, resp.Truncated)
 	}
 	return resp, nil
 }

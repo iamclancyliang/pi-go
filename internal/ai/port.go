@@ -77,6 +77,15 @@ type Response struct {
 	// what served the call is what makes model_changed provable rather than
 	// assumed.
 	Model string
+
+	// Truncated reports that the model stopped because it ran out of room
+	// rather than because it had finished.
+	//
+	// It matters because truncation can cut a tool call's arguments mid-way,
+	// and the cut arguments may still be valid on their own: half a path is a
+	// path, and a shortened command is a command. Whether the arguments parse
+	// therefore says nothing about whether they are what the model meant.
+	Truncated bool
 }
 
 // Port is the model boundary.

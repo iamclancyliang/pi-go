@@ -123,3 +123,38 @@ func sameKinds(a, b []events.Kind) bool {
 	}
 	return true
 }
+
+// runRoundWith runs one model response verbatim, so a test can set fields on it
+// that a list of calls cannot express.
+func runRoundWith(t testingT, registry *tools.Registry, reply ai.Response) (*runtime.Recorder, *session.Session) {
+	t.Helper()
+
+	sess := session.New("You are pi-go.")
+	model := &ai.Scripted{
+		Name:                 "fake-1",
+		Replies:              []ai.Response{reply},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "run the tools"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return rec, sess
+}

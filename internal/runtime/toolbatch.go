@@ -38,6 +38,7 @@ type toolBatch struct {
 	calls      []*batchCall
 	byID       map[string]*batchCall
 	sequential bool
+	truncated  bool
 	gates      []chan struct{}
 	remaining  int
 }
@@ -69,7 +70,7 @@ func newToolBatch(emitter *emitter, sess *session.Session,
 // from the whole registry instead makes one sequential tool serialise every batch
 // for the life of the process, including batches that never call it.
 func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
-	sequentialFor func(name string) bool) {
+	sequentialFor func(name string) bool, truncated bool) {
 	b.mu.Lock()
 
 	b.calls = make([]*batchCall, 0, len(calls))
@@ -78,6 +79,7 @@ func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
 	b.sequential = false
 	b.remaining = len(calls)
 
+	b.truncated = truncated
 	for index, call := range calls {
 		entry := &batchCall{id: call.ID, name: call.Name, args: call.Args}
 		b.calls = append(b.calls, entry)
@@ -133,7 +135,20 @@ func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
 
 // prepareCall asks whether a call may run, with no lock held: the decision is
 // the caller's and may take arbitrary time.
+//
+// A TRUNCATED message fails every call it carried, without running any of them.
+// Not the ones whose arguments fail to parse — all of them. Truncation cuts the
+// arguments, and cut arguments can still be valid: checking each call and running
+// the ones that parse keeps exactly the calls whose meaning was most likely
+// changed, which inverts the rule.
 func (b *toolBatch) prepareCall(ctx context.Context, call *batchCall) (string, bool) {
+	b.mu.Lock()
+	truncated := b.truncated
+	b.mu.Unlock()
+	if truncated {
+		return "failed: the model's message was cut short, so none of its tool " +
+			"calls were run", true
+	}
 	if b.prepare == nil {
 		return "", false
 	}
