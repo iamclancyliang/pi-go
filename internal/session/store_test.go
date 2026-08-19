@@ -87,8 +87,8 @@ func TestNoStoreStillWorks(t *testing.T) {
 
 type failingStore struct{ err error }
 
-func (f *failingStore) Append(context.Context, ai.Message) error { return f.err }
-func (f *failingStore) Load(context.Context) ([]ai.Message, error) {
+func (f *failingStore) Append(context.Context, Entry) error { return f.err }
+func (f *failingStore) Load(context.Context) ([]Entry, error) {
 	return nil, f.err
 }
 

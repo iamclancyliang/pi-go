@@ -32,6 +32,13 @@ type Session struct {
 	// store, when set, is where history is recorded so it outlives the process.
 	store Store
 
+	// checkpoint is the latest compaction, if any. It stands in for everything
+	// appended before it.
+	checkpoint *Checkpoint
+
+	// sinceCheckpoint is what has been appended after that checkpoint, in order.
+	sinceCheckpoint []ai.Message
+
 	mu sync.RWMutex
 
 	// system is held separately from the transcript because it is not a
@@ -69,12 +76,16 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 
 	if s.store != nil {
 		for _, m := range msgs {
-			if err := s.store.Append(context.Background(), m); err != nil {
+			recorded := m
+			if err := s.store.Append(context.Background(), Entry{Message: &recorded}); err != nil {
 				return fmt.Errorf("session: recording message: %w", err)
 			}
 		}
 	}
 	s.messages = append(s.messages, msgs...)
+	if s.checkpoint != nil {
+		s.sinceCheckpoint = append(s.sinceCheckpoint, msgs...)
+	}
 	return nil
 }
 
@@ -119,19 +130,49 @@ func (s *Session) Project() Projection {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	out := make([]ai.Message, 0, len(s.messages)+1)
+	out := make([]ai.Message, 0, len(s.messages)+2)
 	if s.system != "" {
 		out = append(out, ai.Message{Role: ai.RoleSystem, Content: s.system})
 	}
+
+	// With a checkpoint, the model sees its summary and everything after it, and
+	// nothing the summary replaced. Reading further back would rebuild the very
+	// context the compaction existed to shorten, so the conversation would keep
+	// paying for history it has already summarised.
+	if s.checkpoint != nil {
+		out = append(out, ai.Message{
+			Role:    ai.RoleSystem,
+			Content: s.checkpoint.Summary,
+		})
+		out = append(out, cloneMessages(s.checkpoint.RetainedTail)...)
+		out = append(out, cloneMessages(s.sinceCheckpoint)...)
+		return Projection{Messages: out, Complete: true}
+	}
+
 	out = append(out, cloneMessages(s.messages)...)
 	return Projection{Messages: out, Complete: true}
 }
 
-// UnmatchedToolCalls returns the IDs of tool calls with no recorded result.
+// Compact publishes a checkpoint: a summary of everything so far, and the
+// messages kept verbatim after it.
 //
-// This is the state a cancellation can leave behind. It must be
-// representable rather than treated as corruption: recovery has to know a call
-// was emitted and never settled, and must not blindly replay it.
+// History is not edited. The entries the summary replaces stay exactly where they
+// were — a compaction changes what the model is shown next, not what happened.
+func (s *Session) Compact(summary string, retainedTail []ai.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cp := &Checkpoint{Summary: summary, RetainedTail: cloneMessages(retainedTail)}
+	if s.store != nil {
+		if err := s.store.Append(context.Background(), Entry{Checkpoint: cp}); err != nil {
+			return fmt.Errorf("session: publishing checkpoint: %w", err)
+		}
+	}
+	s.checkpoint = cp
+	s.sinceCheckpoint = nil
+	return nil
+}
+
 func (s *Session) UnmatchedToolCalls() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

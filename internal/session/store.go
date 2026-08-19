@@ -19,28 +19,73 @@ import (
 // like a conversation that did not continue, and the difference only becomes
 // visible after a restart, when the missing part cannot be recovered.
 type Store interface {
-	// Append records one message as having happened.
-	Append(ctx context.Context, m ai.Message) error
+	// Append records one entry as having happened.
+	Append(ctx context.Context, e Entry) error
 
-	// Load returns every recorded message, in the order they were appended.
-	Load(ctx context.Context) ([]ai.Message, error)
+	// Load returns every recorded entry, in the order they were appended.
+	Load(ctx context.Context) ([]Entry, error)
+}
+
+// Entry is one thing that happened in a conversation.
+//
+// Exactly one field is set. A checkpoint is an entry rather than a rewrite of
+// earlier ones, because compaction does not change what happened — it changes
+// what the model is shown next.
+type Entry struct {
+	Message    *ai.Message
+	Checkpoint *Checkpoint
+}
+
+// Checkpoint is a compaction: a summary of what came before it, and the messages
+// kept verbatim after it.
+//
+// It is SELF-CONTAINED. Rebuilding the model's context reads the checkpoint and
+// what follows, never the entries the summary replaced. A checkpoint that only
+// pointed at a range would make every projection depend on history that is meant
+// to be behind it, so the cost of a long conversation would never actually fall.
+type Checkpoint struct {
+	// Summary stands in for everything before this checkpoint.
+	Summary string
+
+	// RetainedTail is kept verbatim, in order. It is stored WITH the summary:
+	// a summary whose tail lives elsewhere can be read without it, and that
+	// reads as a conversation that lost its recent turns.
+	RetainedTail []ai.Message
 }
 
 // MemoryStore keeps history in memory. It is durable for the life of the
 // process and no longer, which is what a test wants and what a product does not.
 type MemoryStore struct {
-	messages []ai.Message
+	entries []Entry
+	reads   int
 }
 
 // Append implements Store.
-func (m *MemoryStore) Append(_ context.Context, msg ai.Message) error {
-	m.messages = append(m.messages, cloneMessages([]ai.Message{msg})...)
+func (m *MemoryStore) Append(_ context.Context, e Entry) error {
+	m.entries = append(m.entries, cloneEntry(e))
 	return nil
 }
 
 // Load implements Store.
-func (m *MemoryStore) Load(_ context.Context) ([]ai.Message, error) {
-	return cloneMessages(m.messages), nil
+func (m *MemoryStore) Load(_ context.Context) ([]Entry, error) {
+	out := make([]Entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		out = append(out, cloneEntry(e))
+	}
+	return out, nil
+}
+
+func cloneEntry(e Entry) Entry {
+	if e.Message != nil {
+		cloned := cloneMessages([]ai.Message{*e.Message})[0]
+		return Entry{Message: &cloned}
+	}
+	if e.Checkpoint != nil {
+		cp := *e.Checkpoint
+		cp.RetainedTail = cloneMessages(e.Checkpoint.RetainedTail)
+		return Entry{Checkpoint: &cp}
+	}
+	return Entry{}
 }
 
 // Restore rebuilds a session from a store.
@@ -56,7 +101,22 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 	}
 	s := New(system)
 	s.store = store
-	s.messages = recorded
+	for _, e := range recorded {
+		switch {
+		case e.Message != nil:
+			s.messages = append(s.messages, *e.Message)
+		case e.Checkpoint != nil:
+			// A later checkpoint supersedes an earlier one: the newer summary
+			// already stands in for everything before it, including the older
+			// checkpoint.
+			s.checkpoint = e.Checkpoint
+			s.sinceCheckpoint = nil
+			continue
+		}
+		if s.checkpoint != nil && e.Message != nil {
+			s.sinceCheckpoint = append(s.sinceCheckpoint, *e.Message)
+		}
+	}
 	return s, nil
 }
 
