@@ -199,9 +199,22 @@ func TestA8SequentialAbortDoesNotHang(t *testing.T) {
 	if got := sess.UnmatchedToolCalls(); len(got) == 0 {
 		t.Error("a cancelled sequential round produced results for every call")
 	}
+
+	// The call that never got its turn is not announced either. Opening the
+	// successor's gate to unblock it must not also start it: a start says the
+	// call was attempted, and this one never was.
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindToolStart && e.ToolCallID == "call-2" {
+			t.Errorf("a call the abort never reached was announced: %v", rec.Kinds())
+		}
+	}
+	// The one that did run keeps its start, and nothing follows it.
+	if got := idsOf(rec, events.KindToolStart); !equal(got, []string{"call-1"}) {
+		t.Errorf("starts = %v, want only the call that was in flight", got)
+	}
 }
 
-// TestA8CutCallIsNotExecuted pins that a cut call does not run at all.
+// TestA8CutCallIsNotExecuted pins that a call the abort never reached does not run.
 //
 // "Produces no result" and "does not run" are different claims, and the event
 // stream cannot tell them apart: a round reports nothing for a call it cut, so a
@@ -209,14 +222,23 @@ func TestA8SequentialAbortDoesNotHang(t *testing.T) {
 // visible only in what the tool did — which for a real tool means files written
 // or commands executed.
 //
-// The tool here IGNORES cancellation, deliberately. A tool that honours it would
-// stop on its own and prove nothing about whether the round prevented the call.
+// The round is SEQUENTIAL, which is what makes the claim decidable. There, calls
+// after the current one have genuinely not been reached when the cut arrives, so
+// preventing them is a guarantee. In a parallel round every call is dispatched at
+// once: a call already inside its tool cannot be un-run, and asserting otherwise
+// tests a race rather than a rule.
+//
+// The tool IGNORES cancellation, deliberately. One that honours it would stop by
+// itself and prove nothing about whether the round prevented the call.
 func TestA8CutCallIsNotExecuted(t *testing.T) {
 	gate := newGatedTool("FIRST-RESULT")
 	stubborn := &stubbornTool{}
 	registry := tools.NewRegistry()
 	registry.MustRegister(gate)
 	registry.MustRegister(stubborn)
+	// Makes this round sequential, so the second call waits its turn instead of
+	// being dispatched alongside the first.
+	registry.MustRegister(&timedTool{name: "pacer", delay: time.Millisecond, sequential: true})
 
 	sess := session.New("You are pi-go.")
 	model := &ai.Scripted{
@@ -273,7 +295,7 @@ func (s *stubbornTool) Name() string        { return "stubborn_tool" }
 func (s *stubbornTool) Description() string { return "ignores cancellation" }
 
 func (s *stubbornTool) Execution() tools.Execution {
-	return tools.Execution{Sequential: false, ReadOnly: true}
+	return tools.Execution{Sequential: true, ReadOnly: true}
 }
 
 func (s *stubbornTool) Call(context.Context, string) (tools.Result, error) {
