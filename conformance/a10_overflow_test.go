@@ -156,3 +156,65 @@ func carries(msgs []ai.Message, want string) bool {
 	}
 	return false
 }
+
+// TestA10TerminalOverflowIsDurable pins that the failure outlives the process.
+//
+// A terminal state that lives only in a returned error is forgotten on restart:
+// the process reopens, sees an unanswered question, and spends the same money
+// reaching the same conclusion, handing the caller a fresh failure rather than
+// the one already on record.
+//
+// Asking a NEW question deliberately clears it — the budget and the terminal
+// state both belong to the input that earned them. Resuming the SAME operation
+// without new input has no entry point yet, so that half of the contract is not
+// exercised here; see the issue.
+func TestA10TerminalOverflowIsDurable(t *testing.T) {
+	model := &overflowingModel{}
+	summarizer := &countingSummarizer{}
+	store := &session.MemoryStore{}
+	sess := session.WithStore("You are pi-go.", store)
+
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+		Summarize: summarizer.summarize,
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "a very long question"); err == nil {
+		t.Fatal("the run reported success")
+	}
+
+	reopened, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	failure := reopened.Failure()
+	if failure == nil {
+		t.Fatal("the terminal state did not survive the reopen")
+	}
+	if failure.Code != runtime.CodeContextOverflow {
+		t.Errorf("failure code = %q, want %q so a caller can branch on it rather "+
+			"than parsing a message", failure.Code, runtime.CodeContextOverflow)
+	}
+
+	// A new question clears it: the previous attempts were answering something
+	// else, and charging them here would leave this one unable to recover at all.
+	if err := reopened.Append(ai.Message{Role: ai.RoleUser, Content: "a short question"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if reopened.Failure() != nil {
+		t.Error("a new question inherited the previous question's terminal state")
+	}
+	if got := reopened.OverflowAttempts(); got != 0 {
+		t.Errorf("attempts after a new question = %d, want 0", got)
+	}
+}

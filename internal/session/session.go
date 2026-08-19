@@ -46,6 +46,9 @@ type Session struct {
 	// settled marks call ids whose outcome is known.
 	settled map[string]bool
 
+	// failure is the terminal state of the current input, if it has one.
+	failure *OperationFailure
+
 	// overflowUsage accumulates what the refused attempts cost.
 	overflowUsage ai.Usage
 
@@ -111,6 +114,7 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 		// recover from its first overflow.
 		if m.Role == ai.RoleUser {
 			s.overflowAttempts = 0
+			s.failure = nil
 		}
 	}
 	return nil
@@ -178,6 +182,37 @@ func (s *Session) Project() Projection {
 
 	out = append(out, cloneMessages(s.messages)...)
 	return Projection{Messages: out, Complete: true}
+}
+
+// Fail durably records that the operation ended and cannot be retried as it
+// stands.
+func (s *Session) Fail(code, detail string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	failure := &OperationFailure{Code: code, Detail: detail}
+	if s.store != nil {
+		recorded := *failure
+		if err := s.store.Append(context.Background(), Entry{Failure: &recorded}); err != nil {
+			return fmt.Errorf("session: recording a terminal failure: %w", err)
+		}
+	}
+	s.failure = failure
+	return nil
+}
+
+// Failure reports the terminal state of the current input, or nil.
+//
+// Read before asking the model anything: reopening a conversation that already
+// failed and asking again spends the same money to reach the same conclusion.
+func (s *Session) Failure() *OperationFailure {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.failure == nil {
+		return nil
+	}
+	copied := *s.failure
+	return &copied
 }
 
 // RecordIntent durably notes that a tool is about to run.

@@ -528,8 +528,17 @@ func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request,
 	})
 
 	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
-		return ai.Response{}, fmt.Errorf("runtime: context overflow, recovery %s: %w",
-			map[bool]string{true: "unavailable", false: "already spent"}[o.summarize == nil], cause)
+		detail := "recovery already spent"
+		if o.summarize == nil {
+			detail = "no way to shorten the context"
+		}
+		// Recorded before it is returned, so reopening finds the same terminal
+		// state instead of starting the same losing attempt again.
+		if err := o.session.Fail(CodeContextOverflow, detail); err != nil {
+			return ai.Response{}, err
+		}
+		return ai.Response{}, fmt.Errorf("runtime: %s: %s: %w",
+			CodeContextOverflow, detail, cause)
 	}
 
 	summary, retained, err := o.summarize(ctx, o.session.Truth())
@@ -568,7 +577,20 @@ func (o *observingPort) currentModel() string {
 	return o.modelName
 }
 
+// CodeContextOverflow is the terminal state of an input that stayed too large
+// even after the context was shortened.
+const CodeContextOverflow = "context_overflow_after_compaction"
+
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
+	// An input that already failed terminally is not asked again. Reopening a
+	// conversation and retrying it would spend the same money to reach the same
+	// conclusion, and the caller would see a fresh failure rather than the one
+	// that was already recorded.
+	if failure := o.session.Failure(); failure != nil {
+		return ai.Response{}, fmt.Errorf("runtime: %s: %s: %w",
+			failure.Code, failure.Detail, ai.ErrContextOverflow)
+	}
+
 	requested := req.Model
 	if requested == "" {
 		requested = o.currentModel()

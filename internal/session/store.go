@@ -41,6 +41,21 @@ type Entry struct {
 	Overflow   *OverflowAttempt
 	Intent     *ToolIntent
 	Settlement *ToolSettlement
+	Failure    *OperationFailure
+}
+
+// OperationFailure records that the operation ended and cannot be retried as it
+// stands.
+//
+// Durable, because a terminal state that lives only in a returned error is
+// forgotten on restart: the process reopens, sees an unanswered question, and
+// spends the same money reaching the same conclusion.
+type OperationFailure struct {
+	// Code is stable enough for a caller to branch on.
+	Code string
+
+	// Detail is for a human reading the record afterwards.
+	Detail string
 }
 
 // OverflowAttempt records that the provider refused a request because the context
@@ -125,6 +140,10 @@ func cloneEntry(e Entry) Entry {
 		settled := *e.Settlement
 		return Entry{Settlement: &settled}
 	}
+	if e.Failure != nil {
+		failed := *e.Failure
+		return Entry{Failure: &failed}
+	}
 	return Entry{}
 }
 
@@ -146,9 +165,11 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 		case e.Message != nil:
 			s.messages = append(s.messages, *e.Message)
 			if e.Message.Role == ai.RoleUser {
-				// A new question starts a new budget. The spent cost is NOT
-				// reset: it was really paid, and the ledger is cumulative.
+				// A new question starts a new budget, and clears a terminal
+				// state that belonged to the previous one. The spent cost is
+				// NOT reset: it was really paid, and the ledger is cumulative.
 				s.overflowAttempts = 0
+				s.failure = nil
 			}
 		case e.Overflow != nil:
 			// Durable, and deliberately not part of the conversation: it is
@@ -156,6 +177,9 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			s.overflowAttempts++
 			s.overflowUsage.InputTokens += e.Overflow.Usage.InputTokens
 			s.overflowUsage.OutputTokens += e.Overflow.Usage.OutputTokens
+			continue
+		case e.Failure != nil:
+			s.failure = e.Failure
 			continue
 		case e.Intent != nil:
 			s.intents[e.Intent.CallID] = *e.Intent
