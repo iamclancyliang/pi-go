@@ -17,11 +17,6 @@ import (
 	"sync"
 )
 
-// Execution describes how a tool may be scheduled relative to others.
-//
-// This is per-tool metadata, not a global mode: one tool in a multi-call batch
-// may need to run alone while the others do not care. A single global flag
-// cannot express that.
 // Result is what one call produced.
 type Result struct {
 	// Content is what the model sees.
@@ -41,6 +36,11 @@ type Result struct {
 	Terminate bool
 }
 
+// Execution describes how a tool may be scheduled relative to others.
+//
+// This is per-tool metadata, not a global mode: one tool in a multi-call batch
+// may need to run alone while the others do not care. A single global flag
+// cannot express that.
 type Execution struct {
 	// Sequential declares that this tool cannot tolerate running
 	// concurrently with other calls.

@@ -68,6 +68,13 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 	}
 
 	result, err := t.inner.Call(ctx, args)
+	if err != nil && ctx.Err() != nil {
+		// The round was cut, not the tool. A cut call produces no result:
+		// reporting one would tell the model an attempt was made and reported
+		// on, when it was abandoned.
+		t.batch.drop(callID)
+		return "", err
+	}
 	if err != nil {
 		// A failing tool is an observable outcome. The failure text is
 		// returned to the model rather than propagated as a Go error,

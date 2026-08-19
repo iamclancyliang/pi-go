@@ -54,6 +54,8 @@ type batchCall struct {
 	settled bool
 	// terminate records that this call asked the loop to stop.
 	terminate bool
+	// dropped marks a call the abort cut: it produces no result at all.
+	dropped bool
 }
 
 func newToolBatch(emitter *emitter, sess *session.Session,
@@ -113,6 +115,18 @@ func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
 	// after it are even announced -- so a refusal is visible in the stream at
 	// the point it was decided rather than alongside results that ran.
 	for _, call := range pending {
+		if ctx.Err() != nil {
+			// The round was cut before this call was announced. It gets no
+			// start and no result: announcing it would describe a call that
+			// was never attempted.
+			b.mu.Lock()
+			if !call.dropped {
+				call.dropped = true
+				b.remaining--
+			}
+			b.mu.Unlock()
+			continue
+		}
 		b.emitStart(call)
 		refusal, refused := b.prepareCall(ctx, call)
 		if !refused {
@@ -241,9 +255,12 @@ func (b *toolBatch) finish(callID, result string, terminate bool, err error) {
 	if b.remaining == 0 {
 		// Source order, once the whole round is in. Committing as each call
 		// completes would write history in whatever order the scheduler
-		// happened to produce.
+		// happened to produce. Calls the abort cut are skipped: they have no
+		// result to record.
 		for _, entry := range b.calls {
-			b.commit(entry)
+			if !entry.dropped {
+				b.commit(entry)
+			}
 		}
 	}
 }
@@ -268,6 +285,32 @@ func (b *toolBatch) ShouldTerminate() bool {
 		}
 	}
 	return true
+}
+
+// drop cuts a call out of the round without a result.
+//
+// An abort is not a tool failure. A failure is something the model should see and
+// can react to; a cut call was never carried out, and inventing a result for it
+// would tell the model an attempt was made and reported on. The assistant's
+// message keeps the call id with nothing matching it, which is the state anything
+// reading the transcript afterwards has to tolerate.
+func (b *toolBatch) drop(callID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	call, known := b.byID[callID]
+	if !known || call.dropped || call.settled {
+		return
+	}
+	call.dropped = true
+	b.remaining--
+	if !b.sequential && b.remaining == 0 {
+		for _, entry := range b.calls {
+			if !entry.dropped {
+				b.commit(entry)
+			}
+		}
+	}
 }
 
 // commit makes the result session truth and emits it.
