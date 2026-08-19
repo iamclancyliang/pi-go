@@ -50,7 +50,17 @@ func TestA12CompactionProjectsSummaryAndTail(t *testing.T) {
 	}
 
 	for _, s := range []*session.Session{live, restored} {
-		got := contentsOf(s.Project().Messages)
+		projection := s.Project()
+
+		// A compacted projection SAYS it is lossy. A summary stands in for
+		// messages it does not carry, and a consumer that cannot tell this from
+		// whole history will read a summarised answer as one the model made with
+		// the entire conversation in view.
+		if projection.Complete {
+			t.Error("a projection built from a summary reported itself complete")
+		}
+
+		got := contentsOf(projection.Messages)
 		want := []string{"You are pi-go.", "SUMMARY-OF-OLD", "RECENT-ONE", "RECENT-TWO", "AFTER"}
 		if !equal(got, want) {
 			t.Errorf("projection = %v, want %v", got, want)
@@ -69,6 +79,11 @@ func TestA12CompactionProjectsSummaryAndTail(t *testing.T) {
 	// History is untouched: compaction changed what the model is shown, not what
 	// happened. Losing the originals would make the record disagree with the
 	// conversation that took place.
+	if !session.New("You are pi-go.").Project().Complete {
+		t.Error("a projection that summarised nothing reported itself incomplete, " +
+			"so the flag says nothing about whether anything was lost")
+	}
+
 	full := contentsOf(live.Truth())
 	for _, kept := range []string{"OLD-ONE", "OLD-TWO", "RECENT-ONE", "RECENT-TWO", "AFTER"} {
 		found := false

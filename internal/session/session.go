@@ -163,12 +163,12 @@ type Projection struct {
 	Complete bool
 }
 
-// Project returns the default v0 projection: the system message followed by
-// complete history, losing nothing.
+// Project returns what one model call gets to see.
 //
-// v0 has no compaction, so the honest projection is the total one. Lossy
-// projections arrive with compaction in v1 — and when they do, Complete is
-// already there to distinguish them.
+// Without a checkpoint this is complete history, losing nothing. With one it is
+// the summary and what followed it, which is LOSSY — and it says so. A consumer
+// that cannot tell "the model saw everything" from "the model saw a summary" will
+// read a summarised answer as one made with the whole conversation in view.
 func (s *Session) Project() Projection {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -189,7 +189,11 @@ func (s *Session) Project() Projection {
 		})
 		out = append(out, cloneMessages(s.checkpoint.RetainedTail)...)
 		out = append(out, cloneMessages(s.sinceCheckpoint)...)
-		return Projection{Messages: out, Complete: true}
+
+		// NOT complete: a summary stands in for messages this projection does not
+		// carry. Reporting completeness here would make a compacted context
+		// indistinguishable from the whole conversation.
+		return Projection{Messages: out, Complete: false}
 	}
 
 	out = append(out, cloneMessages(s.messages)...)
