@@ -66,14 +66,9 @@ func (a *Agent) Recover(ctx context.Context) (Recovery, error) {
 // can be given at any time after the question was asked, and a tool that was
 // swapped in between is not the tool the attempt agreed to repeat.
 func (a *Agent) Repeat(ctx context.Context, resultID string) error {
-	// Reserved slot, not call id: a later operation may reuse a call id, and an
-	// outcome belonging to a different attempt would answer for this one.
-	if _, settled := a.cfg.Session.Settlement(resultID); settled {
-		return fmt.Errorf("%w: %s", ErrAlreadySettled, resultID)
-	}
-	intent, waiting := a.cfg.Session.UnsettledIntent(resultID)
-	if !waiting {
-		return fmt.Errorf("%w: %s", ErrNoAttemptWaiting, resultID)
+	intent, err := a.answerable(resultID)
+	if err != nil {
+		return err
 	}
 
 	policy, version, known := a.cfg.Tools.Declaration(intent.Tool)
@@ -153,12 +148,30 @@ func (a *Agent) Repeat(ctx context.Context, resultID string) error {
 // Named the same way as Repeat, and for the same reason: the attempt being closed
 // is the recorded one, not one the caller describes.
 func (a *Agent) Abandon(resultID string) error {
-	if _, settled := a.cfg.Session.Settlement(resultID); settled {
-		return fmt.Errorf("%w: %s", ErrAlreadySettled, resultID)
-	}
-	intent, waiting := a.cfg.Session.UnsettledIntent(resultID)
-	if !waiting {
-		return fmt.Errorf("%w: %s", ErrNoAttemptWaiting, resultID)
+	intent, err := a.answerable(resultID)
+	if err != nil {
+		return err
 	}
 	return session.SettleAsUnknown(a.cfg.Session, intent)
+}
+
+// answerable returns the attempt waiting under resultID, or says why none is.
+//
+// Both answers ask the same question, so they ask it in one place: an answer that
+// applied to Repeat and not to Abandon would let the same call be closed by one
+// route and not the other.
+//
+// The slot is the reserved result id, never the call id the model chose — a later
+// operation may reuse one, and an outcome belonging to a different attempt would
+// answer for this one. A settled slot is reported as settled rather than merely
+// absent, because a caller who has already answered needs to know that, not to be
+// told the attempt was never made.
+func (a *Agent) answerable(resultID string) (session.ToolIntent, error) {
+	if intent, waiting := a.cfg.Session.UnsettledIntent(resultID); waiting {
+		return intent, nil
+	}
+	if _, settled := a.cfg.Session.Settlement(resultID); settled {
+		return session.ToolIntent{}, fmt.Errorf("%w: %s", ErrAlreadySettled, resultID)
+	}
+	return session.ToolIntent{}, fmt.Errorf("%w: %s", ErrNoAttemptWaiting, resultID)
 }
