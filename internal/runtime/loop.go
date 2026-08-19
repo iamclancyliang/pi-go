@@ -61,6 +61,13 @@ type Config struct {
 	// Now overrides the clock, for deterministic traces in tests.
 	Now func() time.Time
 
+	// Summarize shortens the conversation when the model refuses a request for
+	// exceeding its context. Optional; without it an overflow is terminal.
+	//
+	// It is given durable truth and returns what should stand in for it: a
+	// summary, and the messages to keep verbatim.
+	Summarize func(ctx context.Context, truth []ai.Message) (summary string, retainedTail []ai.Message, err error)
+
 	// PrepareNextTurn runs after each turn and may change what the turns AFTER
 	// it use. Optional.
 	//
@@ -279,6 +286,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		modelName:     a.cfg.ModelName,
 		batch:         batch,
 		sequentialFor: a.sequentialFor,
+		summarize:     a.cfg.Summarize,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -502,6 +510,41 @@ type observingPort struct {
 	modelName     string
 	batch         *toolBatch
 	sequentialFor func(name string) bool
+	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+}
+
+// recoverFromOverflow compacts once and asks again, or gives up.
+//
+// The budget is one attempt per user input, counted durably. Asking again without
+// shortening the context would resend what was just refused, and a second refusal
+// is the operation failing — not an empty answer, which reads to a caller as the
+// model having nothing to say.
+func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, cause error) (ai.Response, error) {
+	if err := o.session.RecordOverflowAttempt(cause.Error()); err != nil {
+		return ai.Response{}, err
+	}
+	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+		e.Detail.Err = cause.Error()
+	})
+
+	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
+		return ai.Response{}, fmt.Errorf("runtime: context overflow, recovery %s: %w",
+			map[bool]string{true: "unavailable", false: "already spent"}[o.summarize == nil], cause)
+	}
+
+	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	if err != nil {
+		return ai.Response{}, fmt.Errorf("runtime: shortening the context: %w", err)
+	}
+	if err := o.session.Compact(summary, retained); err != nil {
+		return ai.Response{}, err
+	}
+
+	// Ask again from the SHORTENED projection. Reusing the request would send
+	// the context that was just refused.
+	retry := req
+	retry.Messages = o.session.Project().Messages
+	return o.Generate(ctx, retry)
 }
 
 // selectModel changes the model used from the next request onward, and reports
@@ -537,6 +580,9 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	})
 
 	resp, err := o.inner.Generate(ctx, req)
+	if errors.Is(err, ai.ErrContextOverflow) {
+		return o.recoverFromOverflow(ctx, req, err)
+	}
 	if err != nil {
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested

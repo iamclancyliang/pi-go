@@ -8,7 +8,10 @@
 // does not change, and neither does any caller of it.
 package ai
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Role identifies who produced a message.
 type Role string
@@ -96,3 +99,12 @@ type Response struct {
 type Port interface {
 	Generate(ctx context.Context, req Request) (Response, error)
 }
+
+// ErrContextOverflow reports that a request was refused for exceeding the
+// model's context, rather than for any transient reason.
+//
+// It is distinguished from an ordinary failure because the two need opposite
+// responses: a transient failure is retried unchanged, and retrying an overflow
+// unchanged sends back exactly what was just refused. Recovering from one means
+// shortening the context first.
+var ErrContextOverflow = errors.New("ai: the request exceeded the model's context")
