@@ -1562,6 +1562,44 @@ def test_a_function_declaration_in_a_block_ends_with_the_block() -> None:
     assert _write_receiver(source, "PI_AFTER").startswith("object")
 
 
+def _count_gate():
+    """The published-count gate, imported rather than run: `main` is guarded."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_doc_counts", _TOOLS / "check-doc-counts.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_count_gate_checks_every_statement_of_a_figure() -> None:
+    """The gate that keeps published numbers honest needs its own control.
+
+    It is not in the mutation sweep's copies -- the sweep breaks the extractor and
+    runs this suite -- so without a control here, nothing proves the gate can fail.
+    Three behaviours matter: agreement passes, ONE drifted copy fails, and a claim
+    that matches no phrasing fails rather than passing on an empty search.
+    """
+    gate = _count_gate()
+    patterns = [r"(\d+) 种改法全部被抓到", r"这 (\d+) 种针对"]
+
+    gate.problems.clear()
+    gate.expect_every("agrees", patterns, "76 种改法全部被抓到。这 76 种针对的是各条保证。", 76)
+    assert not gate.problems, gate.problems
+
+    # A second copy left behind is exactly the drift that reading one match allows.
+    gate.problems.clear()
+    gate.expect_every("drifted", patterns, "76 种改法全部被抓到。这 75 种针对的是各条保证。", 76)
+    assert gate.problems, "a drifted second copy was accepted"
+
+    # A rewording that moves the claim out of reach must not read as a pass.
+    gate.problems.clear()
+    gate.expect_every("absent", patterns, "这份文档不再提到那个数字。", 76)
+    assert gate.problems, "a claim that matched no phrasing was accepted"
+    gate.problems.clear()
+
+
 def test_a_relative_import_that_is_not_supplied_stays_unknown() -> None:
     """A file present in the CHECKOUT but not supplied must not resolve.
 

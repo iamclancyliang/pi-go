@@ -264,6 +264,13 @@ MUTATIONS = [
     Mutation("initializer walked twice",
              "\t\tif (!force && alreadyDescended.has(node)) return;",
              "\t\tif (!force && false) return;"),
+    Mutation("count gate reads only the first statement of a figure",
+             "    found = [int(m) for pattern in patterns for m in re.findall(pattern, text)]",
+             "    found = [int(m) for pattern in patterns "
+             "for m in re.findall(pattern, text)][:1]"),
+    Mutation("count gate treats a claim it cannot find as agreement",
+             "    if not found:\n        complain(f\"{label}: the document no longer states this figure in any known \"",
+             "    if False:\n        complain(f\"{label}: the document no longer states this figure in any known \""),
     Mutation("catch variable not bound",
              "\t\tif (ts.isCatchClause(node) && node.variableDeclaration) {",
              "\t\tif (false && node.variableDeclaration) {"),
@@ -333,9 +340,12 @@ MUTATIONS = [
 # interrupt at any moment leaves the repository untouched by construction rather
 # than by cleanup.
 TOOLS = pathlib.Path("tools")
+# The published-count gate is copied too: it decides whether every figure in the
+# reader-facing documents still matches the generator, and a gate with no mutation
+# behind it is the same thing as an untested control.
 COPIES = ["census_source.py", "census_families.py", "gen-feature-ids.py",
           "ts-spans.mjs", "ts-env-facts.mjs", "ts-members.mjs", "ts-shared.mjs",
-          "test_gen_feature_ids.py"]
+          "check-doc-counts.py", "test_gen_feature_ids.py"]
 
 workspace = pathlib.Path(tempfile.mkdtemp(prefix="census-mutation-")) / "tools"
 workspace.mkdir(parents=True)
