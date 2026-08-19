@@ -17,6 +17,26 @@ import (
 	"sync"
 )
 
+// ReplayPolicy says whether a call may be repeated after its outcome was lost.
+type ReplayPolicy int
+
+const (
+	// ReplayNever forbids repeating the call. This is the default.
+	ReplayNever ReplayPolicy = iota
+
+	// ReplaySafe permits repeating the call, and is only ever honoured when the
+	// record written before the crash agrees with the tool registered now.
+	ReplaySafe
+)
+
+// String names the policy for durable records and for a reader.
+func (p ReplayPolicy) String() string {
+	if p == ReplaySafe {
+		return "safe"
+	}
+	return "never"
+}
+
 // Result is what one call produced.
 type Result struct {
 	// Content is what the model sees.
@@ -50,6 +70,15 @@ type Execution struct {
 	// does not runs them concurrently. A tool that declares this is never run
 	// in parallel; rounds that never call it are unaffected.
 	Sequential bool
+
+	// Replay says whether this tool may be run again when a crash left its
+	// outcome unknown.
+	//
+	// The zero value forbids it. A tool that has not said it is safe to repeat
+	// is assumed unsafe: the two mistakes are not symmetric — refusing to repeat
+	// a safe call leaves work undone, which is visible and can be retried, while
+	// repeating an unsafe one may already have changed the user's files.
+	Replay ReplayPolicy
 
 	// ReadOnly declares the tool performs no mutation. v0 ships read-only
 	// tools only — no arbitrary write or shell access yet — and the field
@@ -148,3 +177,41 @@ func (r *Registry) All() []Tool {
 // unused: eino decides sequencing per tools-node at construction, so a
 // per-batch API would advertise a granularity the runtime cannot deliver.
 // Sequencing is resolved in internal/runtime — see Execution.Sequential.
+
+// Versioned is implemented by a tool whose behaviour changes between builds.
+//
+// A tool that permits a repeat is making a promise about the code that runs on
+// the repeat, and only the tool knows when that code stopped matching the
+// promise. Declaring a version is how it says so.
+type Versioned interface {
+	// Version identifies this tool's behaviour. Any change to it means a
+	// record written earlier no longer describes the tool running now.
+	Version() string
+}
+
+// Declaration reports what a tool currently says about repeating a call.
+//
+// Read when deciding whether a call whose outcome was lost may be run again.
+// The comparison is against what the tool declares NOW, because a tool that was
+// changed or swapped while the process was down is not the tool the earlier
+// record agreed to repeat.
+//
+// A tool that declares no version gets one derived from what it does declare —
+// its name, description and scheduling metadata. That is deliberately
+// conservative: it can report a change that did not alter behaviour, which costs
+// an unnecessary refusal, and it cannot notice a behaviour change behind
+// identical declarations, which is why a tool that permits repeats should
+// implement Versioned rather than rely on this.
+func (r *Registry) Declaration(name string) (ReplayPolicy, string, bool) {
+	t, ok := r.Lookup(name)
+	if !ok {
+		return ReplayNever, "", false
+	}
+	execution := t.Execution()
+	if versioned, declares := t.(Versioned); declares {
+		return execution.Replay, versioned.Version(), true
+	}
+	return execution.Replay, fmt.Sprintf("derived:%s/%s/%v/%v/%s",
+		t.Name(), execution.Replay, execution.Sequential, execution.ReadOnly,
+		t.Description()), true
+}

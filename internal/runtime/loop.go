@@ -61,6 +61,13 @@ type Config struct {
 	// Now overrides the clock, for deterministic traces in tests.
 	Now func() time.Time
 
+	// Summarize shortens the conversation when the model refuses a request for
+	// exceeding its context. Optional; without it an overflow is terminal.
+	//
+	// It is given durable truth and returns what should stand in for it: a
+	// summary, and the messages to keep verbatim.
+	Summarize func(ctx context.Context, truth []ai.Message) (summary string, retainedTail []ai.Message, err error)
+
 	// PrepareNextTurn runs after each turn and may change what the turns AFTER
 	// it use. Optional.
 	//
@@ -138,6 +145,17 @@ type Run struct {
 
 // Start submits a prompt and returns while the run is still in flight.
 func (a *Agent) Start(ctx context.Context, prompt string) (*Run, error) {
+	// An unfinished call from a previous process is answered BEFORE anything is
+	// asked. The conversation holds a tool call with no result, and a model shown
+	// that either waits for an answer that is not coming or is invited to act as
+	// though the call never happened — which is the reading that repeats an
+	// effect. See Recover.
+	if waiting := a.cfg.Session.UnsettledIntents(); len(waiting) > 0 {
+		err := fmt.Errorf("%w: %s", ErrAwaitingRecovery, waiting[0].Tool)
+		a.failStart(err)
+		return nil, err
+	}
+
 	a.emitter.emit(events.KindAgentStart, nil)
 
 	loop, err := a.buildLoop(ctx)
@@ -270,7 +288,8 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// One coordinator for this loop. Each model response opens a new round in
 	// it, so the order of a round is decided in one place instead of inside the
 	// tools, which cannot see each other.
-	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall)
+	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall,
+		a.cfg.Tools.Declaration)
 
 	observed := &observingPort{
 		inner:         a.cfg.Model,
@@ -279,6 +298,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		modelName:     a.cfg.ModelName,
 		batch:         batch,
 		sequentialFor: a.sequentialFor,
+		summarize:     a.cfg.Summarize,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -352,10 +372,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				if item == nil {
 					continue
 				}
-				a.cfg.Session.Append(ai.Message{
+				// A message that could not be recorded must not enter the
+				// conversation. Continuing would run a turn whose input is
+				// absent from history, so a restart would resume from a
+				// conversation that never had it.
+				if err := a.cfg.Session.Append(ai.Message{
 					Role:    fromEinoRole(item.Role),
 					Content: item.Content,
-				})
+				}); err != nil {
+					return nil, err
+				}
 			}
 
 			// The input handed to eino is pi-go's PROJECTION of
@@ -421,6 +447,14 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				default:
 				}
 			}
+			// A result that could not be recorded ends the turn: the model was
+			// told the call happened, so continuing would build on a history
+			// that disagrees with what the model was shown.
+			if failure == nil {
+				failure = batch.recordingFailure()
+			}
+			failure = unwrapOwn(failure)
+
 			// A round that asked to stop is a normal ending, not a failure.
 			// The framework reports it by cancelling the turn, which is
 			// indistinguishable from any other cancellation unless the cause
@@ -470,6 +504,37 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	return loop, nil
 }
 
+// ownError marks an error pi-go produced itself.
+//
+// eino wraps whatever a node returns in an error of its own, whose message
+// carries framework internals: an error-type tag and the path of the node that
+// failed. That text reaching a caller contradicts what this package promises —
+// eino is an implementation detail, and replacing it must not be visible
+// outside.
+//
+// A tag rather than text matching, because recovering the original by parsing the
+// wrapper's message would depend on a format eino never promised and would break
+// silently when it changes. Unwrap keeps the chain intact, so a caller's
+// errors.Is still sees everything it saw before.
+type ownError struct{ err error }
+
+func (o ownError) Error() string { return o.err.Error() }
+func (o ownError) Unwrap() error { return o.err }
+
+// unwrapOwn recovers the error pi-go produced from whatever wrapped it.
+//
+// Applied ONCE, where a turn decides what failed. Everything a caller can see
+// comes from there — the turn's own event, the run's exit reason, and the error
+// returned — so cleaning it again downstream would add a second site that
+// changes no answer, leaving neither testable.
+func unwrapOwn(err error) error {
+	var own ownError
+	if errors.As(err, &own) {
+		return own.err
+	}
+	return err
+}
+
 // stopCauseToolTerminate marks a stop the tools asked for, so it can be told
 // apart from a cancellation or a failure when the turn is closed out.
 const stopCauseToolTerminate = "tool_terminate"
@@ -489,6 +554,50 @@ type observingPort struct {
 	modelName     string
 	batch         *toolBatch
 	sequentialFor func(name string) bool
+	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+}
+
+// recoverFromOverflow compacts once and asks again, or gives up.
+//
+// The budget is one attempt per user input, counted durably. Asking again without
+// shortening the context would resend what was just refused, and a second refusal
+// is the operation failing — not an empty answer, which reads to a caller as the
+// model having nothing to say.
+func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent ai.Usage, cause error) (ai.Response, error) {
+	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
+		return ai.Response{}, err
+	}
+	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+		e.Detail.Err = cause.Error()
+	})
+
+	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
+		detail := "recovery already spent"
+		if o.summarize == nil {
+			detail = "no way to shorten the context"
+		}
+		// Recorded before it is returned, so reopening finds the same terminal
+		// state instead of starting the same losing attempt again.
+		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
+		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
+			return ai.Response{}, err
+		}
+		return ai.Response{}, failureError(recorded, cause)
+	}
+
+	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	if err != nil {
+		return ai.Response{}, fmt.Errorf("runtime: shortening the context: %w", err)
+	}
+	if err := o.session.Compact(summary, retained); err != nil {
+		return ai.Response{}, err
+	}
+
+	// Ask again from the SHORTENED projection. Reusing the request would send
+	// the context that was just refused.
+	retry := req
+	retry.Messages = o.session.Project().Messages
+	return o.Generate(ctx, retry)
 }
 
 // selectModel changes the model used from the next request onward, and reports
@@ -512,7 +621,94 @@ func (o *observingPort) currentModel() string {
 	return o.modelName
 }
 
+// CodeContextOverflow is the terminal state of an input that stayed too large
+// even after the context was shortened.
+const CodeContextOverflow = "context_overflow_after_compaction"
+
+// OutcomeStatus is how an operation stands when it is reopened.
+type OutcomeStatus string
+
+const (
+	// OutcomeOpen means nothing terminal is on record. The operation has not
+	// settled, and it moves forward only when a caller submits input.
+	OutcomeOpen OutcomeStatus = "open"
+
+	// OutcomeFailed means the operation ended and cannot be retried as it
+	// stands. Reopening it returns this same result every time.
+	OutcomeFailed OutcomeStatus = "failed"
+)
+
+// Outcome is an operation's result, readable without running the operation.
+//
+// A terminal state reachable only by re-running the work is not a result: the
+// caller pays for the model call and the compaction again just to be told what
+// the session already recorded. Failure carries the recorded reason and is nil
+// unless Status is OutcomeFailed.
+type Outcome struct {
+	Status  OutcomeStatus
+	Failure *session.OperationFailure
+}
+
+// Failed reports whether the operation is terminally failed.
+func (o Outcome) Failed() bool { return o.Status == OutcomeFailed }
+
+// Err renders a failed outcome as an error, or nil when there is none.
+//
+// It is the same error a call would have raised, so the two ways of learning
+// the operation failed cannot report it differently.
+func (o Outcome) Err() error {
+	if o.Failure == nil {
+		return nil
+	}
+	return failureError(o.Failure, nil)
+}
+
+// Reopen returns the operation's outcome without submitting input.
+//
+// This is what makes a recorded terminal state worth recording: after a restart
+// the caller reads the result already reached instead of asking the model the
+// same question again. It calls neither the model nor the compactor, and it
+// changes nothing.
+//
+// Submitting input is a different act. It starts a new operation, which clears
+// the terminal state and the budget the previous input earned.
+func (a *Agent) Reopen() Outcome {
+	if failure := a.cfg.Session.Failure(); failure != nil {
+		return Outcome{Status: OutcomeFailed, Failure: failure}
+	}
+	return Outcome{Status: OutcomeOpen}
+}
+
+// failureError renders a recorded failure as an error.
+//
+// Every path that reports a failure comes through here — the one that raises it
+// as it happens and the one that reads it back after a restart — so the two
+// cannot describe the same failure differently.
+//
+// cause is what actually went wrong, when the caller still has it: the provider's
+// own error at the moment of refusal carries detail the durable record does not
+// keep. A caller reading the failure back later has no cause to offer, so the
+// class is recovered from the code instead, which is what keeps the wrapped
+// sentinel the same either way.
+func failureError(failure *session.OperationFailure, cause error) error {
+	if cause == nil && failure.Code == CodeContextOverflow {
+		cause = ai.ErrContextOverflow
+	}
+	if cause == nil {
+		return fmt.Errorf("runtime: %s: %s", failure.Code, failure.Detail)
+	}
+	return fmt.Errorf("runtime: %s: %s: %w", failure.Code, failure.Detail, cause)
+}
+
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
+	// An input that already failed terminally is not asked again. Reopening a
+	// conversation and retrying it would spend the same money to reach the same
+	// conclusion, and the caller would see a fresh failure rather than the one
+	// that was already recorded.
+	if failure := o.session.Failure(); failure != nil {
+		return ai.Response{}, failureError(failure, nil)
+	}
+
 	requested := req.Model
 	if requested == "" {
 		requested = o.currentModel()
@@ -524,6 +720,10 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	})
 
 	resp, err := o.inner.Generate(ctx, req)
+	if errors.Is(err, ai.ErrContextOverflow) {
+		// The refused call still reports what it cost, and it was still billed.
+		return o.recoverFromOverflow(ctx, req, resp.Usage, err)
+	}
 	if err != nil {
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested
@@ -552,11 +752,16 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		e.Detail.ToolCallIDs = ids
 	})
 
-	o.session.Append(ai.Message{
+	// The reply is recorded before it is acted on. A reply that was answered
+	// but never recorded leaves the tool calls that follow it referring to a
+	// request that history does not contain.
+	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   resp.Content,
 		ToolCalls: resp.ToolCalls,
-	})
+	}); err != nil {
+		return ai.Response{}, err
+	}
 
 	// The round opens HERE, where the calls are still in the order the model
 	// asked for them and before the tools node has dispatched any of them.
