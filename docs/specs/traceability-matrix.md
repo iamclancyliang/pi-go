@@ -135,6 +135,11 @@ not do it" is visible and can be retried, while "did it twice" may already have 
 files and cannot be seen or undone. Repeating automatically bets that every tool author marked the
 declaration correctly.
 
+**What is covered is the contract, not a human being asked.** The question is presented by the
+library; no command restores a session, so nothing reaches a person today. `cmd/pi-tracer` keeps its
+session in memory and never restores, which is deliberate — it is a contract probe with a scripted
+model. A host that recovers a durable session and collects the answer is not built, by decision.
+
 > **An issue is not coverage.** These rows now have a ticket and a planned test path; **no test has
 > been written and none can run against product code that does not exist**. Do not read "#7–#16" as
 > evidence of conformance.
