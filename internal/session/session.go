@@ -53,8 +53,7 @@ func New(system string) *Session {
 	return &Session{system: system}
 }
 
-// Append records a message as truth. It is never removed.
-// Append records a message as having happened.
+// Append records a message as having happened. It is never removed.
 //
 // The error is the store's. A history that quietly stops persisting looks exactly
 // like a conversation that did not continue, and the difference only shows up
