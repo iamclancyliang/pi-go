@@ -17,6 +17,26 @@ import (
 	"sync"
 )
 
+// ReplayPolicy says whether a call may be repeated after its outcome was lost.
+type ReplayPolicy int
+
+const (
+	// ReplayNever forbids repeating the call. This is the default.
+	ReplayNever ReplayPolicy = iota
+
+	// ReplaySafe permits repeating the call, and is only ever honoured when the
+	// record written before the crash agrees with the tool registered now.
+	ReplaySafe
+)
+
+// String names the policy for durable records and for a reader.
+func (p ReplayPolicy) String() string {
+	if p == ReplaySafe {
+		return "safe"
+	}
+	return "never"
+}
+
 // Result is what one call produced.
 type Result struct {
 	// Content is what the model sees.
@@ -50,6 +70,15 @@ type Execution struct {
 	// does not runs them concurrently. A tool that declares this is never run
 	// in parallel; rounds that never call it are unaffected.
 	Sequential bool
+
+	// Replay says whether this tool may be run again when a crash left its
+	// outcome unknown.
+	//
+	// The zero value forbids it. A tool that has not said it is safe to repeat
+	// is assumed unsafe: the two mistakes are not symmetric — refusing to repeat
+	// a safe call leaves work undone, which is visible and can be retried, while
+	// repeating an unsafe one may already have changed the user's files.
+	Replay ReplayPolicy
 
 	// ReadOnly declares the tool performs no mutation. v0 ships read-only
 	// tools only — no arbitrary write or shell access yet — and the field

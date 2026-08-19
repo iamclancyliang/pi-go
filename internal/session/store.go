@@ -39,6 +39,8 @@ type Entry struct {
 	Message    *ai.Message
 	Checkpoint *Checkpoint
 	Overflow   *OverflowAttempt
+	Intent     *ToolIntent
+	Settlement *ToolSettlement
 }
 
 // OverflowAttempt records that the provider refused a request because the context
@@ -115,6 +117,14 @@ func cloneEntry(e Entry) Entry {
 		attempt := *e.Overflow
 		return Entry{Overflow: &attempt}
 	}
+	if e.Intent != nil {
+		intent := *e.Intent
+		return Entry{Intent: &intent}
+	}
+	if e.Settlement != nil {
+		settled := *e.Settlement
+		return Entry{Settlement: &settled}
+	}
 	return Entry{}
 }
 
@@ -147,6 +157,12 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			s.overflowUsage.InputTokens += e.Overflow.Usage.InputTokens
 			s.overflowUsage.OutputTokens += e.Overflow.Usage.OutputTokens
 			continue
+		case e.Intent != nil:
+			s.intents[e.Intent.CallID] = *e.Intent
+			continue
+		case e.Settlement != nil:
+			s.settled[e.Settlement.CallID] = true
+			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary
 			// already stands in for everything before it, including the older
@@ -167,4 +183,65 @@ func WithStore(system string, store Store) *Session {
 	s := New(system)
 	s.store = store
 	return s
+}
+
+// ToolIntent records that a tool is about to be run, before it is.
+//
+// It exists because a process can die between the effect and the record of it.
+// Without an intent, a transcript cannot distinguish a call that never ran from
+// one that ran and lost its answer, and the second is the dangerous reading.
+type ToolIntent struct {
+	// CallID identifies the model's request, and reserves where the result goes.
+	CallID string
+
+	// Tool and Args are exactly what was about to run.
+	Tool string
+	Args string
+
+	// Replay is the policy as declared WHEN THE INTENT WAS WRITTEN. Recovery
+	// compares it with what the tool declares now: a tool whose policy changed
+	// between the crash and the restart has not agreed to be repeated.
+	Replay string
+}
+
+// ToolSettlement records what a tool call actually produced.
+//
+// Its absence is not evidence that nothing happened. It means the outcome is
+// unknown, which is a different and more dangerous state than failure.
+type ToolSettlement struct {
+	CallID string
+	Result string
+	// Interrupted marks a settlement written by recovery rather than by the
+	// tool: the effect was never confirmed either way.
+	Interrupted bool
+}
+
+// RecoverUnsettled decides what to do about calls whose outcome was lost, and
+// settles each one.
+//
+// A call is repeated only when the policy recorded before the crash AND the
+// policy the tool declares now both say it is safe. Either side disagreeing is
+// enough to refuse: a tool whose declaration changed while the process was down
+// has not agreed to be repeated, and the record written earlier cannot speak for
+// the code running now.
+//
+// Everything else is settled as interrupted — the effect is unknown, not absent.
+// Reporting it as "did not happen" is what would repeat a destructive action.
+func RecoverUnsettled(ctx context.Context, s *Session, declaredNow func(tool string) (string, bool)) ([]string, error) {
+	var replayable []string
+	for _, intent := range s.UnsettledIntents() {
+		now, known := declaredNow(intent.Tool)
+		if known && now == "safe" && intent.Replay == "safe" {
+			replayable = append(replayable, intent.CallID)
+			continue
+		}
+		if err := s.Settle(ToolSettlement{
+			CallID:      intent.CallID,
+			Result:      "interrupted: the process stopped before this call reported its outcome",
+			Interrupted: true,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return replayable, nil
 }

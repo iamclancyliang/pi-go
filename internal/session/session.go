@@ -20,6 +20,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -39,6 +40,12 @@ type Session struct {
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
+	// intents are tool calls that were about to run, by call id.
+	intents map[string]ToolIntent
+
+	// settled marks call ids whose outcome is known.
+	settled map[string]bool
+
 	// overflowUsage accumulates what the refused attempts cost.
 	overflowUsage ai.Usage
 
@@ -57,7 +64,9 @@ type Session struct {
 
 // New returns a Session with the given system instruction.
 func New(system string) *Session {
-	return &Session{system: system}
+	return &Session{
+		intents: map[string]ToolIntent{},
+		settled: map[string]bool{}, system: system}
 }
 
 // Append records a message as having happened. It is never removed.
@@ -169,6 +178,58 @@ func (s *Session) Project() Projection {
 
 	out = append(out, cloneMessages(s.messages)...)
 	return Projection{Messages: out, Complete: true}
+}
+
+// RecordIntent durably notes that a tool is about to run.
+//
+// Written BEFORE the tool is invoked. Written after, it would be missing in
+// exactly the case it exists for: a crash between the effect and its record.
+func (s *Session) RecordIntent(intent ToolIntent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.store != nil {
+		recorded := intent
+		if err := s.store.Append(context.Background(), Entry{Intent: &recorded}); err != nil {
+			return fmt.Errorf("session: recording a tool intent: %w", err)
+		}
+	}
+	s.intents[intent.CallID] = intent
+	return nil
+}
+
+// Settle durably records what a call produced.
+func (s *Session) Settle(settlement ToolSettlement) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.store != nil {
+		recorded := settlement
+		if err := s.store.Append(context.Background(), Entry{Settlement: &recorded}); err != nil {
+			return fmt.Errorf("session: settling a tool call: %w", err)
+		}
+	}
+	s.settled[settlement.CallID] = true
+	return nil
+}
+
+// UnsettledIntents lists calls that were started and whose outcome is unknown.
+//
+// Unknown, not failed: the tool may have done its work and died before saying
+// so. Treating these as "did not happen" is the reading that repeats a
+// destructive action.
+func (s *Session) UnsettledIntents() []ToolIntent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []ToolIntent
+	for id, intent := range s.intents {
+		if !s.settled[id] {
+			out = append(out, intent)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })
+	return out
 }
 
 // RecordOverflowAttempt durably notes that the provider refused the request for
