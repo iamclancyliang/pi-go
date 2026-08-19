@@ -22,9 +22,9 @@ planned test → evidence/blocker.
 | **A7** one result requests terminate | FR-1 | **C5** | **#12** | @cc | `conformance/a7_terminate_test.go` | ✅ **IMPLEMENTED AND PASSING.** A result carries `Terminate` explicitly; the round stops only when every call asks. Cut before the next model call, so a stop means no further call rather than one more. **Mutation-verified** against the named trap: reading it as `any` lets a single call end the conversation. Both directions asserted, and both confirm the results survive in history — a stop that loses work is worse than not stopping |
 | **A8** cancel after tool call emitted | FR-3, FR-6 | **C6** | **#13** | @cc | `conformance/a8_unmatched_test.go` | ✅ **IMPLEMENTED AND PASSING.** An abort is not a tool failure: a cut call produces no result, so the assistant's message keeps call ids with nothing matching them. **Mutation-verified**: treating cancellation as an ordinary failure invents a result and leaves nothing unmatched. Covers BOTH execution shapes: the sequential round hands the turn between calls, so a cut leaves a call waiting for a hand-off that never comes — the run hangs rather than fails, which the parallel case cannot detect. Also asserts a cut call does not EXECUTE, using a tool that ignores cancellation: the stream reports nothing for a cut call either way, so only the tool's own record distinguishes prevented from unreported. Paired control confirms a completed round leaves none |
 | **A9** next-turn hook changes model | FR-4 | **C8** | **#17** (spike #4 closed) | @cc | `conformance/a9_model_swap_test.go` | ✅ **IMPLEMENTED AND PASSING.** A per-turn hook selects the model for the turns that follow; the turn that chose it keeps the model it ran with, including its post-tool request. The change is announced as a `model_changed` event, because the framework emits none and a mid-run switch would otherwise be invisible. **Mutation-verified**: capturing the model name once instead of asking per call leaves the change applying to nothing. Control asserts no hook means no event and no change |
-| **A10** context overflow twice | FR-6 | **S1, S2, S6** | none | @cc | `conformance/a10_overflow_test.go` | contract now exists (`session-compaction-recovery-contracts.md`). One attempt per input boundary (S1); second overflow is a durable terminal failure (S2); the attempt stays durable but is absent from the retry projection (S6) |
-| **A11** death after destructive intent, pre-settlement | FR-6, NFR-6 | **S7, S8** — **class N**, see **G6** | none | @cc | `conformance/a11_settlement_test.go` | ⚠️ **class N — pi-go net-new requirement, no released Pi counterpart.** Verified at the pinned baseline: the current coding-agent has **no** durable tool-intent/settlement mechanism. "Don't blindly replay a destructive tool" comes from AgentHarness's newer durable design and becomes a **pi-go v1 safety policy**. There is no pi behaviour to conform to — do not look for one |
-| **A12** compaction performed | FR-6 | **S3, S4, S5** | none | @cc | `conformance/a12_compaction_test.go` | history and projection are different data (S3); checkpoint is self-contained summary + retained tail (S4); publication is atomic at the projection boundary (S5) |
+| **A10** context overflow twice | FR-6 | **S1, S2, S6** | **#22** | @cc | `conformance/a10_overflow_test.go` | ✅ **IMPLEMENTED AND PASSING.** One shortening and one further attempt per input boundary (S1); a second refusal is a durable terminal failure with a code a caller can branch on, and `Reopen` returns it without calling the model or the compactor (S2); the refused attempt stays durable, carries what it cost, and never enters the retry projection (S6). **Mutation-verified**: no budget recurses without end; an empty answer reports a run that answered nothing as success; ignoring the recorded failure loses it across a restart |
+| **A11** death after destructive intent, pre-settlement | FR-6, NFR-6 | **S7, S8** — **class N**, see **G6** | **#23** (durable record), **#24** (recovery decision) | @cc | `conformance/a11_settlement_test.go` | ✅ **IMPLEMENTED AND PASSING.** The attempt is durable before the call can take effect and is settled with its result in one write; attempts are paired by the slot they reserved, not by the call id the model chose. Recovery settles what may not be repeated as an unknown outcome and presents what may, without running it. ⚠️ **class N — pi-go net-new requirement, no released Pi counterpart.** Verified at the pinned baseline: the current coding-agent has **no** durable tool-intent/settlement mechanism. "Don't blindly replay a destructive tool" comes from AgentHarness's newer durable design and becomes a **pi-go v1 safety policy**. There is no pi behaviour to conform to — do not look for one |
+| **A12** compaction performed | FR-6 | **S3, S4, S5** | **#21** | @cc | `conformance/a12_compaction_test.go` | ✅ **IMPLEMENTED AND PASSING.** History and projection are different data, and a compacted projection reports itself lossy (S3); the checkpoint carries its own summary and retained tail (S4); publication is atomic as seen by whoever reopens — a crash either side gives the complete old context or the summary with its complete tail, never a state between (S5) |
 | **A13** Pi client on compatibility surface | FR-8, NFR-4 | **wire-compatibility spec gap (G5)** + C4/C4.0, C6 reused | **placeholder — v3** | @cc | `interop/a13_pi_client_test.go` | **blocked-on-product-decision**: wire A/B/C (architecture §6.4). Do **not** assume a live adapter. The reused loop contracts cover ordering only — **framing, hello/version, schema and error mapping have no contract at all** |
 
 ### 1.1 Added after review (A14–A16)
@@ -109,19 +109,23 @@ released Pi counterpart.** Important constraints on it:
 
 A11 is the first N row.
 
-### G4 — issue coverage — **partially closed 2026-08-15**
-Ten conformance scenarios are now ticketed: **#7–#16** (A2, A3, A4, A5, A6, A7, A8, A14, A15, A16).
-These are pure loop-behaviour contracts — valid whichever way ADR-0002 decides loop ownership, since
-only the subject under test changes, not the assertions.
+### G4 — issue coverage — **closed 2026-08-19 except A13**
+Every scenario but A13 is ticketed. The mapping, stated here once — the Issue column of the matrix in
+§1 is the same set:
 
-**One remains unticketed, for a stated reason — not oversight:**
-| A | Why not yet |
+| A | Issue |
 | --- | --- |
-| ~~A1~~ | ~~the tracer bullet itself~~ — **closed 2026-08-17**: implemented, ticketed as **#18** |
-| ~~A9~~ | ~~depends on spike #4~~ — **closed 2026-08-15**: spike #4 PASS, ticketed as **#17** |
-| ~~A10–A12~~ | ~~need the v1 session storage port~~ — **closed 2026-08-19**: the port landed;
-ticketed as **#21** (A12), **#22** (A10), **#23** (A11), each with conformance tests |
-| A13 | v3, and just rewritten for wire decision C |
+| A1 | **#18** |
+| A2–A8, A14–A16 | **#7–#16** |
+| A9 | **#17** (spike #4 closed first) |
+| A10 | **#22** |
+| A11 | **#23** the durable record, **#24** the recovery decision |
+| A12 | **#21** |
+| A13 | none — v3, blocked on the wire decision |
+
+A11 has two tickets because it has two separable halves: what is recorded before a call takes effect
+and how a restart resolves what it finds. The second only became answerable once the first existed, so
+splitting it kept the decision about repeating from being buried in the record's design.
 
 **A11 is covered end to end.** Attempts are recorded before a call can take effect and settled with
 its result. On recovery, a call that may not be repeated is settled as an unknown outcome without
@@ -140,9 +144,10 @@ library; no command restores a session, so nothing reaches a person today. `cmd/
 session in memory and never restores, which is deliberate — it is a contract probe with a scripted
 model. A host that recovers a durable session and collects the answer is not built, by decision.
 
-> **An issue is not coverage.** These rows now have a ticket and a planned test path; **no test has
-> been written and none can run against product code that does not exist**. Do not read "#7–#16" as
-> evidence of conformance.
+> **An issue is still not coverage** — but the reason has changed. When these rows were first
+> ticketed there was no product code to test; now there is, and every row above except A13 has a
+> passing conformance test. **Read the Evidence column, not the ticket**: a ticket says the work was
+> tracked, and only the test says what is asserted.
 
 ## 3. Coverage summary
 
