@@ -184,10 +184,10 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			s.failure = e.Failure
 			continue
 		case e.Intent != nil:
-			s.intents[e.Intent.CallID] = *e.Intent
+			s.intents[e.Intent.ResultID] = *e.Intent
 			continue
 		case e.Settlement != nil:
-			s.settled[e.Settlement.CallID] = *e.Settlement
+			s.settled[e.Settlement.ResultID] = *e.Settlement
 			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary
@@ -225,9 +225,13 @@ type ToolIntent struct {
 	// CallID identifies the model's request.
 	CallID string
 
-	// ResultID reserves where the answer will go. Reserved before the call so
-	// that recovery has somewhere to write a synthetic outcome without
-	// inventing an identity the transcript never had.
+	// ResultID reserves where the answer will go, and IS this attempt's identity.
+	//
+	// Reserved before the call so that recovery has somewhere to write a
+	// synthetic outcome without inventing an identity the transcript never had.
+	// It is what an attempt is filed and paired under, because a call id is not
+	// unique: the model chooses them and a later operation may reuse one, so
+	// pairing on the call id alone lets an old outcome close a new attempt.
 	ResultID string
 
 	// Tool, ToolVersion and Args are exactly what was about to run. The version
@@ -247,9 +251,15 @@ type ToolIntent struct {
 // Its absence is not evidence that nothing happened. It means the outcome is
 // unknown, which is a different and more dangerous state than failure.
 type ToolSettlement struct {
-	CallID   string
+	// CallID is which request in the conversation this answers.
+	CallID string
+
+	// ResultID is the slot the attempt reserved, and is how this settlement is
+	// paired with it. Required, because everything filed under an empty name is
+	// the same attempt.
 	ResultID string
-	Result   string
+
+	Result string
 
 	// Interrupted marks a settlement written by recovery rather than by the
 	// tool: the effect was never confirmed either way.
@@ -288,20 +298,35 @@ func RecoverUnsettled(ctx context.Context, s *Session, declaredNow func(tool str
 			continue
 		}
 
-		const unknownEffect = "interrupted: the process stopped before this call " +
-			"reported its outcome, so whether it took effect is unknown"
-		if err := s.Settle(ToolSettlement{
-			CallID:      intent.CallID,
-			ResultID:    intent.ResultID,
-			Result:      unknownEffect,
-			Interrupted: true,
-		}, ai.Message{
-			Role:       ai.RoleTool,
-			Content:    unknownEffect,
-			ToolCallID: intent.CallID,
-		}); err != nil {
+		if err := SettleAsUnknown(s, intent); err != nil {
 			return nil, err
 		}
 	}
 	return replayable, nil
+}
+
+// unknownEffect is what the model is told about a call whose outcome was lost.
+//
+// It says unknown rather than failed on purpose. The tool may have done its work
+// and died before reporting it, and a model told the call failed will act as
+// though the world was left untouched.
+const unknownEffect = "interrupted: the process stopped before this call " +
+	"reported its outcome, so whether it took effect is unknown"
+
+// SettleAsUnknown resolves an attempt whose outcome cannot be established.
+//
+// The model is told in the SAME write. A conversation holding a tool call with no
+// result cannot be continued at all, so a settlement recorded without the message
+// would close the attempt and leave the conversation unusable.
+func SettleAsUnknown(s *Session, intent ToolIntent) error {
+	return s.Settle(ToolSettlement{
+		CallID:      intent.CallID,
+		ResultID:    intent.ResultID,
+		Result:      unknownEffect,
+		Interrupted: true,
+	}, ai.Message{
+		Role:       ai.RoleTool,
+		Content:    unknownEffect,
+		ToolCallID: intent.CallID,
+	})
 }

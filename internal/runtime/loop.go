@@ -145,6 +145,17 @@ type Run struct {
 
 // Start submits a prompt and returns while the run is still in flight.
 func (a *Agent) Start(ctx context.Context, prompt string) (*Run, error) {
+	// An unfinished call from a previous process is answered BEFORE anything is
+	// asked. The conversation holds a tool call with no result, and a model shown
+	// that either waits for an answer that is not coming or is invited to act as
+	// though the call never happened — which is the reading that repeats an
+	// effect. See Recover.
+	if waiting := a.cfg.Session.UnsettledIntents(); len(waiting) > 0 {
+		err := fmt.Errorf("%w: %s", ErrAwaitingRecovery, waiting[0].Tool)
+		a.failStart(err)
+		return nil, err
+	}
+
 	a.emitter.emit(events.KindAgentStart, nil)
 
 	loop, err := a.buildLoop(ctx)

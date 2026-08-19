@@ -40,10 +40,10 @@ type Session struct {
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
-	// intents are tool calls that were about to run, by call id.
+	// intents are tool calls that were about to run, by reserved result id.
 	intents map[string]ToolIntent
 
-	// settled holds the recorded outcome of each call, by call id.
+	// settled holds the recorded outcome of each attempt, by reserved result id.
 	settled map[string]ToolSettlement
 
 	// failure is the terminal state of the current input, if it has one.
@@ -243,7 +243,18 @@ func (s *Session) OperationID() string {
 //
 // Written BEFORE the tool is invoked. Written after, it would be missing in
 // exactly the case it exists for: a crash between the effect and its record.
+//
+// Attempts are held under their RESERVED RESULT ID, not their call id. The model
+// chooses call ids and nothing stops a later operation reusing one, so pairing on
+// the call id alone lets an old outcome close a new attempt — and recovery then
+// passes over an effect that is genuinely unknown. An attempt with no reserved
+// slot is refused rather than filed under the empty name, where every such
+// attempt would be the same one.
 func (s *Session) RecordIntent(intent ToolIntent) error {
+	if intent.ResultID == "" {
+		return fmt.Errorf("session: a tool intent needs a reserved result id")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -253,7 +264,7 @@ func (s *Session) RecordIntent(intent ToolIntent) error {
 			return fmt.Errorf("session: recording a tool intent: %w", err)
 		}
 	}
-	s.intents[intent.CallID] = intent
+	s.intents[intent.ResultID] = intent
 	return nil
 }
 
@@ -269,6 +280,11 @@ func (s *Session) RecordIntent(intent ToolIntent) error {
 //
 // told may be empty, for a call whose result was already recorded on its own.
 func (s *Session) Settle(settlement ToolSettlement, told ...ai.Message) error {
+	if settlement.ResultID == "" {
+		return fmt.Errorf("session: a settlement needs the reserved result id of " +
+			"the attempt it closes")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -284,7 +300,7 @@ func (s *Session) Settle(settlement ToolSettlement, told ...ai.Message) error {
 			return fmt.Errorf("session: settling a tool call: %w", err)
 		}
 	}
-	s.settled[settlement.CallID] = settlement
+	s.settled[settlement.ResultID] = settlement
 	s.rememberLocked(told...)
 	return nil
 }
@@ -304,15 +320,20 @@ func (s *Session) UnsettledIntents() []ToolIntent {
 			out = append(out, intent)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })
+	sort.Slice(out, func(i, j int) bool { return out[i].ResultID < out[j].ResultID })
 	return out
 }
 
-// Settlement reports the recorded outcome of a call, if it has one.
-func (s *Session) Settlement(callID string) (ToolSettlement, bool) {
+// Settlement reports the recorded outcome of one attempt, if it has one.
+//
+// Identified by the slot the attempt reserved, because that is what makes an
+// attempt distinct. Two operations may each hold a call the model named the same
+// thing, and answering for the wrong one is how a recovery reports an outcome for
+// work that never produced it.
+func (s *Session) Settlement(resultID string) (ToolSettlement, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	settled, ok := s.settled[callID]
+	settled, ok := s.settled[resultID]
 	return settled, ok
 }
 

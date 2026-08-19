@@ -94,7 +94,7 @@ func TestA11UnsettledCallsAreNotAssumedNotToHaveHappened(t *testing.T) {
 			}
 			// The outcome is recorded AND told to the model. A model that hears
 			// nothing about the call waits for an answer that is not coming.
-			settled, ok := reopened.Settlement("call-1")
+			settled, ok := reopened.Settlement("result-1")
 			if !ok || !settled.Interrupted {
 				t.Errorf("settlement = %+v (found=%v), want a synthetic interrupted "+
 					"outcome", settled, ok)
@@ -155,7 +155,7 @@ func TestA11AnAlreadySettledCallIsAuthoritative(t *testing.T) {
 		t.Errorf("recovery offered to repeat a call that already has an answer: %v", replayable)
 	}
 	// And the real answer is still the answer.
-	if settled, ok := reopened.Settlement("call-1"); !ok || settled.Result != "REAL-RESULT" {
+	if settled, ok := reopened.Settlement("result-1"); !ok || settled.Result != "REAL-RESULT" {
 		t.Errorf("settlement = %+v, want the real result kept", settled)
 	}
 }
@@ -270,7 +270,7 @@ func TestA11TheAttemptIsRecordedBeforeTheEffect(t *testing.T) {
 	// The terms are the ones the tool offered when it ran. Reading them back at
 	// recovery time instead would judge the decision against whatever the tool
 	// says later, which is the code that has not agreed to be repeated.
-	settlement, settled := sess.Settlement("call-1")
+	settlement, settled := sess.Settlement(want.ResultID)
 	if !settled {
 		t.Fatal("the call ran and reported, and is still unsettled: recovery would " +
 			"offer to repeat work already in history")
@@ -355,7 +355,7 @@ func TestA11ARefusalIsNotAnAttempt(t *testing.T) {
 	if got := reopened.UnsettledIntents(); len(got) != 0 {
 		t.Errorf("recorded attempts = %+v, want none: nothing was attempted", got)
 	}
-	if _, settled := reopened.Settlement("call-1"); settled {
+	if _, settled := reopened.Settlement("op-1.call-1"); settled {
 		t.Error("a call that never ran was settled, which reads as an outcome")
 	}
 }
@@ -474,7 +474,7 @@ func TestA11AnOutcomeAndItsResultAreOneWrite(t *testing.T) {
 		if _, err := session.RecoverUnsettled(context.Background(), sess, declared); err == nil {
 			t.Fatal("a settlement that could not be recorded was reported as done")
 		}
-		if _, settled := sess.Settlement("call-1"); settled {
+		if _, settled := sess.Settlement("op-1.call-1"); settled {
 			t.Error("the call was settled while the result the model reads was not " +
 				"recorded, so nothing will revisit it and nothing says it is missing")
 		}
@@ -515,8 +515,288 @@ func TestA11AnOutcomeAndItsResultAreOneWrite(t *testing.T) {
 		if err := agent.Run(ctx, "read the file"); err == nil {
 			t.Fatal("a turn whose result could not be recorded reported success")
 		}
-		if _, settled := sess.Settlement("call-1"); settled {
+		if _, settled := sess.Settlement("op-1.call-1"); settled {
 			t.Error("the call was settled while its result was not recorded")
+		}
+	})
+}
+
+// TestA11AttemptsAreDistinguishedByTheirReservedSlot pins that a reused call id
+// cannot close the wrong attempt.
+//
+// The model chooses call ids and nothing stops a later operation reusing one. If
+// attempts were paired on the call id, the earlier operation's outcome would
+// answer for the later one, and recovery would pass over an effect that is
+// genuinely unknown — silently, because everything would look settled.
+func TestA11AttemptsAreDistinguishedByTheirReservedSlot(t *testing.T) {
+	store := &session.MemoryStore{}
+	sess := session.WithStore("You are pi-go.", store)
+
+	first := session.ToolIntent{
+		OperationID: "op-1", CallID: "call-1", ResultID: "op-1.call-1",
+		Tool: "delete_files", ToolVersion: "v1", Replay: tools.ReplayNever,
+	}
+	if err := sess.RecordIntent(first); err != nil {
+		t.Fatalf("RecordIntent: %v", err)
+	}
+	if err := sess.Settle(session.ToolSettlement{
+		CallID: first.CallID, ResultID: first.ResultID, Result: "deleted",
+	}); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+
+	// A later operation, and the model reuses the same call id.
+	second := first
+	second.OperationID, second.ResultID = "op-2", "op-2.call-1"
+	if err := sess.RecordIntent(second); err != nil {
+		t.Fatalf("RecordIntent: %v", err)
+	}
+
+	unsettled := sess.UnsettledIntents()
+	if len(unsettled) != 1 || unsettled[0].ResultID != second.ResultID {
+		t.Fatalf("unsettled = %+v, want only the second attempt: the first "+
+			"operation's outcome does not answer for it", unsettled)
+	}
+	if _, settled := sess.Settlement(second.ResultID); settled {
+		t.Error("the second attempt was reported as settled by the first one's outcome")
+	}
+
+	reopened, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := reopened.UnsettledIntents(); len(got) != 1 ||
+		got[0].ResultID != second.ResultID {
+		t.Errorf("unsettled after a restart = %+v, want only the second attempt", got)
+	}
+
+	// An attempt with no reserved slot is refused, because everything filed
+	// under the empty name would be the same attempt.
+	if err := sess.RecordIntent(session.ToolIntent{CallID: "call-2"}); err == nil {
+		t.Error("an attempt with no reserved slot was accepted")
+	}
+	if err := sess.Settle(session.ToolSettlement{CallID: "call-2"}); err == nil {
+		t.Error("a settlement naming no attempt was accepted")
+	}
+}
+
+// repeatableTool records how many times it was actually run.
+type repeatableTool struct {
+	name    string
+	version string
+	replay  tools.ReplayPolicy
+	runs    int
+}
+
+func (c *repeatableTool) Name() string        { return c.name }
+func (c *repeatableTool) Description() string { return "test tool" }
+func (c *repeatableTool) Version() string     { return c.version }
+func (c *repeatableTool) Execution() tools.Execution {
+	return tools.Execution{ReadOnly: true, Replay: c.replay}
+}
+
+func (c *repeatableTool) Call(context.Context, string) (tools.Result, error) {
+	c.runs++
+	return tools.Result{Content: c.name + " ran"}, nil
+}
+
+// recoveringAgent builds an agent over a session restored from store.
+func recoveringAgent(t *testing.T, store session.Store, registry *tools.Registry) (*runtime.Agent, *session.Session) {
+	t.Helper()
+
+	sess, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	agent, err := runtime.New(runtime.Config{
+		Model:     &ai.Scripted{Name: "fake-1", Final: ai.AssistantText("done")},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	return agent, sess
+}
+
+// seedUnfinished records an attempt and nothing else: the process died during the
+// call.
+func seedUnfinished(t *testing.T, store session.Store, tool string,
+	version string, replay tools.ReplayPolicy) session.ToolIntent {
+	t.Helper()
+
+	sess := session.WithStore("You are pi-go.", store)
+	if err := sess.AppendAll(
+		ai.Message{Role: ai.RoleUser, Content: "do the thing"},
+		ai.Message{Role: ai.RoleAssistant, ToolCalls: []ai.ToolCall{
+			{ID: "call-1", Name: tool, Args: `{}`},
+		}},
+	); err != nil {
+		t.Fatalf("AppendAll: %v", err)
+	}
+	intent := session.ToolIntent{
+		OperationID: "op-1", CallID: "call-1", ResultID: "op-1.call-1",
+		Tool: tool, ToolVersion: version, Args: `{}`, Replay: replay,
+	}
+	if err := sess.RecordIntent(intent); err != nil {
+		t.Fatalf("RecordIntent: %v", err)
+	}
+	return intent
+}
+
+// TestA11RecoveryAsksBeforeRepeating pins the decision the owner made: a call
+// that may be repeated is presented, not repeated.
+//
+// Repeating automatically would bet safety on every tool author having marked the
+// declaration correctly, and the two mistakes are not symmetric — "did not do it"
+// is visible and retryable, while "did it twice" may already have changed the
+// user's files and cannot be seen or undone.
+func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
+	t.Run("a repeatable call waits for an answer", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+		tool := &repeatableTool{name: "read_files", version: "v7", replay: tools.ReplaySafe}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+		agent, sess := recoveringAgent(t, store, registry)
+
+		found, err := agent.Recover(context.Background())
+		if err != nil {
+			t.Fatalf("Recover: %v", err)
+		}
+		if len(found.Awaiting) != 1 || found.Awaiting[0].ResultID != intent.ResultID {
+			t.Fatalf("awaiting = %+v, want the unfinished call", found.Awaiting)
+		}
+		if tool.runs != 0 {
+			t.Errorf("the tool ran %d times during recovery, want 0: whoever owns "+
+				"the effects owns the decision to repeat", tool.runs)
+		}
+		if _, settled := sess.Settlement(intent.ResultID); settled {
+			t.Error("a call that is waiting for an answer was given one")
+		}
+
+		// Nothing can be asked while it waits: the conversation holds a tool call
+		// with no result, and a model shown that either waits forever or is
+		// invited to act as though the call never happened.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := agent.Run(ctx, "and now this"); !errors.Is(err, runtime.ErrAwaitingRecovery) {
+			t.Errorf("Run while an answer is owed = %v, want it refused", err)
+		}
+	})
+
+	t.Run("repeating runs it again and records what it produced", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+		tool := &repeatableTool{name: "read_files", version: "v7", replay: tools.ReplaySafe}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+		agent, sess := recoveringAgent(t, store, registry)
+
+		if _, err := agent.Recover(context.Background()); err != nil {
+			t.Fatalf("Recover: %v", err)
+		}
+		if err := agent.Repeat(context.Background(), intent); err != nil {
+			t.Fatalf("Repeat: %v", err)
+		}
+		if tool.runs != 1 {
+			t.Errorf("the tool ran %d times, want 1", tool.runs)
+		}
+		settled, ok := sess.Settlement(intent.ResultID)
+		if !ok || settled.Result != "read_files ran" {
+			t.Errorf("settlement = %+v, want what the repeat produced", settled)
+		}
+		if settled.Interrupted {
+			t.Error("a call that was repeated and reported was settled as interrupted")
+		}
+		// Answered once. A second answer would run a tool the caller already
+		// decided about.
+		if err := agent.Repeat(context.Background(), intent); !errors.Is(err, runtime.ErrAlreadySettled) {
+			t.Errorf("repeating an answered call = %v, want it refused", err)
+		}
+		if tool.runs != 1 {
+			t.Errorf("the tool ran %d times after a refused repeat, want 1", tool.runs)
+		}
+	})
+
+	t.Run("abandoning tells the model the outcome is unknown", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+		tool := &repeatableTool{name: "read_files", version: "v7", replay: tools.ReplaySafe}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+		agent, sess := recoveringAgent(t, store, registry)
+
+		if _, err := agent.Recover(context.Background()); err != nil {
+			t.Fatalf("Recover: %v", err)
+		}
+		if err := agent.Abandon(intent); err != nil {
+			t.Fatalf("Abandon: %v", err)
+		}
+		if tool.runs != 0 {
+			t.Errorf("the tool ran %d times, want 0", tool.runs)
+		}
+		settled, ok := sess.Settlement(intent.ResultID)
+		if !ok || !settled.Interrupted {
+			t.Fatalf("settlement = %+v, want an unknown outcome: declining to "+
+				"repeat says nothing about whether the first attempt took effect",
+				settled)
+		}
+		if !carries(sess.Project().Messages, settled.Result) {
+			t.Error("the model was not told, so it is still waiting for this call")
+		}
+		// And now the conversation can go on.
+		if got := sess.UnsettledIntents(); len(got) != 0 {
+			t.Errorf("unsettled after an answer = %+v, want none", got)
+		}
+	})
+
+	t.Run("a call that may not be repeated is not a question", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "delete_files", "v1", tools.ReplayNever)
+
+		registry := tools.NewRegistry()
+		registry.MustRegister(&repeatableTool{name: "delete_files", version: "v1"})
+		agent, sess := recoveringAgent(t, store, registry)
+
+		found, err := agent.Recover(context.Background())
+		if err != nil {
+			t.Fatalf("Recover: %v", err)
+		}
+		if len(found.Awaiting) != 0 {
+			t.Errorf("awaiting = %+v, want nothing: no answer would let this run "+
+				"again, so there is nothing to ask", found.Awaiting)
+		}
+		settled, ok := sess.Settlement(intent.ResultID)
+		if !ok || !settled.Interrupted {
+			t.Errorf("settlement = %+v, want it settled as unknown without asking",
+				settled)
+		}
+	})
+
+	t.Run("a tool changed since the question cannot answer it", func(t *testing.T) {
+		store := &session.MemoryStore{}
+		intent := seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+		// Recovery asked while v7 was registered; the answer arrives after a
+		// swap. A repeat now is not the act that was agreed to.
+		tool := &repeatableTool{name: "read_files", version: "v8", replay: tools.ReplaySafe}
+		registry := tools.NewRegistry()
+		registry.MustRegister(tool)
+		agent, _ := recoveringAgent(t, store, registry)
+
+		if err := agent.Repeat(context.Background(), intent); err == nil {
+			t.Error("a tool that changed since the attempt was allowed to repeat it")
+		}
+		if tool.runs != 0 {
+			t.Errorf("the changed tool ran %d times, want 0", tool.runs)
 		}
 	})
 }

@@ -123,10 +123,17 @@ only the subject under test changes, not the assertions.
 ticketed as **#21** (A12), **#22** (A10), **#23** (A11), each with conformance tests |
 | A13 | v3, and just rewritten for wire decision C |
 
-**A11 carries one declared gap.** Attempts are recorded and settled around real calls, and recovery
-resolves an unsettled attempt to an unknown outcome. Nothing yet DRIVES that recovery at startup:
-the replayable attempts are handed back, and who decides to repeat them — and therefore owns the
-effects of repeating them — is an open product decision.
+**A11 is covered end to end.** Attempts are recorded before a call can take effect and settled with
+its result. On recovery, a call that may not be repeated is settled as an unknown outcome without
+being asked about — no answer would let it run again. A call whose tool declared a repeat harmless is
+**presented and left alone**: repeating it or abandoning it are both answers, and neither is chosen
+on the caller's behalf. A run cannot start while an answer is owed, because the conversation holds a
+tool call with no result.
+
+Asking rather than repeating automatically is the owner's decision, and the reason is asymmetry: "did
+not do it" is visible and can be retried, while "did it twice" may already have changed the user's
+files and cannot be seen or undone. Repeating automatically bets that every tool author marked the
+declaration correctly.
 
 > **An issue is not coverage.** These rows now have a ticket and a planned test path; **no test has
 > been written and none can run against product code that does not exist**. Do not read "#7–#16" as
