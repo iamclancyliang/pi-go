@@ -37,11 +37,12 @@ func Event(e events.Event) (string, bool) {
 	case events.KindToolStart:
 		return fmt.Sprintf("%s id=%s args=%s", e.ToolName, e.ToolCallID, e.Detail.Args), true
 	case events.KindToolEnd:
+		// The end says how the call finished, not what it produced: the result
+		// is carried by the source-ordered event so the two orders stay apart.
 		if e.Detail.Err != "" {
 			return fmt.Sprintf("%s id=%s err=%s", e.ToolName, e.ToolCallID, e.Detail.Err), true
 		}
-		return fmt.Sprintf("%s id=%s result=%q", e.ToolName, e.ToolCallID,
-			Truncate(e.Detail.Result, 40)), true
+		return fmt.Sprintf("%s id=%s finished", e.ToolName, e.ToolCallID), true
 	case events.KindToolResult:
 		// Distinguished from the end on purpose: the end says the call
 		// finished, this says the result became history.

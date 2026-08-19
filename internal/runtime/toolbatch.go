@@ -121,44 +121,45 @@ func (b *toolBatch) begin(callID string) {
 }
 
 // finish records the outcome and emits whatever the mode says comes next.
+//
+// EMISSION HAPPENS UNDER THE LOCK, and that is the point rather than an oversight.
+// Recording the outcome and then emitting outside the lock lets a goroutine be
+// descheduled between the two: the last call to finish can emit its own end and
+// then the whole batch's results, while an earlier call's end has still not been
+// emitted. The stream would then show a result before an end that precedes it,
+// which is the one thing the parallel shape promises cannot happen. Ordering by
+// lock acquisition makes the shape true by construction instead of by timing.
+//
+// Observers are notified from inside the critical section, so an observer that
+// calls back into this batch would deadlock. They are event sinks; they receive
+// the stream and do not drive it.
 func (b *toolBatch) finish(callID, result string, err error) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	call, known := b.byID[callID]
 	if !known {
-		b.mu.Unlock()
 		return
 	}
 	call.result, call.err = result, err
-	sequential := b.sequential
-	index := b.indexOf(callID)
 	b.remaining--
-	finished := b.remaining == 0
-	var ordered []*batchCall
-	if !sequential && finished {
-		ordered = append([]*batchCall(nil), b.calls...)
-	}
-	var next chan struct{}
-	if sequential && index >= 0 && index+1 < len(b.gates) {
-		next = b.gates[index+1]
-	}
-	b.mu.Unlock()
 
-	// The end is the execution event, so it is emitted the moment this call
-	// finished: in parallel mode that is completion order, by construction.
+	// The end is the execution event: emitted the moment this call finished,
+	// which under the lock is completion order.
 	b.emitEnd(call)
 
-	if sequential {
+	if b.sequential {
 		b.commit(call)
-		if next != nil {
-			close(next)
+		if index := b.indexOf(callID); index >= 0 && index+1 < len(b.gates) {
+			close(b.gates[index+1])
 		}
 		return
 	}
-	if finished {
-		// Source order, once the whole batch is in. Committing on completion
-		// instead would write history in whatever order the scheduler
+	if b.remaining == 0 {
+		// Source order, once the whole round is in. Committing as each call
+		// completes would write history in whatever order the scheduler
 		// happened to produce.
-		for _, entry := range ordered {
+		for _, entry := range b.calls {
 			b.commit(entry)
 		}
 	}
@@ -190,11 +191,16 @@ func (b *toolBatch) emitStart(call *batchCall) {
 	})
 }
 
+// emitEnd reports that a call finished, and nothing about what it produced.
+//
+// Carrying the result here would put it on the completion-ordered event, so a
+// consumer could read results in completion order while the source-ordered event
+// says otherwise — the two orders the split exists to keep apart. Failure is not
+// a result: it belongs to the end, because it is how the call finished.
 func (b *toolBatch) emitEnd(call *batchCall) {
 	b.emitter.emit(events.KindToolEnd, func(e *events.Event) {
 		e.ToolCallID = call.id
 		e.ToolName = call.name
-		e.Detail.Result = call.result
 		if call.err != nil {
 			e.Detail.Err = call.err.Error()
 		}

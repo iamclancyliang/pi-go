@@ -65,7 +65,7 @@ func TestParallelRoundOrdering(t *testing.T) {
 	}
 
 	var starts, ends, results []string
-	lastStart, firstResult := -1, -1
+	lastStart, lastEnd, firstResult := -1, -1, -1
 	for index, e := range rec.Events() {
 		switch e.Kind {
 		case events.KindToolStart:
@@ -73,6 +73,7 @@ func TestParallelRoundOrdering(t *testing.T) {
 			lastStart = index
 		case events.KindToolEnd:
 			ends = append(ends, e.ToolCallID)
+			lastEnd = index
 		case events.KindToolResult:
 			results = append(results, e.ToolCallID)
 			if firstResult < 0 {
@@ -85,6 +86,21 @@ func TestParallelRoundOrdering(t *testing.T) {
 	// is false by construction, which is what distinguishes the two.
 	if lastStart > firstResult {
 		t.Errorf("a result was emitted before the last start: %v", rec.Kinds())
+	}
+	// And every end precedes every result. Recording an outcome and emitting
+	// outside the lock lets the last call emit its end and then the whole
+	// round's results while an earlier end is still unemitted -- an order this
+	// test's per-id checks would not notice.
+	if lastEnd > firstResult {
+		t.Errorf("a result was emitted before the last end: %v", rec.Kinds())
+	}
+	// The end carries no result: on the completion-ordered event it would let a
+	// consumer read results in completion order.
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindToolEnd && e.Detail.Result != "" {
+			t.Errorf("tool_end for %s carries a result payload: %q",
+				e.ToolCallID, e.Detail.Result)
+		}
 	}
 	if want := []string{"call-slow", "call-fast"}; !equal(starts, want) {
 		t.Errorf("starts = %v, want source order %v", starts, want)
@@ -149,4 +165,90 @@ func equal(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestUnusedSequentialToolDoesNotSerialiseTheRound pins that concurrency is
+// decided per ROUND, not per registry.
+//
+// A registered tool that declares it cannot overlap is not called here. Deciding
+// from the registry — the shape this replaced — serialises every round for the
+// life of the process, including rounds like this one that never touch it. That
+// regression leaves every other assertion in this file intact, because the calls
+// still pair, still end and still record in source order; only the shape changes.
+func TestUnusedSequentialToolDoesNotSerialiseTheRound(t *testing.T) {
+	slow := &timedTool{name: "slow_tool", delay: 120 * time.Millisecond}
+	fast := &timedTool{name: "fast_tool", delay: 1 * time.Millisecond}
+
+	registry := tools.NewRegistry()
+	registry.MustRegister(slow)
+	registry.MustRegister(fast)
+	// Registered, never requested.
+	registry.MustRegister(&sequentialTool{})
+
+	sess := session.New("You are pi-go.")
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{
+			ai.AssistantToolCalls(
+				ai.ToolCall{ID: "call-slow", Name: "slow_tool", Args: `{}`},
+				ai.ToolCall{ID: "call-fast", Name: "fast_tool", Args: `{}`},
+			),
+		},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("both done"),
+	}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "run both"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The parallel shape: both starts announced before either call reports a
+	// result. Serialised, the first call's result precedes the second's start.
+	lastStart, firstResult := -1, -1
+	for index, e := range rec.Events() {
+		switch e.Kind {
+		case events.KindToolStart:
+			lastStart = index
+		case events.KindToolResult:
+			if firstResult < 0 {
+				firstResult = index
+			}
+		}
+	}
+	if lastStart < 0 || firstResult < 0 {
+		t.Fatalf("expected starts and results, got %v", rec.Kinds())
+	}
+	if lastStart > firstResult {
+		t.Errorf("an unused sequential tool serialised the round: %v", rec.Kinds())
+	}
+}
+
+// sequentialTool declares it cannot overlap and is never called.
+type sequentialTool struct{}
+
+func (t *sequentialTool) Name() string        { return "unused_sequential" }
+func (t *sequentialTool) Description() string { return "registered but never requested" }
+
+func (t *sequentialTool) Execution() tools.Execution {
+	return tools.Execution{Sequential: true, ReadOnly: true}
+}
+
+func (t *sequentialTool) Call(context.Context, string) (string, error) {
+	return "", nil
 }
