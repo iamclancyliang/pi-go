@@ -126,3 +126,52 @@ func TestProjectionCarriesSystemAndCompleteness(t *testing.T) {
 		t.Errorf("Len() = %d, want 1 — the system message must not count as history", got)
 	}
 }
+
+// TestReadingHistoryCannotRewriteIt pins that a reader gets copies.
+//
+// Truth and Project are how anything outside this package reads the record. If
+// what they hand back shares storage with the session, a reader can change what
+// happened — and an append-only record whose contents can be edited in place is
+// not one. The tool calls on a message are where this hides: copying the struct
+// copies the slice header, so the copy looks defensive and the elements are still
+// shared.
+func TestReadingHistoryCannotRewriteIt(t *testing.T) {
+	s := New("You are pi-go.")
+	if err := s.Append(ai.Message{
+		Role:      ai.RoleAssistant,
+		Content:   "CALLING",
+		ToolCalls: []ai.ToolCall{{ID: "call-1", Name: "read_files", Args: `{"path":"a"}`}},
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	for _, read := range []struct {
+		name string
+		get  func() []ai.Message
+	}{
+		{"Truth", s.Truth},
+		{"Project", func() []ai.Message { return s.Project().Messages }},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			got := read.get()
+			for i := range got {
+				got[i].Content = "REWRITTEN"
+				for j := range got[i].ToolCalls {
+					got[i].ToolCalls[j].Args = "REWRITTEN"
+				}
+			}
+
+			for _, m := range s.Truth() {
+				if m.Content == "REWRITTEN" {
+					t.Error("history was rewritten through what a reader was handed")
+				}
+				for _, call := range m.ToolCalls {
+					if call.Args == "REWRITTEN" {
+						t.Errorf("a recorded call's arguments were rewritten from "+
+							"outside: %q", call.Args)
+					}
+				}
+			}
+		})
+	}
+}
