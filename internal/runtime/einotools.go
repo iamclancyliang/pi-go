@@ -30,25 +30,20 @@ func (a *Agent) einoTools(batch *toolBatch) ([]tool.BaseTool, error) {
 	registered := a.cfg.Tools.All()
 	out := make([]tool.BaseTool, 0, len(registered))
 	for _, t := range registered {
-		out = append(out, &observedTool{
-			inner:  t,
-			batch:  batch,
-			policy: a.cfg.Policy,
-		})
+		out = append(out, &observedTool{inner: t, batch: batch})
 	}
 	return out, nil
 }
 
-// observedTool wraps a pi-go tool with the policy seam, event emission and
-// session recording.
+// observedTool hands a registered tool to the round that owns its ordering.
 //
-// All three happen here rather than inside the tools themselves so that a tool
-// author cannot forget them — and so a third-party tool cannot skip the policy
-// check by not calling it.
+// The policy check, the events and the session record all belong to the round
+// rather than to the tool: a tool author cannot forget them, a third-party tool
+// cannot skip the policy check by not calling it, and a refusal can be decided
+// before any call in the round has run.
 type observedTool struct {
-	inner  tools.Tool
-	batch  *toolBatch
-	policy Policy
+	inner tools.Tool
+	batch *toolBatch
 }
 
 // Info implements tool.BaseTool.
@@ -63,23 +58,13 @@ func (t *observedTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (string, error) {
 	callID := toolCallIDFrom(ctx)
 
-	// The batch decides when this call may run and when its start is
-	// announced; a tool cannot know where it sits in a round.
-	t.batch.begin(callID)
-
-	decision := t.policy.Before(ctx, PolicyCall{
-		ToolCallID: callID,
-		ToolName:   t.inner.Name(),
-		Args:       args,
-		Execution:  t.inner.Execution(),
-	})
-	if decision.Denied {
-		// A denial is a RESULT, not an error: the model must see that
-		// the call was refused and why, or it will retry forever. It is
-		// also recorded as truth, so the denial survives in history.
-		msg := fmt.Sprintf("denied: %s", decision.Reason)
-		t.batch.finish(callID, msg, nil)
-		return msg, nil
+	// The round decides when this call may run, announces it, and decides
+	// whether it may run at all; a tool cannot know where it sits in a round.
+	if refusal, refused := t.batch.begin(ctx, callID); refused {
+		// Already ended by the round, at the point the refusal was decided.
+		// A denial is a RESULT, not an error: the model must see that the
+		// call was refused and why, or it will retry forever.
+		return refusal, nil
 	}
 
 	result, err := t.inner.Call(ctx, args)
@@ -107,4 +92,29 @@ var _ tool.InvokableTool = (*observedTool)(nil)
 // making, so it is read from eino's call context rather than inferred.
 func toolCallIDFrom(ctx context.Context) string {
 	return compose.GetToolCallID(ctx)
+}
+
+// prepareCall applies the policy seam before a call may run.
+//
+// It happens in the round rather than inside the tool so a refusal can end the
+// call at the point it was decided: before the calls after it are announced. Run
+// from inside the tool it could only end after every call had already started,
+// which is a different, and wrong, thing to show a reader of the stream.
+func (a *Agent) prepareCall(ctx context.Context, name, callID, args string) (string, bool) {
+	registered, ok := a.cfg.Tools.Lookup(name)
+	if !ok {
+		// An unknown tool is refused rather than dispatched: the framework
+		// would otherwise fail it later, out of the round's ordering.
+		return fmt.Sprintf("denied: no tool named %s", name), true
+	}
+	decision := a.cfg.Policy.Before(ctx, PolicyCall{
+		ToolCallID: callID,
+		ToolName:   name,
+		Args:       args,
+		Execution:  registered.Execution(),
+	})
+	if !decision.Denied {
+		return "", false
+	}
+	return fmt.Sprintf("denied: %s", decision.Reason), true
 }

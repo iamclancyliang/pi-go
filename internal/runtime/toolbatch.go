@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"sync"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -29,6 +30,10 @@ type toolBatch struct {
 	emitter *emitter
 	session *session.Session
 
+	// prepare decides whether a call may run at all, before any execution in
+	// the round begins. It reports the refusal text when it may not.
+	prepare func(ctx context.Context, name, callID, args string) (string, bool)
+
 	mu         sync.Mutex
 	calls      []*batchCall
 	byID       map[string]*batchCall
@@ -43,10 +48,19 @@ type batchCall struct {
 	args   string
 	result string
 	err    error
+	// settled marks a call refused during preparation: it has already ended
+	// and must not run.
+	settled bool
 }
 
-func newToolBatch(emitter *emitter, sess *session.Session) *toolBatch {
-	return &toolBatch{emitter: emitter, session: sess, byID: map[string]*batchCall{}}
+func newToolBatch(emitter *emitter, sess *session.Session,
+	prepare func(ctx context.Context, name, callID, args string) (string, bool)) *toolBatch {
+	return &toolBatch{
+		emitter: emitter,
+		session: sess,
+		prepare: prepare,
+		byID:    map[string]*batchCall{},
+	}
 }
 
 // register opens a round of calls in SOURCE order, before any of them runs.
@@ -54,7 +68,8 @@ func newToolBatch(emitter *emitter, sess *session.Session) *toolBatch {
 // `sequentialFor` is asked about the calls in THIS batch and no others. Deciding
 // from the whole registry instead makes one sequential tool serialise every batch
 // for the life of the process, including batches that never call it.
-func (b *toolBatch) register(calls []ai.ToolCall, sequentialFor func(name string) bool) {
+func (b *toolBatch) register(ctx context.Context, calls []ai.ToolCall,
+	sequentialFor func(name string) bool) {
 	b.mu.Lock()
 
 	b.calls = make([]*batchCall, 0, len(calls))
@@ -74,30 +89,63 @@ func (b *toolBatch) register(calls []ai.ToolCall, sequentialFor func(name string
 	}
 
 	sequential := b.sequential
-	starts := append([]*batchCall(nil), b.calls...)
+	pending := append([]*batchCall(nil), b.calls...)
 	if len(b.gates) > 0 {
 		// The first call is free to go in either mode; the rest wait only
-		// when the batch is sequential.
+		// when the round is sequential.
 		close(b.gates[0])
 	}
 	b.mu.Unlock()
 
 	if sequential {
-		// Starts are emitted per call, interleaved with that call's end and
-		// result. Emitting them here would produce the parallel shape.
+		// Each call is announced, prepared and finished before the next one
+		// starts, so there is nothing to do up front: doing it here would
+		// produce the parallel shape.
 		return
 	}
-	// Every start, serially, in source order, BEFORE any execution begins.
-	// Emitting a start from inside each tool instead lets the starts race,
-	// which still passes a test that only checks results are ordered.
-	for _, call := range starts {
+
+	// PREPARATION IS A SEPARATE PASS, serial and in source order, before any
+	// execution begins. A call refused here ends INLINE -- before the calls
+	// after it are even announced -- so a refusal is visible in the stream at
+	// the point it was decided rather than alongside results that ran.
+	for _, call := range pending {
 		b.emitStart(call)
+		refusal, refused := b.prepareCall(ctx, call)
+		if !refused {
+			continue
+		}
+		b.mu.Lock()
+		call.settled, call.result = true, refusal
+		b.remaining--
+		b.emitEnd(call)
+		finished := b.remaining == 0
+		ordered := append([]*batchCall(nil), b.calls...)
+		b.mu.Unlock()
+		if finished {
+			b.mu.Lock()
+			for _, entry := range ordered {
+				b.commit(entry)
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
-// begin blocks until this call may run, and emits its start if the batch is
-// sequential.
-func (b *toolBatch) begin(callID string) {
+// prepareCall asks whether a call may run, with no lock held: the decision is
+// the caller's and may take arbitrary time.
+func (b *toolBatch) prepareCall(ctx context.Context, call *batchCall) (string, bool) {
+	if b.prepare == nil {
+		return "", false
+	}
+	return b.prepare(ctx, call.name, call.id, call.args)
+}
+
+// begin blocks until this call may run, and reports a refusal decided before it.
+//
+// In a sequential round the announcing and the preparing happen here, because
+// each call is announced only when its turn arrives. In a parallel round both
+// already happened during registration, and this returns what was decided then.
+func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 	b.mu.Lock()
 	call, known := b.byID[callID]
 	sequential := b.sequential
@@ -109,15 +157,33 @@ func (b *toolBatch) begin(callID string) {
 	b.mu.Unlock()
 
 	if !known {
-		// A call the batch never saw is not silently reordered into it: it
-		// runs unsequenced rather than being attributed a position it does
-		// not have.
-		return
+		// A call the round never saw is not reordered into it: it runs
+		// unsequenced rather than being given a position it does not have.
+		return "", false
 	}
-	if gate != nil {
-		<-gate
-		b.emitStart(call)
+	if !sequential {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return call.result, call.settled
 	}
+
+	<-gate
+	b.emitStart(call)
+	refusal, refused := b.prepareCall(ctx, call)
+	if !refused {
+		return "", false
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	call.settled, call.result = true, refusal
+	b.remaining--
+	b.emitEnd(call)
+	b.commit(call)
+	if index >= 0 && index+1 < len(b.gates) {
+		close(b.gates[index+1])
+	}
+	return refusal, true
 }
 
 // finish records the outcome and emits whatever the mode says comes next.

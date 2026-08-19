@@ -245,7 +245,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	// One coordinator for this loop. Each model response opens a new round in
 	// it, so the order of a round is decided in one place instead of inside the
 	// tools, which cannot see each other.
-	batch := newToolBatch(a.emitter, a.cfg.Session)
+	batch := newToolBatch(a.emitter, a.cfg.Session, a.prepareCall)
 
 	observed := &observingPort{
 		inner:         a.cfg.Model,
@@ -437,7 +437,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	// Source order is not recoverable later: once execution starts, the only
 	// order anything can observe is the order things happened to finish.
 	if len(resp.ToolCalls) > 0 && o.batch != nil {
-		o.batch.register(resp.ToolCalls, o.sequentialFor)
+		o.batch.register(ctx, resp.ToolCalls, o.sequentialFor)
 	}
 	return resp, nil
 }
