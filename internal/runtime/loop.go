@@ -442,6 +442,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			if failure == nil {
 				failure = batch.recordingFailure()
 			}
+			failure = unwrapOwn(failure)
 
 			// A round that asked to stop is a normal ending, not a failure.
 			// The framework reports it by cancelling the turn, which is
@@ -490,6 +491,37 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		},
 	})
 	return loop, nil
+}
+
+// ownError marks an error pi-go produced itself.
+//
+// eino wraps whatever a node returns in an error of its own, whose message
+// carries framework internals: an error-type tag and the path of the node that
+// failed. That text reaching a caller contradicts what this package promises —
+// eino is an implementation detail, and replacing it must not be visible
+// outside.
+//
+// A tag rather than text matching, because recovering the original by parsing the
+// wrapper's message would depend on a format eino never promised and would break
+// silently when it changes. Unwrap keeps the chain intact, so a caller's
+// errors.Is still sees everything it saw before.
+type ownError struct{ err error }
+
+func (o ownError) Error() string { return o.err.Error() }
+func (o ownError) Unwrap() error { return o.err }
+
+// unwrapOwn recovers the error pi-go produced from whatever wrapped it.
+//
+// Applied ONCE, where a turn decides what failed. Everything a caller can see
+// comes from there — the turn's own event, the run's exit reason, and the error
+// returned — so cleaning it again downstream would add a second site that
+// changes no answer, leaving neither testable.
+func unwrapOwn(err error) error {
+	var own ownError
+	if errors.As(err, &own) {
+		return own.err
+	}
+	return err
 }
 
 // stopCauseToolTerminate marks a stop the tools asked for, so it can be told

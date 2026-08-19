@@ -42,7 +42,9 @@ func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, o
 
 	resp, err := m.port.Generate(ctx, req)
 	if err != nil {
-		return nil, err
+		// Tagged on the way out, because this is where a pi-go error crosses
+		// into the framework and gets wrapped in the framework's own.
+		return nil, ownError{err}
 	}
 	return toEinoMessage(resp), nil
 }

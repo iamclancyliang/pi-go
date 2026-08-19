@@ -173,13 +173,14 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	store := &session.MemoryStore{}
 	sess := session.WithStore("You are pi-go.", store)
 
+	rec := runtime.NewRecorder()
 	agent, err := runtime.New(runtime.Config{
 		Model:     model,
 		ModelName: "fake-1",
 		Tools:     tools.NewRegistry(),
 		Session:   sess,
 		Policy:    runtime.DenyWrites,
-		Observers: []events.Observer{runtime.NewRecorder()},
+		Observers: []events.Observer{rec},
 		Now:       fixedClock(),
 		Summarize: summarizer.summarize,
 	})
@@ -243,6 +244,24 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	recorded := "runtime: " + failure.Code + ": " + failure.Detail
 	if !strings.Contains(runErr.Error(), recorded) {
 		t.Errorf("mid-run error %q does not render the record as %q", runErr, recorded)
+	}
+	// Nothing about the framework reaches a caller. Replacing it is meant to be
+	// invisible outside the runtime, and both an error message and an event are
+	// outside it — the event stream is rendered by clients.
+	frameworkText := []string{"NodeRunError", "GraphRunError", "node path"}
+	for _, leak := range frameworkText {
+		if strings.Contains(runErr.Error(), leak) {
+			t.Errorf("returned error names %q, which is the framework showing "+
+				"through: %q", leak, runErr)
+		}
+	}
+	for _, e := range rec.Events() {
+		for _, leak := range frameworkText {
+			if strings.Contains(e.Detail.Err, leak) {
+				t.Errorf("event %s carries %q, which is the framework showing "+
+					"through: %q", e.Kind, leak, e.Detail.Err)
+			}
+		}
 	}
 	if !strings.Contains(outcome.Err().Error(), recorded) {
 		t.Errorf("reopened error %q does not render the record as %q",
