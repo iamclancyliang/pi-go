@@ -581,14 +581,80 @@ func (o *observingPort) currentModel() string {
 // even after the context was shortened.
 const CodeContextOverflow = "context_overflow_after_compaction"
 
+// OutcomeStatus is how an operation stands when it is reopened.
+type OutcomeStatus string
+
+const (
+	// OutcomeOpen means nothing terminal is on record. The operation has not
+	// settled, and it moves forward only when a caller submits input.
+	OutcomeOpen OutcomeStatus = "open"
+
+	// OutcomeFailed means the operation ended and cannot be retried as it
+	// stands. Reopening it returns this same result every time.
+	OutcomeFailed OutcomeStatus = "failed"
+)
+
+// Outcome is an operation's result, readable without running the operation.
+//
+// A terminal state reachable only by re-running the work is not a result: the
+// caller pays for the model call and the compaction again just to be told what
+// the session already recorded. Failure carries the recorded reason and is nil
+// unless Status is OutcomeFailed.
+type Outcome struct {
+	Status  OutcomeStatus
+	Failure *session.OperationFailure
+}
+
+// Failed reports whether the operation is terminally failed.
+func (o Outcome) Failed() bool { return o.Status == OutcomeFailed }
+
+// Err renders a failed outcome as an error, or nil when there is none.
+//
+// It is the same error a call would have raised, so the two ways of learning
+// the operation failed cannot report it differently.
+func (o Outcome) Err() error {
+	if o.Failure == nil {
+		return nil
+	}
+	return failureError(o.Failure)
+}
+
+// Reopen returns the operation's outcome without submitting input.
+//
+// This is what makes a recorded terminal state worth recording: after a restart
+// the caller reads the result already reached instead of asking the model the
+// same question again. It calls neither the model nor the compactor, and it
+// changes nothing.
+//
+// Submitting input is a different act. It starts a new operation, which clears
+// the terminal state and the budget the previous input earned.
+func (a *Agent) Reopen() Outcome {
+	if failure := a.cfg.Session.Failure(); failure != nil {
+		return Outcome{Status: OutcomeFailed, Failure: failure}
+	}
+	return Outcome{Status: OutcomeOpen}
+}
+
+// failureError renders a recorded failure as an error.
+//
+// One site, so a failure raised mid-run and the same failure read back after a
+// restart cannot describe themselves differently. Overflow keeps its sentinel
+// wrapped for callers that already branch on it.
+func failureError(failure *session.OperationFailure) error {
+	if failure.Code == CodeContextOverflow {
+		return fmt.Errorf("runtime: %s: %s: %w",
+			failure.Code, failure.Detail, ai.ErrContextOverflow)
+	}
+	return fmt.Errorf("runtime: %s: %s", failure.Code, failure.Detail)
+}
+
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
 	// An input that already failed terminally is not asked again. Reopening a
 	// conversation and retrying it would spend the same money to reach the same
 	// conclusion, and the caller would see a fresh failure rather than the one
 	// that was already recorded.
 	if failure := o.session.Failure(); failure != nil {
-		return ai.Response{}, fmt.Errorf("runtime: %s: %s: %w",
-			failure.Code, failure.Detail, ai.ErrContextOverflow)
+		return ai.Response{}, failureError(failure)
 	}
 
 	requested := req.Model

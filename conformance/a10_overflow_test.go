@@ -164,10 +164,9 @@ func carries(msgs []ai.Message, want string) bool {
 // reaching the same conclusion, handing the caller a fresh failure rather than
 // the one already on record.
 //
-// Asking a NEW question deliberately clears it — the budget and the terminal
-// state both belong to the input that earned them. Resuming the SAME operation
-// without new input has no entry point yet, so that half of the contract is not
-// exercised here; see the issue.
+// Reopening the SAME operation returns that recorded result and spends nothing:
+// no model call, no shortening. Asking a NEW question deliberately clears it —
+// the budget and the terminal state both belong to the input that earned them.
 func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	model := &overflowingModel{}
 	summarizer := &countingSummarizer{}
@@ -206,6 +205,44 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 			"than parsing a message", failure.Code, runtime.CodeContextOverflow)
 	}
 
+	// Reopening returns the recorded result rather than re-deriving it. A
+	// terminal state that can only be learnt by running the work again is not
+	// worth having stored: the caller pays twice to be told the same thing.
+	reopenedModel := &overflowingModel{}
+	reopenedSummarizer := &countingSummarizer{}
+	reopenedAgent, err := runtime.New(runtime.Config{
+		Model:     reopenedModel,
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   reopened,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+		Summarize: reopenedSummarizer.summarize,
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	outcome := reopenedAgent.Reopen()
+	if !outcome.Failed() {
+		t.Fatalf("reopened outcome = %q, want %q", outcome.Status, runtime.OutcomeFailed)
+	}
+	if outcome.Failure == nil || outcome.Failure.Code != runtime.CodeContextOverflow {
+		t.Errorf("reopened outcome carries %+v, want the recorded %q",
+			outcome.Failure, runtime.CodeContextOverflow)
+	}
+	if !errors.Is(outcome.Err(), ai.ErrContextOverflow) {
+		t.Errorf("reopened error = %v, want the same error the original call "+
+			"raised, so the two ways of learning this cannot disagree", outcome.Err())
+	}
+	if got := reopenedModel.calls(); got != 0 {
+		t.Errorf("model calls while reopening = %d, want 0: the answer is already "+
+			"on record and asking again costs money to reach it a second time", got)
+	}
+	if got := reopenedSummarizer.calls(); got != 0 {
+		t.Errorf("shortenings while reopening = %d, want 0", got)
+	}
+
 	// A new question clears it: the previous attempts were answering something
 	// else, and charging them here would leave this one unable to recover at all.
 	if err := reopened.Append(ai.Message{Role: ai.RoleUser, Content: "a short question"}); err != nil {
@@ -213,6 +250,9 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	}
 	if reopened.Failure() != nil {
 		t.Error("a new question inherited the previous question's terminal state")
+	}
+	if got := reopenedAgent.Reopen().Status; got != runtime.OutcomeOpen {
+		t.Errorf("outcome after a new question = %q, want %q", got, runtime.OutcomeOpen)
 	}
 	if got := reopened.OverflowAttempts(); got != 0 {
 		t.Errorf("attempts after a new question = %d, want 0", got)
