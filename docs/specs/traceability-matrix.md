@@ -35,7 +35,7 @@ follow-up.
 
 | A | Requirement | Contract | Issue | Owner | Planned test | Evidence / blocker |
 | --- | --- | --- | --- | --- | --- | --- |
-| **A14** follow-up queued during a turn that errors → not consumed; agent stops | FR-1, FR-2 | **C7** | **#14** | @cc | `conformance/a14_error_followup_test.go` | contract verified (agent-loop.ts:196-200) |
+| **A14** follow-up queued during a turn that errors → not consumed; agent stops | FR-1, FR-2 | **C7** | **#14** | @cc | `conformance/a14_error_followup_test.go` | ✅ **IMPLEMENTED AND PASSING.** The test was written first and failed on three counts: the run reported success, the queued follow-up WAS consumed, and a second turn started. A turn's events are now inspected for failure instead of drained, and a failed turn ends the agent without looking behind it |
 | **A15** same two tools run sequential vs parallel → interleavings differ as specified | FR-3, FR-5 | **C4.0** | **#15** | @cc | `conformance/a15_interleaving_test.go` | ✅ **IMPLEMENTED AND PASSING.** Same names, arguments, delays and order; only one declaration differs. **Mutation-verified**: collapsing both modes onto one path turns it red — the case a single `parallel bool` path breaks |
 | **A16** invalid args on call A → `endA` precedes `startB` | FR-3, FR-5 | **C4b** | **#16** | @cc | `conformance/a16_immediate_fail_test.go` | ✅ **IMPLEMENTED AND PASSING.** A call refused before execution ends inline, while the round is still being announced; only the end moves, results stay source-ordered. Also asserts the refusal reaches the model as a result and that the refused tool never ran |
 

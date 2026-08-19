@@ -348,9 +348,18 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			return agent, nil
 		},
 		OnAgentEvents: func(_ context.Context, tc *adk.TurnContext[*schema.Message, *schema.Message], evs *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.Message]]) error {
+			// The FIRST failure decides the turn. Draining without looking
+			// leaves a failed turn indistinguishable from a successful one,
+			// so the loop goes on to the next turn and consumes whatever was
+			// queued while this one was failing.
+			var failure error
 			for {
-				if _, ok := evs.Next(); !ok {
+				event, ok := evs.Next()
+				if !ok {
 					break
+				}
+				if event != nil && event.Err != nil && failure == nil {
+					failure = event.Err
 				}
 			}
 			// Stopped is a channel closed only when a Stop actually
@@ -366,9 +375,23 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				default:
 				}
 			}
+			if failure != nil {
+				reason = "error"
+			}
 			a.emitter.emit(events.KindTurnEnd, func(e *events.Event) {
 				e.Detail.Reason = reason
+				if failure != nil {
+					e.Detail.Err = failure.Error()
+				}
 			})
+			// A turn that failed or was cut short ends the agent WITHOUT
+			// looking for anything queued behind it. A message sent while a
+			// turn was failing is not consumed: the queue does not always
+			// drain, and a caller that assumes it does acts on that message
+			// a turn later than the sender believes, or not at all.
+			if failure != nil {
+				return failure
+			}
 			return nil
 		},
 	})
