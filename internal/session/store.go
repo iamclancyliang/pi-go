@@ -19,8 +19,12 @@ import (
 // like a conversation that did not continue, and the difference only becomes
 // visible after a restart, when the missing part cannot be recovered.
 type Store interface {
-	// Append records one entry as having happened.
-	Append(ctx context.Context, e Entry) error
+	// Append records entries as having happened, ALL OR NONE.
+	//
+	// A partial write is the one outcome a caller cannot recover from: it leaves
+	// the store holding entries the session does not have, so the conversation
+	// read back after a restart is not the conversation that ran.
+	Append(ctx context.Context, entries ...Entry) error
 
 	// Load returns every recorded entry, in the order they were appended.
 	Load(ctx context.Context) ([]Entry, error)
@@ -61,8 +65,12 @@ type MemoryStore struct {
 }
 
 // Append implements Store.
-func (m *MemoryStore) Append(_ context.Context, e Entry) error {
-	m.entries = append(m.entries, cloneEntry(e))
+func (m *MemoryStore) Append(_ context.Context, entries ...Entry) error {
+	staged := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		staged = append(staged, cloneEntry(e))
+	}
+	m.entries = append(m.entries, staged...)
 	return nil
 }
 

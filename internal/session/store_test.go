@@ -87,7 +87,7 @@ func TestNoStoreStillWorks(t *testing.T) {
 
 type failingStore struct{ err error }
 
-func (f *failingStore) Append(context.Context, Entry) error { return f.err }
+func (f *failingStore) Append(context.Context, ...Entry) error { return f.err }
 func (f *failingStore) Load(context.Context) ([]Entry, error) {
 	return nil, f.err
 }
@@ -97,4 +97,46 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
+}
+
+// TestAppendAllLeavesNoPartialWrite pins the unit the method promises.
+//
+// Writing the messages one at a time lets a failure part-way through leave the
+// store holding a prefix the session rejected. Nothing looks wrong until a
+// restart, when the conversation read back contains messages the live one never
+// accepted — a divergence that a durable history exists to rule out.
+func TestAppendAllLeavesNoPartialWrite(t *testing.T) {
+	store := &failAfterFirst{}
+	s := WithStore("You are pi-go.", store)
+
+	err := s.AppendAll(
+		ai.Message{Role: ai.RoleUser, Content: "first"},
+		ai.Message{Role: ai.RoleAssistant, Content: "second"},
+	)
+	if err == nil {
+		t.Fatal("a rejected batch was reported as success")
+	}
+	if got := s.Len(); got != 0 {
+		t.Errorf("session holds %d messages after a rejected batch, want 0", got)
+	}
+	if got := len(store.entries); got != 0 {
+		t.Errorf("store kept %d entries from a rejected batch, want 0: the live "+
+			"session and a restart would read different conversations", got)
+	}
+}
+
+// failAfterFirst accepts a single entry and rejects anything larger, which is how
+// a store that cannot write a batch atomically behaves.
+type failAfterFirst struct{ entries []Entry }
+
+func (f *failAfterFirst) Append(_ context.Context, entries ...Entry) error {
+	if len(entries) > 1 {
+		return errors.New("store: cannot write this batch atomically")
+	}
+	f.entries = append(f.entries, entries...)
+	return nil
+}
+
+func (f *failAfterFirst) Load(context.Context) ([]Entry, error) {
+	return append([]Entry(nil), f.entries...), nil
 }

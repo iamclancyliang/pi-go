@@ -12,9 +12,9 @@
 // point and starts a NEW execution, so continuity is reconstructed from truth
 // held here, not carried by the framework.
 //
-// In-memory only for now. Durable storage arrives later behind its own
-// interface; this is deliberately the minimum needed to keep truth and
-// projection apart, not a storage backend.
+// History is held in memory and, when a Store is supplied, recorded so it
+// outlives the process. The Store is a seam, not a backend: this package decides
+// what is worth recording and in what order, and the Store decides where it goes.
 package session
 
 import (
@@ -64,22 +64,25 @@ func (s *Session) Append(m ai.Message) error {
 	return s.AppendAll(m)
 }
 
-// AppendAll records several messages as one unit.
+// AppendAll records several messages as ONE unit.
 //
-// The durable write happens BEFORE the message becomes visible in memory.
-// Recording it in memory first would let an observer read a message the store
-// never accepted, and after a restart that message is simply gone — the session
-// would have reported something that did not survive.
+// The durable write happens BEFORE the messages become visible in memory, and it
+// happens as a single all-or-none write. Recording them one at a time would let a
+// failure part-way through leave the store holding a prefix the session rejected:
+// the live conversation and the one a restart reads back would then differ, which
+// is the exact disagreement a durable history exists to rule out.
 func (s *Session) AppendAll(msgs ...ai.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.store != nil {
-		for _, m := range msgs {
-			recorded := m
-			if err := s.store.Append(context.Background(), Entry{Message: &recorded}); err != nil {
-				return fmt.Errorf("session: recording message: %w", err)
-			}
+	if s.store != nil && len(msgs) > 0 {
+		entries := make([]Entry, 0, len(msgs))
+		for i := range msgs {
+			recorded := msgs[i]
+			entries = append(entries, Entry{Message: &recorded})
+		}
+		if err := s.store.Append(context.Background(), entries...); err != nil {
+			return fmt.Errorf("session: recording messages: %w", err)
 		}
 	}
 	s.messages = append(s.messages, msgs...)
