@@ -19,20 +19,25 @@ import (
 //
 // If pi-go ever stops using this framework, this file is what gets deleted —
 // not the port, and not any caller of it.
-func newEinoChatModel(p ai.Port, defaultModel string) model.BaseChatModel {
+// The model name is asked for per call, not captured once.
+//
+// A run may change model between turns, and a name copied at construction keeps
+// naming the model the run started with: the change would apply to nothing while
+// still being announced, which is worse than not supporting it.
+func newEinoChatModel(p ai.Port, defaultModel func() string) model.BaseChatModel {
 	return &einoChatModel{port: p, defaultModel: defaultModel}
 }
 
 type einoChatModel struct {
 	port         ai.Port
-	defaultModel string
+	defaultModel func() string
 }
 
 func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	req := ai.Request{
 		Messages: fromEinoMessages(input),
 		Tools:    toolSpecsFromOptions(opts),
-		Model:    m.defaultModel,
+		Model:    m.defaultModel(),
 	}
 
 	resp, err := m.port.Generate(ctx, req)

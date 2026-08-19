@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -59,6 +60,21 @@ type Config struct {
 
 	// Now overrides the clock, for deterministic traces in tests.
 	Now func() time.Time
+
+	// PrepareNextTurn runs after each turn and may change what the turns AFTER
+	// it use. Optional.
+	//
+	// It never applies to the turn that just ran: a turn's model is the one it
+	// was executed with, and changing that afterwards would describe a
+	// conversation that did not happen.
+	PrepareNextTurn func(ctx context.Context) NextTurn
+}
+
+// NextTurn is what one turn may change for the turns that follow it.
+type NextTurn struct {
+	// ModelName selects the model from the next turn onward. Empty leaves it
+	// unchanged.
+	ModelName string
 }
 
 // Agent runs prompts through the loop.
@@ -278,7 +294,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		// every request; passing it here as well puts it in the context twice,
 		// which is a change to the prompt the model actually sees.
 		Instruction: "",
-		Model:       newEinoChatModel(observed, a.cfg.ModelName),
+		Model:       newEinoChatModel(observed, observed.currentModel),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,
@@ -425,6 +441,21 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				}
 			})
 
+			// The model for the FOLLOWING turns is chosen here, once this turn
+			// is closed out. A change is ANNOUNCED, because the framework
+			// reports none: without an event of pi-go's own, a run that
+			// switched models halfway looks identical to one that did not, and
+			// nothing afterwards can explain why the later answers differ.
+			if failure == nil && a.cfg.PrepareNextTurn != nil {
+				next := a.cfg.PrepareNextTurn(ctx)
+				if from, to, changed := observed.selectModel(next.ModelName); changed {
+					a.emitter.emit(events.KindModelChanged, func(e *events.Event) {
+						e.Detail.From = from
+						e.Detail.To = to
+					})
+				}
+			}
+
 			// A turn that failed or was cut short ends the agent WITHOUT
 			// looking for anything queued behind it. A message sent while a
 			// turn was failing is not consumed: the queue does not always
@@ -451,6 +482,7 @@ var errToolTerminate = errors.New("runtime: the round asked to stop")
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
+	mu            sync.Mutex
 	inner         ai.Port
 	emitter       *emitter
 	session       *session.Session
@@ -459,10 +491,31 @@ type observingPort struct {
 	sequentialFor func(name string) bool
 }
 
+// selectModel changes the model used from the next request onward, and reports
+// whether that was a change.
+func (o *observingPort) selectModel(name string) (from, to string, changed bool) {
+	if name == "" {
+		return "", "", false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if name == o.modelName {
+		return "", "", false
+	}
+	from, o.modelName = o.modelName, name
+	return from, name, true
+}
+
+func (o *observingPort) currentModel() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.modelName
+}
+
 func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
 	requested := req.Model
 	if requested == "" {
-		requested = o.modelName
+		requested = o.currentModel()
 	}
 
 	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {

@@ -52,19 +52,31 @@ func (s *Scripted) Generate(ctx context.Context, req Request) (Response, error) 
 	s.mu.Unlock()
 
 	if s.StopWhenToolsSettled && toolsSettled(req.Messages) {
-		return s.stamp(s.Final), nil
+		return s.stamp(req, s.Final), nil
 	}
 	if idx < len(s.Replies) {
-		return s.stamp(s.Replies[idx]), nil
+		return s.stamp(req, s.Replies[idx]), nil
 	}
-	return s.stamp(s.Final), nil
+	return s.stamp(req, s.Final), nil
 }
 
 // stamp fills in the serving model name when the scripted reply left it empty.
-func (s *Scripted) stamp(r Response) Response {
-	if r.Model == "" {
-		r.Model = s.Name
+// stamp names the model that served a reply.
+//
+// A reply that names none is served by whatever was asked for, falling back to
+// this script's own name when the request named nothing either. Reporting a fixed
+// name regardless of the request would make every model change look as though the
+// provider had substituted a different model, which is a real signal and would be
+// raised here for no reason.
+func (s *Scripted) stamp(req Request, r Response) Response {
+	if r.Model != "" {
+		return r
 	}
+	if req.Model != "" {
+		r.Model = req.Model
+		return r
+	}
+	r.Model = s.Name
 	return r
 }
 
