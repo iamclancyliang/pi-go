@@ -129,3 +129,73 @@ func TestA8ControlCompletedRoundHasNoUnmatched(t *testing.T) {
 		t.Errorf("a completed round left %v unmatched", got)
 	}
 }
+
+// TestA8SequentialAbortDoesNotHang covers the other execution shape.
+//
+// A sequential round hands the turn from one call to the next. A call still
+// waiting when the round is cut is waiting for a hand-off that will never come,
+// so the run does not fail — it never returns at all. A hang is worse than a
+// wrong answer: nothing reports it, and the caller has nothing to act on.
+//
+// The parallel case cannot find this: there is no hand-off there, so every call
+// is free to observe the cut on its own.
+func TestA8SequentialAbortDoesNotHang(t *testing.T) {
+	gate := newGatedTool("FIRST-RESULT")
+	registry := tools.NewRegistry()
+	registry.MustRegister(gate)
+	// Registered AND called, so this round is sequential.
+	registry.MustRegister(&timedTool{name: "exclusive_tool", delay: time.Millisecond, sequential: true})
+
+	sess := session.New("You are pi-go.")
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(
+			ai.ToolCall{ID: "call-1", Name: "slow_read", Args: `{}`},
+			ai.ToolCall{ID: "call-2", Name: "exclusive_tool", Args: `{}`},
+		)},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	run, err := agent.Start(ctx, "Read, then list.")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	gate.waitEntered(t)
+	cancel()
+
+	// The run must RETURN. Asserting on what it returns comes second: a run that
+	// never returns cannot be asserted on at all.
+	done := make(chan struct{})
+	go func() {
+		_ = run.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled sequential round never returned: the call waiting its " +
+			"turn is waiting for a hand-off that will not come")
+	}
+
+	// And the cut call left no result behind, same as the parallel shape.
+	if got := sess.UnmatchedToolCalls(); len(got) == 0 {
+		t.Error("a cancelled sequential round produced results for every call")
+	}
+}

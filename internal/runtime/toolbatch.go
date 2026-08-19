@@ -198,7 +198,15 @@ func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 		return call.result, call.settled
 	}
 
-	<-gate
+	// The wait must be cancellable. A sequential round hands the turn from one
+	// call to the next, so a call still waiting when the round is cut would wait
+	// for a hand-off that is never coming, and the run would never return.
+	select {
+	case <-gate:
+	case <-ctx.Done():
+		b.drop(callID)
+		return "", false
+	}
 	b.emitStart(call)
 	refusal, refused := b.prepareCall(ctx, call)
 	if !refused {
@@ -304,7 +312,20 @@ func (b *toolBatch) drop(callID string) {
 	}
 	call.dropped = true
 	b.remaining--
-	if !b.sequential && b.remaining == 0 {
+	if b.sequential {
+		// Hand the round on even though this call produced nothing. The next
+		// call is waiting to be let through; without this it waits forever,
+		// and a cut round would hang instead of ending.
+		if index := b.indexOf(callID); index >= 0 && index+1 < len(b.gates) {
+			select {
+			case <-b.gates[index+1]:
+			default:
+				close(b.gates[index+1])
+			}
+		}
+		return
+	}
+	if b.remaining == 0 {
 		for _, entry := range b.calls {
 			if !entry.dropped {
 				b.commit(entry)
