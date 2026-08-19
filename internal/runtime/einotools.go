@@ -60,11 +60,18 @@ func (t *observedTool) InvokableRun(ctx context.Context, args string, _ ...tool.
 
 	// The round decides when this call may run, announces it, and decides
 	// whether it may run at all; a tool cannot know where it sits in a round.
-	if refusal, refused := t.batch.begin(ctx, callID); refused {
+	switch decided := t.batch.begin(ctx, callID); {
+	case decided.Dropped:
+		// The round was cut before this call. It must not run: a tool that
+		// ignores cancellation would otherwise still do its work, and the only
+		// sign would be its side effects, since the round reports nothing for
+		// a call it cut.
+		return "", context.Canceled
+	case decided.Settled:
 		// Already ended by the round, at the point the refusal was decided.
 		// A denial is a RESULT, not an error: the model must see that the
 		// call was refused and why, or it will retry forever.
-		return refusal, nil
+		return decided.Refusal, nil
 	}
 
 	result, err := t.inner.Call(ctx, args)

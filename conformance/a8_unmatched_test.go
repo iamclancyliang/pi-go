@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -198,4 +199,92 @@ func TestA8SequentialAbortDoesNotHang(t *testing.T) {
 	if got := sess.UnmatchedToolCalls(); len(got) == 0 {
 		t.Error("a cancelled sequential round produced results for every call")
 	}
+}
+
+// TestA8CutCallIsNotExecuted pins that a cut call does not run at all.
+//
+// "Produces no result" and "does not run" are different claims, and the event
+// stream cannot tell them apart: a round reports nothing for a call it cut, so a
+// tool that ran anyway looks identical to one that did not. The difference is
+// visible only in what the tool did — which for a real tool means files written
+// or commands executed.
+//
+// The tool here IGNORES cancellation, deliberately. A tool that honours it would
+// stop on its own and prove nothing about whether the round prevented the call.
+func TestA8CutCallIsNotExecuted(t *testing.T) {
+	gate := newGatedTool("FIRST-RESULT")
+	stubborn := &stubbornTool{}
+	registry := tools.NewRegistry()
+	registry.MustRegister(gate)
+	registry.MustRegister(stubborn)
+
+	sess := session.New("You are pi-go.")
+	model := &ai.Scripted{
+		Name: "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(
+			ai.ToolCall{ID: "call-1", Name: "slow_read", Args: `{}`},
+			ai.ToolCall{ID: "call-2", Name: "stubborn_tool", Args: `{}`},
+		)},
+		StopWhenToolsSettled: true,
+		Final:                ai.AssistantText("done"),
+	}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	run, err := agent.Start(ctx, "Read, then be stubborn.")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	gate.waitEntered(t)
+	cancel()
+	_ = run.Wait()
+
+	// Give a tool that ignores cancellation every chance to run before asserting
+	// that it did not.
+	time.Sleep(100 * time.Millisecond)
+	if got := stubborn.ran(); got != 0 {
+		t.Errorf("a call cut by the abort still executed %d time(s); the round must "+
+			"prevent it, not merely decline to report it", got)
+	}
+}
+
+// stubbornTool ignores cancellation, so only "did it run" distinguishes a call
+// the round prevented from one it merely stayed quiet about.
+type stubbornTool struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *stubbornTool) Name() string        { return "stubborn_tool" }
+func (s *stubbornTool) Description() string { return "ignores cancellation" }
+
+func (s *stubbornTool) Execution() tools.Execution {
+	return tools.Execution{Sequential: false, ReadOnly: true}
+}
+
+func (s *stubbornTool) Call(context.Context, string) (tools.Result, error) {
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+	return tools.Result{Content: "ran anyway"}, nil
+}
+
+func (s *stubbornTool) ran() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }

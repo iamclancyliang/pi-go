@@ -171,12 +171,28 @@ func (b *toolBatch) prepareCall(ctx context.Context, call *batchCall) (string, b
 	return b.prepare(ctx, call.name, call.id, call.args)
 }
 
-// begin blocks until this call may run, and reports a refusal decided before it.
+// beginResult is what the round has already decided about a call.
+//
+// A tool asks before running, because by then the round may have settled the call
+// without it: refused before it was allowed to run, or cut out entirely. Returning
+// only a refusal cannot express the second — a cut call is not refused, it is not
+// to happen at all — and a tool told merely "not refused" runs.
+type beginResult struct {
+	// Refusal is what the model is told when the call was refused.
+	Refusal string
+	// Settled means the round already resolved this call and it must not run.
+	Settled bool
+	// Dropped means an abort cut this call: it must not run and produces
+	// nothing at all, not even a refusal.
+	Dropped bool
+}
+
+// begin blocks until this call may run, and reports what the round decided.
 //
 // In a sequential round the announcing and the preparing happen here, because
 // each call is announced only when its turn arrives. In a parallel round both
 // already happened during registration, and this returns what was decided then.
-func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
+func (b *toolBatch) begin(ctx context.Context, callID string) beginResult {
 	b.mu.Lock()
 	call, known := b.byID[callID]
 	sequential := b.sequential
@@ -190,12 +206,25 @@ func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 	if !known {
 		// A call the round never saw is not reordered into it: it runs
 		// unsequenced rather than being given a position it does not have.
-		return "", false
+		return beginResult{}
+	}
+
+	// THE ROUND CHECKS THE CUT, not the tool. Marking a call only when it
+	// notices cancellation itself leaves every tool that ignores cancellation
+	// free to run: nothing would have marked it, and the round reports nothing
+	// for a cut call, so the work would happen with no trace of it anywhere.
+	if ctx.Err() != nil {
+		b.drop(callID)
+		return beginResult{Dropped: true}
 	}
 	if !sequential {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		return call.result, call.settled
+		return beginResult{
+			Refusal: call.result,
+			Settled: call.settled,
+			Dropped: call.dropped,
+		}
 	}
 
 	// The wait must be cancellable. A sequential round hands the turn from one
@@ -205,12 +234,21 @@ func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 	case <-gate:
 	case <-ctx.Done():
 		b.drop(callID)
-		return "", false
+		return beginResult{Dropped: true}
 	}
+
+	// The round may have been cut while this call waited its turn.
+	b.mu.Lock()
+	dropped := call.dropped
+	b.mu.Unlock()
+	if dropped {
+		return beginResult{Dropped: true}
+	}
+
 	b.emitStart(call)
 	refusal, refused := b.prepareCall(ctx, call)
 	if !refused {
-		return "", false
+		return beginResult{}
 	}
 
 	b.mu.Lock()
@@ -222,7 +260,7 @@ func (b *toolBatch) begin(ctx context.Context, callID string) (string, bool) {
 	if index >= 0 && index+1 < len(b.gates) {
 		close(b.gates[index+1])
 	}
-	return refusal, true
+	return beginResult{Refusal: refusal, Settled: true}
 }
 
 // finish records the outcome and emits whatever the mode says comes next.
