@@ -560,6 +560,18 @@ func TestA11AttemptsAreDistinguishedByTheirReservedSlot(t *testing.T) {
 	if _, settled := sess.Settlement(second.ResultID); settled {
 		t.Error("the second attempt was reported as settled by the first one's outcome")
 	}
+	// An attempt that HAS an outcome is not waiting for one. Asked the other way
+	// round, a recovery would offer a decision about work already reported.
+	if got, waiting := sess.UnsettledIntent(first.ResultID); waiting {
+		t.Errorf("attempt with an outcome reported as waiting: %+v", got)
+	}
+	if got, waiting := sess.UnsettledIntent(second.ResultID); !waiting ||
+		got.OperationID != second.OperationID {
+		t.Errorf("waiting attempt = %+v (found=%v), want the second one", got, waiting)
+	}
+	if _, waiting := sess.UnsettledIntent("op-3.call-1"); waiting {
+		t.Error("an attempt nobody recorded was reported as waiting")
+	}
 
 	reopened, err := session.Restore(context.Background(), "You are pi-go.", store)
 	if err != nil {
@@ -648,8 +660,8 @@ func seedUnfinished(t *testing.T, store session.Store, tool string,
 	return intent
 }
 
-// TestA11RecoveryAsksBeforeRepeating pins the decision the owner made: a call
-// that may be repeated is presented, not repeated.
+// TestA11RecoveryAsksBeforeRepeating pins the recovery policy: a call that may be
+// repeated is presented, not repeated.
 //
 // Repeating automatically would bet safety on every tool author having marked the
 // declaration correctly, and the two mistakes are not symmetric — "did not do it"
@@ -702,7 +714,7 @@ func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
 		if _, err := agent.Recover(context.Background()); err != nil {
 			t.Fatalf("Recover: %v", err)
 		}
-		if err := agent.Repeat(context.Background(), intent); err != nil {
+		if err := agent.Repeat(context.Background(), intent.ResultID); err != nil {
 			t.Fatalf("Repeat: %v", err)
 		}
 		if tool.runs != 1 {
@@ -717,7 +729,7 @@ func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
 		}
 		// Answered once. A second answer would run a tool the caller already
 		// decided about.
-		if err := agent.Repeat(context.Background(), intent); !errors.Is(err, runtime.ErrAlreadySettled) {
+		if err := agent.Repeat(context.Background(), intent.ResultID); !errors.Is(err, runtime.ErrAlreadySettled) {
 			t.Errorf("repeating an answered call = %v, want it refused", err)
 		}
 		if tool.runs != 1 {
@@ -737,7 +749,7 @@ func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
 		if _, err := agent.Recover(context.Background()); err != nil {
 			t.Fatalf("Recover: %v", err)
 		}
-		if err := agent.Abandon(intent); err != nil {
+		if err := agent.Abandon(intent.ResultID); err != nil {
 			t.Fatalf("Abandon: %v", err)
 		}
 		if tool.runs != 0 {
@@ -792,11 +804,45 @@ func TestA11RecoveryAsksBeforeRepeating(t *testing.T) {
 		registry.MustRegister(tool)
 		agent, _ := recoveringAgent(t, store, registry)
 
-		if err := agent.Repeat(context.Background(), intent); err == nil {
+		if err := agent.Repeat(context.Background(), intent.ResultID); err == nil {
 			t.Error("a tool that changed since the attempt was allowed to repeat it")
 		}
 		if tool.runs != 0 {
 			t.Errorf("the changed tool ran %d times, want 0", tool.runs)
 		}
 	})
+}
+
+// TestA11OnlyRecordedAttemptsCanBeDecidedAbout pins that a decision names an
+// attempt this conversation actually made.
+//
+// Taking a description of the work from the caller would let a repeat be asked for
+// something never attempted here: the tool would run and its result be appended for
+// a call the transcript does not contain, with no durable attempt behind either.
+func TestA11OnlyRecordedAttemptsCanBeDecidedAbout(t *testing.T) {
+	store := &session.MemoryStore{}
+	seedUnfinished(t, store, "read_files", "v7", tools.ReplaySafe)
+
+	tool := &repeatableTool{name: "read_files", version: "v7", replay: tools.ReplaySafe}
+	registry := tools.NewRegistry()
+	registry.MustRegister(tool)
+	agent, sess := recoveringAgent(t, store, registry)
+
+	invented := "op-9.call-9"
+	if err := agent.Repeat(context.Background(), invented); !errors.Is(err, runtime.ErrNoAttemptWaiting) {
+		t.Errorf("repeating an attempt that was never recorded = %v, want it refused", err)
+	}
+	if tool.runs != 0 {
+		t.Errorf("the tool ran %d times for an attempt nobody made, want 0", tool.runs)
+	}
+	if err := agent.Abandon(invented); !errors.Is(err, runtime.ErrNoAttemptWaiting) {
+		t.Errorf("abandoning an attempt that was never recorded = %v, want it refused", err)
+	}
+	if _, settled := sess.Settlement(invented); settled {
+		t.Error("an outcome was recorded for an attempt the conversation never made")
+	}
+	// And the real one is untouched by either refusal.
+	if got := sess.UnsettledIntents(); len(got) != 1 {
+		t.Errorf("unsettled = %+v, want the one real attempt still waiting", got)
+	}
 }

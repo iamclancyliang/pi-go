@@ -324,6 +324,27 @@ func (s *Session) UnsettledIntents() []ToolIntent {
 	return out
 }
 
+// UnsettledIntent returns the recorded attempt for one reserved slot, if that
+// attempt is still waiting for an outcome.
+//
+// The attempt is read from the record, never taken from a caller. A decision to
+// repeat work has to be about work this conversation actually attempted: given a
+// description instead, it would run a tool and append a result for a call the
+// transcript never contains.
+func (s *Session) UnsettledIntent(resultID string) (ToolIntent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	intent, recorded := s.intents[resultID]
+	if !recorded {
+		return ToolIntent{}, false
+	}
+	if _, done := s.settled[resultID]; done {
+		return ToolIntent{}, false
+	}
+	return intent, true
+}
+
 // Settlement reports the recorded outcome of one attempt, if it has one.
 //
 // Identified by the slot the attempt reserved, because that is what makes an

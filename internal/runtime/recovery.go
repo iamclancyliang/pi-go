@@ -36,6 +36,10 @@ var ErrAwaitingRecovery = errors.New(
 // decide about it.
 var ErrAlreadySettled = errors.New("runtime: this call already has an outcome")
 
+// ErrNoAttemptWaiting reports that no recorded attempt is waiting under that
+// reserved slot.
+var ErrNoAttemptWaiting = errors.New("runtime: no attempt is waiting for a decision")
+
 // Recover resolves what a previous process left unfinished, and reports what
 // still needs an answer.
 //
@@ -53,15 +57,23 @@ func (a *Agent) Recover(ctx context.Context) (Recovery, error) {
 
 // Repeat runs an unfinished call again and settles it with what it produced.
 //
+// It names the attempt by the slot that attempt reserved and reads the rest from
+// the record. Taking a description of the work from the caller instead would let
+// a repeat be asked for work this conversation never attempted, and the tool would
+// run and its result be appended for a call the transcript does not contain.
+//
 // The declared terms are checked AGAIN, against the tool registered now. An answer
 // can be given at any time after the question was asked, and a tool that was
 // swapped in between is not the tool the attempt agreed to repeat.
-func (a *Agent) Repeat(ctx context.Context, intent session.ToolIntent) error {
-	// Asked by the slot the attempt reserved, not by its call id: a later
-	// operation may reuse a call id, and an outcome belonging to a different
-	// attempt would answer for this one.
-	if _, settled := a.cfg.Session.Settlement(intent.ResultID); settled {
-		return fmt.Errorf("%w: %s", ErrAlreadySettled, intent.ResultID)
+func (a *Agent) Repeat(ctx context.Context, resultID string) error {
+	// Reserved slot, not call id: a later operation may reuse a call id, and an
+	// outcome belonging to a different attempt would answer for this one.
+	if _, settled := a.cfg.Session.Settlement(resultID); settled {
+		return fmt.Errorf("%w: %s", ErrAlreadySettled, resultID)
+	}
+	intent, waiting := a.cfg.Session.UnsettledIntent(resultID)
+	if !waiting {
+		return fmt.Errorf("%w: %s", ErrNoAttemptWaiting, resultID)
 	}
 
 	policy, version, known := a.cfg.Tools.Declaration(intent.Tool)
@@ -137,9 +149,16 @@ func (a *Agent) Repeat(ctx context.Context, intent session.ToolIntent) error {
 //
 // The model is told the outcome is unknown, which is the honest answer: declining
 // to repeat says nothing about whether the first attempt took effect.
-func (a *Agent) Abandon(intent session.ToolIntent) error {
-	if _, settled := a.cfg.Session.Settlement(intent.ResultID); settled {
-		return fmt.Errorf("%w: %s", ErrAlreadySettled, intent.ResultID)
+//
+// Named the same way as Repeat, and for the same reason: the attempt being closed
+// is the recorded one, not one the caller describes.
+func (a *Agent) Abandon(resultID string) error {
+	if _, settled := a.cfg.Session.Settlement(resultID); settled {
+		return fmt.Errorf("%w: %s", ErrAlreadySettled, resultID)
+	}
+	intent, waiting := a.cfg.Session.UnsettledIntent(resultID)
+	if !waiting {
+		return fmt.Errorf("%w: %s", ErrNoAttemptWaiting, resultID)
 	}
 	return session.SettleAsUnknown(a.cfg.Session, intent)
 }
