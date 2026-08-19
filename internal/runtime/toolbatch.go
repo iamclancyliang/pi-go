@@ -39,8 +39,10 @@ type toolBatch struct {
 	byID       map[string]*batchCall
 	sequential bool
 	truncated  bool
-	gates      []chan struct{}
-	remaining  int
+	// storeErr is the first failure to record a result, carried out to the turn.
+	storeErr  error
+	gates     []chan struct{}
+	remaining int
 }
 
 type batchCall struct {
@@ -372,17 +374,30 @@ func (b *toolBatch) drop(callID string) {
 	}
 }
 
+// recordingFailure reports the first failure to persist a result, if any.
+func (b *toolBatch) recordingFailure() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.storeErr
+}
+
 // commit makes the result session truth and emits it.
 //
 // The result message is what history keeps, so it is appended in the same order
 // it is emitted — source order. `tool_end` therefore reports that a call
 // finished, not that the session already contains it.
 func (b *toolBatch) commit(call *batchCall) {
-	b.session.Append(ai.Message{
+	// A result that could not be recorded is remembered rather than dropped.
+	// commit runs while the round holds its lock and cannot return, so the
+	// failure is carried out to the turn, which ends rather than continuing with
+	// a history that is missing a result the model was told about.
+	if err := b.session.Append(ai.Message{
 		Role:       ai.RoleTool,
 		Content:    call.result,
 		ToolCallID: call.id,
-	})
+	}); err != nil && b.storeErr == nil {
+		b.storeErr = err
+	}
 	b.emitter.emit(events.KindToolResult, func(e *events.Event) {
 		e.ToolCallID = call.id
 		e.ToolName = call.name

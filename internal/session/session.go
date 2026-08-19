@@ -18,6 +18,8 @@
 package session
 
 import (
+	"context"
+	"fmt"
 	"sync"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -27,6 +29,9 @@ import (
 //
 // Safe for concurrent use: the runtime appends while a projection is read.
 type Session struct {
+	// store, when set, is where history is recorded so it outlives the process.
+	store Store
+
 	mu sync.RWMutex
 
 	// system is held separately from the transcript because it is not a
@@ -42,23 +47,37 @@ func New(system string) *Session {
 }
 
 // Append records a message as truth. It is never removed.
-func (s *Session) Append(m ai.Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.messages = append(s.messages, m)
-}
-
-// AppendAll records several messages in order.
-func (s *Session) AppendAll(msgs ...ai.Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.messages = append(s.messages, msgs...)
-}
-
-// Truth returns the full recorded history, excluding the system instruction.
+// Append records a message as having happened.
 //
-// The returned slice is a copy: a caller that mutated it would be editing
-// history, which is the exact failure this package exists to prevent.
+// The error is the store's. A history that quietly stops persisting looks exactly
+// like a conversation that did not continue, and the difference only shows up
+// after a restart, when the missing part cannot be recovered — so the caller is
+// told at the point the write failed, not left to discover it later.
+func (s *Session) Append(m ai.Message) error {
+	return s.AppendAll(m)
+}
+
+// AppendAll records several messages as one unit.
+//
+// The durable write happens BEFORE the message becomes visible in memory.
+// Recording it in memory first would let an observer read a message the store
+// never accepted, and after a restart that message is simply gone — the session
+// would have reported something that did not survive.
+func (s *Session) AppendAll(msgs ...ai.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.store != nil {
+		for _, m := range msgs {
+			if err := s.store.Append(context.Background(), m); err != nil {
+				return fmt.Errorf("session: recording message: %w", err)
+			}
+		}
+	}
+	s.messages = append(s.messages, msgs...)
+	return nil
+}
+
 func (s *Session) Truth() []ai.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

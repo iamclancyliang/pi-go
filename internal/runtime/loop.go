@@ -352,10 +352,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				if item == nil {
 					continue
 				}
-				a.cfg.Session.Append(ai.Message{
+				// A message that could not be recorded must not enter the
+				// conversation. Continuing would run a turn whose input is
+				// absent from history, so a restart would resume from a
+				// conversation that never had it.
+				if err := a.cfg.Session.Append(ai.Message{
 					Role:    fromEinoRole(item.Role),
 					Content: item.Content,
-				})
+				}); err != nil {
+					return nil, err
+				}
 			}
 
 			// The input handed to eino is pi-go's PROJECTION of
@@ -421,6 +427,13 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 				default:
 				}
 			}
+			// A result that could not be recorded ends the turn: the model was
+			// told the call happened, so continuing would build on a history
+			// that disagrees with what the model was shown.
+			if failure == nil {
+				failure = batch.recordingFailure()
+			}
+
 			// A round that asked to stop is a normal ending, not a failure.
 			// The framework reports it by cancelling the turn, which is
 			// indistinguishable from any other cancellation unless the cause
@@ -552,11 +565,16 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		e.Detail.ToolCallIDs = ids
 	})
 
-	o.session.Append(ai.Message{
+	// The reply is recorded before it is acted on. A reply that was answered
+	// but never recorded leaves the tool calls that follow it referring to a
+	// request that history does not contain.
+	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   resp.Content,
 		ToolCalls: resp.ToolCalls,
-	})
+	}); err != nil {
+		return ai.Response{}, err
+	}
 
 	// The round opens HERE, where the calls are still in the order the model
 	// asked for them and before the tools node has dispatched any of them.
