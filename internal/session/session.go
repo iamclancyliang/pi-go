@@ -39,6 +39,9 @@ type Session struct {
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
+	// overflowUsage accumulates what the refused attempts cost.
+	overflowUsage ai.Usage
+
 	// overflowAttempts counts recoveries tried against the current input. It is
 	// rebuilt from the store, so a restart cannot hand the run a fresh budget.
 	overflowAttempts int
@@ -174,19 +177,31 @@ func (s *Session) Project() Projection {
 // The attempt is recorded but never projected. Sending it back would resend the
 // thing that was rejected, and offering it to a summariser would let a provider
 // error be written into the conversation as something that was said.
-func (s *Session) RecordOverflowAttempt(detail string) error {
+func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.store != nil {
 		if err := s.store.Append(context.Background(), Entry{
-			Overflow: &OverflowAttempt{Detail: detail},
+			Overflow: &OverflowAttempt{Detail: detail, Usage: usage},
 		}); err != nil {
 			return fmt.Errorf("session: recording an overflow attempt: %w", err)
 		}
 	}
 	s.overflowAttempts++
+	s.overflowUsage.InputTokens += usage.InputTokens
+	s.overflowUsage.OutputTokens += usage.OutputTokens
 	return nil
+}
+
+// OverflowUsage is what the refused attempts cost.
+//
+// Kept separate from the conversation: the calls were paid for and must be
+// auditable, while nothing they returned belongs in what the model is shown.
+func (s *Session) OverflowUsage() ai.Usage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.overflowUsage
 }
 
 // OverflowAttempts reports how many recoveries have been tried for the current

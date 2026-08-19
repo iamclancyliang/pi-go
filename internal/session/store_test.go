@@ -152,7 +152,7 @@ func TestOverflowAttemptIsDurableButNotProjected(t *testing.T) {
 	s := WithStore("You are pi-go.", store)
 
 	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "a long question"}))
-	if err := s.RecordOverflowAttempt("context window exceeded"); err != nil {
+	if err := s.RecordOverflowAttempt("context window exceeded", ai.Usage{InputTokens: 900, OutputTokens: 10}); err != nil {
 		t.Fatalf("RecordOverflowAttempt: %v", err)
 	}
 
@@ -179,6 +179,11 @@ func TestOverflowAttemptIsDurableButNotProjected(t *testing.T) {
 	if got := reopened.OverflowAttempts(); got != 1 {
 		t.Errorf("attempts after restart = %d, want 1: the budget was handed back", got)
 	}
+	// The refused call was billed, so its cost survives too. Dropping it
+	// under-reports what the user actually paid.
+	if got := reopened.OverflowUsage(); got.Total() != 910 {
+		t.Errorf("usage after restart = %+v, want the refused call's 910 tokens", got)
+	}
 }
 
 // TestNewUserInputStartsAFreshBudget pins the boundary the budget belongs to.
@@ -191,7 +196,7 @@ func TestNewUserInputStartsAFreshBudget(t *testing.T) {
 	s := WithStore("You are pi-go.", store)
 
 	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "first question"}))
-	if err := s.RecordOverflowAttempt("too large"); err != nil {
+	if err := s.RecordOverflowAttempt("too large", ai.Usage{InputTokens: 500}); err != nil {
 		t.Fatalf("RecordOverflowAttempt: %v", err)
 	}
 	must(t, s.Append(ai.Message{Role: ai.RoleUser, Content: "second question"}))
@@ -206,5 +211,9 @@ func TestNewUserInputStartsAFreshBudget(t *testing.T) {
 	if got := reopened.OverflowAttempts(); got != 0 {
 		t.Errorf("attempts after new input, reopened = %d, want 0: the rebuilt "+
 			"budget disagrees with the live one", got)
+	}
+	// The budget resets; the ledger does not. That cost was really incurred.
+	if got := s.OverflowUsage(); got.Total() != 500 {
+		t.Errorf("usage after new input = %+v, want the earlier 500 tokens kept", got)
 	}
 }

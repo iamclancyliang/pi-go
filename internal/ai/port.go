@@ -81,6 +81,10 @@ type Response struct {
 	// assumed.
 	Model string
 
+	// Usage is what the provider says the call cost. Zero means the provider
+	// reported nothing, which is different from a call that cost nothing.
+	Usage Usage
+
 	// Truncated reports that the model stopped because it ran out of room
 	// rather than because it had finished.
 	//
@@ -99,6 +103,19 @@ type Response struct {
 type Port interface {
 	Generate(ctx context.Context, req Request) (Response, error)
 }
+
+// Usage is what one model call consumed.
+//
+// Reported by the provider rather than counted here: only the provider knows how
+// it tokenised the request, and a local estimate that disagrees with the bill is
+// worse than no estimate at all.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+}
+
+// Total is the whole cost of the call.
+func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
 
 // ErrContextOverflow reports that a request was refused for exceeding the
 // model's context, rather than for any transient reason.

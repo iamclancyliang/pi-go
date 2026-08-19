@@ -519,8 +519,8 @@ type observingPort struct {
 // shortening the context would resend what was just refused, and a second refusal
 // is the operation failing — not an empty answer, which reads to a caller as the
 // model having nothing to say.
-func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, cause error) (ai.Response, error) {
-	if err := o.session.RecordOverflowAttempt(cause.Error()); err != nil {
+func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent ai.Usage, cause error) (ai.Response, error) {
+	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
 		return ai.Response{}, err
 	}
 	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
@@ -581,7 +581,8 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 
 	resp, err := o.inner.Generate(ctx, req)
 	if errors.Is(err, ai.ErrContextOverflow) {
-		return o.recoverFromOverflow(ctx, req, err)
+		// The refused call still reports what it cost, and it was still billed.
+		return o.recoverFromOverflow(ctx, req, resp.Usage, err)
 	}
 	if err != nil {
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {

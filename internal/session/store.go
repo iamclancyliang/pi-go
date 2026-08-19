@@ -52,6 +52,10 @@ type OverflowAttempt struct {
 	// Detail is what the provider reported, kept for auditing rather than for
 	// the model to read.
 	Detail string
+
+	// Usage is what the refused call still cost. A rejected request is billed
+	// like any other, so dropping it under-reports what the user paid.
+	Usage ai.Usage
 }
 
 // Checkpoint is a compaction: a summary of what came before it, and the messages
@@ -132,12 +136,16 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 		case e.Message != nil:
 			s.messages = append(s.messages, *e.Message)
 			if e.Message.Role == ai.RoleUser {
+				// A new question starts a new budget. The spent cost is NOT
+				// reset: it was really paid, and the ledger is cumulative.
 				s.overflowAttempts = 0
 			}
 		case e.Overflow != nil:
 			// Durable, and deliberately not part of the conversation: it is
 			// counted against the recovery budget and never projected.
 			s.overflowAttempts++
+			s.overflowUsage.InputTokens += e.Overflow.Usage.InputTokens
+			s.overflowUsage.OutputTokens += e.Overflow.Usage.OutputTokens
 			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary
