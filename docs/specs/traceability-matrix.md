@@ -114,13 +114,19 @@ Ten conformance scenarios are now ticketed: **#7–#16** (A2, A3, A4, A5, A6, A7
 These are pure loop-behaviour contracts — valid whichever way ADR-0002 decides loop ownership, since
 only the subject under test changes, not the assertions.
 
-**Four remain unticketed, each for a stated reason — not oversight:**
+**One remains unticketed, for a stated reason — not oversight:**
 | A | Why not yet |
 | --- | --- |
 | ~~A1~~ | ~~the tracer bullet itself~~ — **closed 2026-08-17**: implemented, ticketed as **#18** |
 | ~~A9~~ | ~~depends on spike #4~~ — **closed 2026-08-15**: spike #4 PASS, ticketed as **#17** |
-| A10–A12 | need the v1 session storage port |
+| ~~A10–A12~~ | ~~need the v1 session storage port~~ — **closed 2026-08-19**: the port landed;
+ticketed as **#21** (A12), **#22** (A10), **#23** (A11), each with conformance tests |
 | A13 | v3, and just rewritten for wire decision C |
+
+**A11 carries one declared gap.** Attempts are recorded and settled around real calls, and recovery
+resolves an unsettled attempt to an unknown outcome. Nothing yet DRIVES that recovery at startup:
+the replayable attempts are handed back, and who decides to repeat them — and therefore owns the
+effects of repeating them — is an open product decision.
 
 > **An issue is not coverage.** These rows now have a ticket and a planned test path; **no test has
 > been written and none can run against product code that does not exist**. Do not read "#7–#16" as
