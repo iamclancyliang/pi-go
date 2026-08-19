@@ -291,3 +291,36 @@ func fixedClock() func() time.Time {
 		return base.Add(time.Duration(n) * time.Millisecond)
 	}
 }
+
+// TestSystemPromptEntersContextOnce guards the prompt the model actually sees.
+//
+// The session projection carries the system message, and the framework can be
+// given its own instruction; supplying both puts it in twice. Nothing else in the
+// suite notices, because every assertion about behaviour still holds when the
+// prompt is duplicated — the model is simply asked something different from what
+// the session says.
+func TestSystemPromptEntersContextOnce(t *testing.T) {
+	_, sess, model, _, _ := runA1(t)
+
+	requests := model.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the model received no requests")
+	}
+	for index, req := range requests {
+		var system []string
+		for _, m := range req.Messages {
+			if m.Role == ai.RoleSystem {
+				system = append(system, m.Content)
+			}
+		}
+		if len(system) != 1 {
+			t.Errorf("request %d carried %d system messages, want 1: %q",
+				index, len(system), system)
+			continue
+		}
+		if system[0] != sess.System() {
+			t.Errorf("request %d system message = %q, want the session's %q",
+				index, system[0], sess.System())
+		}
+	}
+}

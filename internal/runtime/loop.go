@@ -264,7 +264,11 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "pi-go",
 		Description: "pi-go v0 tracer bullet agent",
-		Instruction: a.cfg.Session.System(),
+		// No instruction is given to the framework. The session projection
+		// already carries the system message, and it is what pi-go feeds in on
+		// every request; passing it here as well puts it in the context twice,
+		// which is a change to the prompt the model actually sees.
+		Instruction: "",
 		Model:       newEinoChatModel(observed, a.cfg.ModelName),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
