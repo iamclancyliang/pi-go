@@ -293,3 +293,50 @@ func TestReasoningReturnsOnTheCollectedPathToo(t *testing.T) {
 		t.Fatalf("the collected path lost the reasoning before the second request:\n%s", transport.sent[1])
 	}
 }
+
+// TestUsageFromEveryCallReachesTheLedger: a conversation's consumption is the
+// sum of its calls, and a two-round exchange spent on both.
+func TestUsageFromEveryCallReachesTheLedger(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":100,"completion_tokens":10,"completion_tokens_details":{"reasoning_tokens":4}}}`,
+		),
+		sseReply(`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":200,"completion_tokens":20,"completion_tokens_details":{"reasoning_tokens":6}}}`),
+	}}
+	_, sess := runWithProvider(t, transport)
+
+	attempts := sess.Attempts()
+	if len(attempts) != 2 {
+		t.Fatalf("recorded %d attempts for a two-call exchange", len(attempts))
+	}
+
+	total := sess.Usage()
+	if total.InputTokens != 300 || total.OutputTokens != 30 {
+		t.Fatalf("total is %d in / %d out; recording only the last call would read 200/20",
+			total.InputTokens, total.OutputTokens)
+	}
+	if total.ReasoningTokens == nil || *total.ReasoningTokens != 10 {
+		t.Fatalf("reasoning total is %v, want 10", total.ReasoningTokens)
+	}
+	if !total.Reported {
+		t.Fatal("a total built from reported attempts claims nothing was reported")
+	}
+}
+
+// TestAnUnreportedFieldStaysUnreportedInTheTotal: summing what was never said
+// would invent a number, and a zero would claim the provider said zero.
+func TestAnUnreportedFieldStaysUnreportedInTheTotal(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`),
+	}}
+	_, sess := runWithProvider(t, transport)
+
+	total := sess.Usage()
+	if total.ReasoningTokens != nil {
+		t.Fatalf("a field no call reported became %d in the total", *total.ReasoningTokens)
+	}
+	if total.InputTokens != 5 {
+		t.Fatalf("input total %d", total.InputTokens)
+	}
+}

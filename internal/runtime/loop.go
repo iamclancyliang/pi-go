@@ -757,6 +757,10 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		e.Detail.ToolCallIDs = ids
 	})
 
+	// What the call reported using is recorded whether or not the reply is
+	// usable: tokens read before a failure were still read.
+	o.session.RecordUsage(resp.Usage)
+
 	// The reply is recorded before it is acted on. A reply that was answered
 	// but never recorded leaves the tool calls that follow it referring to a
 	// request that history does not contain.
@@ -1088,6 +1092,8 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 	if event.Kind != ai.StreamDone {
 		return nil
 	}
+
+	o.session.RecordUsage(final.Usage)
 
 	// Recorded before it is acted on, exactly as a whole answer is: tool calls
 	// that follow must not refer to a request history does not contain.
