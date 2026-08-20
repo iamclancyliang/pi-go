@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -621,6 +622,236 @@ func (streamOnlyTwoCallModel) Stream(_ context.Context, req ai.Request) (<-chan 
 			out <- e
 		}
 		if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
+
+// TestAConsumerAlwaysGetsExactlyOneTerminal pins the end of a reply, including
+// when the run is cancelled part-way.
+//
+// An observer that never sees a terminal waits for an end that is not coming and
+// cannot tell a cancelled reply from one still arriving. One that sees two has
+// been told the same reply ended twice, with nothing to say which ending stands.
+func TestAConsumerAlwaysGetsExactlyOneTerminal(t *testing.T) {
+	t.Run("a reply that completes", func(t *testing.T) {
+		consumer := &recordingConsumer{}
+		runStreamed(t, consumer, &streamOnlyModel{blocks: []ai.Chunk{
+			{Index: 0, Kind: ai.BlockText, Delta: "done"},
+		}}, false)
+
+		if got := terminalsSeen(consumer); got != 1 {
+			t.Errorf("terminals = %d, want exactly 1", got)
+		}
+	})
+
+	t.Run("a reply cut off part-way", func(t *testing.T) {
+		// The reply is HELD until the cancel has definitely landed, so the
+		// terminal is published to a run that is already cancelled. Racing a
+		// sleep against the reply tests whichever happened to win.
+		model := newHeldModel()
+		consumer := &recordingConsumer{}
+
+		agent, err := runtime.New(runtime.Config{
+			Model:          model,
+			ModelName:      "fake-1",
+			Tools:          tools.NewRegistry(),
+			Session:        session.New("You are pi-go."),
+			Policy:         runtime.DenyWrites,
+			Observers:      []events.Observer{runtime.NewRecorder()},
+			ReplyObservers: []runtime.ReplyObserver{consumer},
+			Now:            fixedClock(),
+		})
+		if err != nil {
+			t.Fatalf("runtime.New: %v", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			_ = agent.Run(ctx, "ask something")
+		}()
+
+		select {
+		case <-model.streaming:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the model was never asked to stream")
+		}
+		cancel()
+		close(model.release)
+
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run never returned after being cancelled")
+		}
+
+		if got := terminalsSeen(consumer); got != 1 {
+			t.Errorf("terminals after a cancel = %d, want exactly 1: an observer "+
+				"cannot tell a stopped reply from one still arriving", got)
+		}
+	})
+
+	t.Run("a reply retried after a refusal", func(t *testing.T) {
+		consumer := &recordingConsumer{}
+		runStreamedWithSummarizer(t, consumer)
+
+		if got := terminalsSeen(consumer); got != 1 {
+			t.Errorf("terminals = %d, want exactly 1: the retry is the same reply "+
+				"continuing, not a second one", got)
+		}
+		starts := 0
+		for _, e := range consumer.events() {
+			if e.Kind == ai.StreamStart {
+				starts++
+			}
+		}
+		if starts != 1 {
+			t.Errorf("starts = %d, want exactly 1", starts)
+		}
+	})
+}
+
+func terminalsSeen(c *recordingConsumer) int {
+	n := 0
+	for _, e := range c.events() {
+		if e.Terminal() {
+			n++
+		}
+	}
+	return n
+}
+
+func runStreamed(t *testing.T, consumer runtime.ReplyObserver, model ai.Port, cancelEarly bool) {
+	t.Helper()
+	agent, err := runtime.New(runtime.Config{
+		Model:          model,
+		ModelName:      "fake-1",
+		Tools:          tools.NewRegistry(),
+		Session:        session.New("You are pi-go."),
+		Policy:         runtime.DenyWrites,
+		Observers:      []events.Observer{runtime.NewRecorder()},
+		ReplyObservers: []runtime.ReplyObserver{consumer},
+		Now:            fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if cancelEarly {
+		go func() {
+			time.Sleep(2 * time.Millisecond)
+			cancel()
+		}()
+	}
+	_ = agent.Run(ctx, "ask something")
+}
+
+// runStreamedWithSummarizer drives a reply refused once for size, then answered.
+func runStreamedWithSummarizer(t *testing.T, consumer runtime.ReplyObserver) {
+	t.Helper()
+	agent, err := runtime.New(runtime.Config{
+		Model:          &overflowThenAnswer{},
+		ModelName:      "fake-1",
+		Tools:          tools.NewRegistry(),
+		Session:        session.New("You are pi-go."),
+		Policy:         runtime.DenyWrites,
+		Observers:      []events.Observer{runtime.NewRecorder()},
+		ReplyObservers: []runtime.ReplyObserver{consumer},
+		Now:            fixedClock(),
+		Summarize: func(context.Context, []ai.Message) (string, []ai.Message, error) {
+			return "shortened", nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "ask something long"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// overflowThenAnswer refuses the first attempt for size, then answers.
+type overflowThenAnswer struct{ calls int }
+
+func (o *overflowThenAnswer) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (o *overflowThenAnswer) Stream(context.Context, ai.Request) (<-chan ai.StreamEvent, error) {
+	o.calls++
+	first := o.calls == 1
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+		if first {
+			refusal := fmt.Errorf("provider refused: %w", ai.ErrContextOverflow)
+			if e, err := acc.Fail(ai.StopError, refusal); err == nil {
+				out <- e
+			}
+			return
+		}
+		if evs, err := acc.Push(ai.Chunk{Index: 0, Kind: ai.BlockText, Delta: "shorter"}); err == nil {
+			for _, e := range evs {
+				out <- e
+			}
+		}
+		if e, err := acc.Close(0); err == nil {
+			out <- e
+		}
+		if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
+
+// heldModel does not produce its reply until the test releases it.
+type heldModel struct {
+	streaming chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func newHeldModel() *heldModel {
+	return &heldModel{streaming: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (h *heldModel) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (h *heldModel) Stream(ctx context.Context, _ ai.Request) (<-chan ai.StreamEvent, error) {
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+
+		h.once.Do(func() { close(h.streaming) })
+		<-h.release
+
+		if evs, err := acc.Push(ai.Chunk{Index: 0, Kind: ai.BlockText, Delta: "half"}); err == nil {
+			for _, e := range evs {
+				out <- e
+			}
+		}
+		if e, err := acc.Fail(ai.StopAborted, ctx.Err()); err == nil {
 			out <- e
 		}
 	}()

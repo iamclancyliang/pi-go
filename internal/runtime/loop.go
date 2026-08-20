@@ -867,8 +867,6 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 		var retried <-chan ai.StreamEvent
 
 		for event := range in {
-			o.publishReply(event)
-
 			// ONE START PER REPLY. A retry is another attempt at the same reply,
 			// not a second reply: the consumer was told once that this reply
 			// began, and telling it again would describe two.
@@ -895,11 +893,13 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 						break
 					}
 				}
+				o.publishReply(ctx, event)
 				out <- event
 				o.recordTerminal(ctx, event, requested)
 				return
 			}
 
+			o.publishReply(ctx, event)
 			out <- event
 			switch {
 			case event.Terminal():
@@ -1098,8 +1098,21 @@ func (o *observingPort) recordTerminal(ctx context.Context, event ai.StreamEvent
 // to go.
 type ReplyObserver interface {
 	// Reply is called for every event of every reply, in order, before the
-	// stream advances. An implementation that blocks holds up delivery, which
-	// is the trade for seeing content as it arrives rather than afterwards.
+	// stream advances.
+	//
+	// IT IS CALLED SYNCHRONOUSLY, and that is the contract rather than an
+	// implementation detail: an observer that blocks holds up delivery to
+	// everyone, including the runtime. Buffering instead would let a slow
+	// observer fall arbitrarily far behind and then see a reply that finished
+	// long ago, which is not "as it arrives" in any useful sense — and the
+	// memory it took to pretend otherwise would be unbounded.
+	//
+	// An observer that cannot keep up should hand the event to its own buffer
+	// and return, choosing what to drop. That decision belongs to whoever is
+	// rendering, which is the only place that knows what may be skipped.
+	//
+	// Exactly one terminal event arrives per reply. A retry after a refused
+	// attempt is the same reply continuing, not a second one.
 	Reply(event ai.StreamEvent)
 }
 
@@ -1111,9 +1124,19 @@ func (f ReplyObserverFunc) Reply(e ai.StreamEvent) { f(e) }
 
 // publishReply hands one event to every reply observer.
 //
-// Called before the event is forwarded, so a renderer sees a block form at the
-// same point the rest of the runtime does rather than after the reply is over.
-func (o *observingPort) publishReply(event ai.StreamEvent) {
+// Fed from the events the runtime forwards, not from the provider's raw stream:
+// a refused attempt's terminal and the retry's start are both real events from a
+// provider, and both describe a reply that is still arriving. An observer told
+// about them would render one reply as two, the first of which appears to fail.
+func (o *observingPort) publishReply(ctx context.Context, event ai.StreamEvent) {
+	// A cancelled run stops publishing, except for the terminal. Continuing to
+	// deliver content after the caller gave up wastes their time on a reply they
+	// stopped; withholding the terminal too would leave an observer waiting for
+	// an end that never comes, with no way to tell a cancelled reply from one
+	// still arriving.
+	if ctx.Err() != nil && !event.Terminal() {
+		return
+	}
 	for _, observer := range o.replyObservers {
 		observer.Reply(event)
 	}
