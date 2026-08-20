@@ -1,129 +1,135 @@
 # Streaming contract
 
-**Status:** alignment table, written before implementation
+**Status:** alignment table, corrected after independent source audits. No implementation yet.
 
 **Pi baseline:** [`086c32e74530564922d011ade23ff582c9d63116`](https://github.com/earendil-works/pi/commit/086c32e74530564922d011ade23ff582c9d63116)
+**Framework baseline:** eino `v0.9.14`
 
 **Scope:** the observable event protocol of a streamed assistant reply, stated so each row can be
-checked against Pi's source and against a pi-go test rather than argued about.
+checked against source rather than argued about.
 
-Pi's real path is streaming. pi-go currently delivers a whole reply as one chunk and says so in
-`internal/runtime/einomodel.go`; that satisfies the framework's interface and proves nothing about
-incremental delivery. This table is what "aligned" has to mean before any of it is written.
+Evidence for every row is in `docs/research/streaming-contract-source-audit.md` and
+`docs/research/streaming-alignment-verification.md`, which were produced independently and agree.
 
 ## 1. Event set
 
-Pi source: `packages/ai/src/types.ts:523-539`.
-
-| Event | Carries | Emitted |
-| --- | --- | --- |
-| `start` | `partial` | once, before any other event |
-| `text_start` | `contentIndex`, `partial` | when a text block opens |
-| `text_delta` | `contentIndex`, `delta`, `partial` | per text increment |
-| `text_end` | `contentIndex`, `content`, `partial` | when that block closes |
-| `thinking_start` / `thinking_delta` / `thinking_end` | as text, `content` on end | thinking block |
-| `toolcall_start` / `toolcall_delta` | `contentIndex`, `delta`, `partial` | tool-call block |
-| `toolcall_end` | `contentIndex`, `toolCall`, `partial` | when the call is complete |
-| `done` | `reason`, `message` | terminal, success |
-| `error` | `reason`, `error` | terminal, failure |
-
-**Checkable:** the set is closed. An implementation emitting anything outside it, or omitting
-`start`, is not aligned.
+`packages/ai/src/types.ts:523-539`. Twelve variants, closed: `start`; `text_start` / `text_delta` /
+`text_end`; `thinking_start` / `thinking_delta` / `thinking_end`; `toolcall_start` /
+`toolcall_delta` / `toolcall_end`; `done`; `error`.
 
 ## 2. Ordering
 
-1. `start` precedes every other event.
-2. Exactly one terminal event ends the stream: `done` or `error`, never both, never neither.
-3. Within one content block: `*_start` → zero or more `*_delta` → `*_end`.
-4. Blocks are **not** required to be sequential. `contentIndex` exists so a consumer can attribute an
-   event to a block without assuming the previous one closed first.
-
-**Checkable:** a recorded event sequence can be replayed and each rule asserted independently.
+1. **A content event is always preceded by `start`.** `start` is NOT guaranteed to be the first event
+   of every stream: a stream may terminate with `error` having emitted nothing else, via the lazy
+   wrapper (`api/lazy.ts:46-61`), any throw before the first push (`anthropic-messages.ts:574-583`),
+   or an already-cancelled signal (`provider-retry.ts:117`, `faux.ts:347-352`).
+2. Exactly one terminal event: `done` or `error`.
+3. A **normally closed** block runs `*_start` → zero or more `*_delta` → `*_end`.
+4. **An error may leave a block open.** `*_start` with no matching `*_end` is legal and occurs; no
+   implementation synthesises closing events (`anthropic-messages.ts:610`, throw at `:413`/`:474`,
+   catch at `:775-785`).
+5. Blocks may interleave; `contentIndex` is what attributes an event to a block.
 
 ## 3. `contentIndex`
 
-Pi source: `packages/ai/src/api/anthropic-messages.ts:610,651-656`.
+The position of the block this event concerns, within the accumulated message's content list.
 
-The index of the block in the assistant message's content list — `output.content.length - 1` when the
-block is appended, and the block's position when a delta arrives. It identifies **which block this
-event is about**, and is the only way to do so when blocks interleave.
+## 4. `partial`
 
-**Checkable:** for every `*_delta`, the block at `contentIndex` in `partial` is the one that grew.
+**Only the ten non-terminal events carry `partial`.** `done` carries `message`; `error` carries
+`error` (`types.ts:523-539`).
 
-## 4. `partial` — the accumulated message, not the increment
+`partial` is the accumulated message **as of this event**, so a consumer never has to maintain its own
+accumulator.
 
-Pi source: same file; every event carries `partial: output`, and `output` is mutated in place
-(`block.text += event.delta.text`).
+### Deliberate divergence: snapshot, not alias
 
-A consumer must be able to read the whole assistant message **as of this event** without keeping its
-own accumulator. This is the property a single-chunk implementation satisfies trivially and therefore
-the one that has to be tested with more than one chunk.
+Pi passes the same mutating object every time (`partial: output`). pi-go delivers a deep copy per
+event. **This is a value-semantics divergence, not an unchanged observable** — under Pi a consumer
+mutating what it received affects later events and the terminal message; under pi-go it does not.
 
-**Divergence, deliberate.** Pi passes a live reference to the mutating object. pi-go will deliver a
-**snapshot per event**, because:
+Chosen because Go delivers events across goroutines, where a shared mutable pointer is a data race,
+and because this repository has twice fixed bugs where a reader could rewrite the record it was
+handed.
 
-- Go delivers events across goroutines, and a shared mutable pointer is a data race, not a style
-  choice.
-- A consumer that holds an event would otherwise see the message change underneath it — this
-  repository has already fixed two bugs of exactly that shape, where a reader could rewrite session
-  history through what it was handed.
+Everything mutable must be copied, not just the top level: the content slice, each block, tool-call
+arguments (arbitrarily nested), `usage`, `usage.cost` (mutated in place after the fact,
+`models.ts:892-896`), diagnostics and each diagnostic's details.
 
-The observable guarantee is unchanged and strictly stronger: the message as of that event. What is
-not carried over is the aliasing.
+**Checkable, both directions:** a producer mutation after delivery must not appear in an already
+delivered event; a consumer mutation of a delivered event must not appear in any later event or in
+the terminal message.
 
-**Checkable:** hold every event; after the terminal event, each held `partial` still reads as it did
-when delivered, and their contents grow monotonically.
+**Not claimed:** that the message grows monotonically in structure. Blocks are edited in place and
+scratch fields are removed, so later is not a superset of earlier.
 
 ## 5. Terminal states
 
-Pi source: `types.ts:393` (`StopReason`), `anthropic-messages.ts:773,781-783`.
-
-| Terminal | `reason` values | Carries |
+| Terminal | `reason` | Carries |
 | --- | --- | --- |
-| `done` | `stop`, `length`, `toolUse`, `deferred` | the final message |
-| `error` | `error`, `aborted` | the final message, with `errorMessage` set |
+| `done` | `stop`, `length`, `toolUse`, `deferred` | final message |
+| `error` | `error`, `aborted` | final message, `errorMessage` set |
 
-Cancellation is **not** a separate event: an aborted stream terminates as `error` with reason
-`aborted`. `pending` is a state of a message, never a terminal reason.
-
-**Checkable:** cancel mid-stream and assert one terminal `error`/`aborted` carrying the partial work,
-not a truncated success.
+Cancellation is not a separate event: it terminates as `error` with reason `aborted`.
 
 ## 6. Streaming scratch state must not survive
 
-Pi source: `anthropic-messages.ts:776-780` — `index` and `partialJson` are deleted from every block
-before the terminal event, with the note that `partialJson` is "only a streaming scratch buffer;
-never persist it".
+Scratch fields are removed before the terminal event on two different paths: **per block as it
+closes** on the success path, and **a catch-all sweep** on the error path
+(`anthropic-messages.ts:775-785`).
 
-**Checkable:** nothing in the final message identifies how it was chunked. The same reply delivered
-in one chunk or twenty produces the same final message.
+Fields observed across providers: `index`, `partialJson`, `partialArgs`, `customInput` (with a nested
+`jsonBuffer`), `streamIndex`.
 
-## 7. What this rules out
+**Checkable:** nothing in the final message says how it was chunked.
 
-A one-chunk implementation satisfies §1 and §5 and fails §2 (no per-block progression), §3 (no index
-to attribute), §4 (one `partial`, which is also the final message) and §6 (trivially, because there
-is nothing to strip). Any test that a single chunk can pass is not testing streaming.
+**Known gap in Pi, not to be copied:** `openai-codex-responses.ts` and `mistral-conversations.ts` do
+not strip `index`. pi-go strips uniformly; that is a deliberate improvement, recorded here so it is
+not mistaken for divergence by omission.
 
-## 8. What the framework gives us, and what it does not
+## 7. Cancellation and partial work — pi-go is STRONGER
 
-eino's streamed chunk is a partial `schema.Message`
-(`schema/message.go:499-528`): text arrives in `Content`, thinking in
-`ReasoningContent`, and tool calls in `ToolCalls`, where `ToolCall.Index` is documented as
-identifying "the chunk of the tool call for merging".
+Pi is not uniform. `anthropic-messages.ts:775-785` re-emits the accumulator, preserving partial work.
+`pi-messages.ts:313-335` builds a **new** message with `content: []` and zero usage on every
+client-side abort (`:413-415`), discarding what had accumulated; `lazy.ts` and `faux.ts` also emit
+empty-content terminals.
 
-**There is no equivalent of `contentIndex`.** eino separates content by FIELD; Pi has one ordered list
-of heterogeneous blocks with a single index space. A tool-call index is not a block index: it counts
-tool calls, not content blocks, so text and thinking do not appear in it at all.
+pi-go preserves accumulated content on every abort path. **This is a stronger guarantee than Pi
+gives, deliberately** — a partial answer the user watched arrive should not vanish because they
+stopped it.
 
-Consequences, and they are the load-bearing ones for the implementation:
+## 8. The discriminator: timing, not chunk count
 
-- pi-go cannot pass framework chunks through and obtain Pi's protocol. It must maintain the block
-  list itself and assign `contentIndex` in its own space.
-- Block boundaries have to be derived. A chunk carrying `Content` after a chunk carrying
-  `ReasoningContent` is a new block; a chunk carrying more `Content` continues the current one.
-- The mapping is therefore part of the contract under test, not an implementation detail: if it is
-  wrong, `contentIndex` is wrong, and every consumer that attributes a delta to a block is wrong with
-  it.
+A single upstream chunk **can** synthesise a whole correct-looking event sequence after the fact, so
+"one chunk cannot pass this" is not a test.
 
-**Checkable:** a stream that interleaves text, thinking and tool-call chunks produces a block list
-whose indices are stable, contiguous from zero, and unchanged by how the provider chunked them.
+**The property is delivery before the terminal.** The test needs at least two upstream chunks under
+the test's control, and must observe the first block's update **while the second chunk and the
+terminal are still withheld**. That, and only that, rules out buffering to completion and replaying.
+
+## 9. Mapping from the framework
+
+`schema.Message` **cannot** support this contract:
+
+- All `Content` is concatenated into one string with no separator, so **two adjacent text blocks are
+  unrecoverable** (`schema/message.go:1698-1701`, `:1772-1783`).
+- Fields in one chunk carry **no relative order**; each accumulates independently, and `ToolCalls` is
+  sorted by index rather than arrival (`:1350-1363`).
+- `ToolCall.Index` is a tool-call space, not a block space.
+
+`schema.AgenticMessage` **can**: `ContentBlock` is an ordered sum type over reasoning, text and tool
+calls, and `ContentBlock.StreamingMeta.Index` spans all of them with sorted, type-checked merging
+(`schema/agentic_message.go:102-124`, `:929-989`, `:1252-1267`).
+
+**Rule:** the input seam must carry explicit ordered block identity. pi-go's own port type owns that
+identity; where a framework type is involved it must be the agentic one. **If block identity is
+absent, fail closed — do not infer boundaries from field transitions.**
+
+Note: `MessageStreamingMeta` is `json:"-"` and does not survive serialization, so block identity
+cannot be recovered from a serialized chunk.
+
+## 10. Open question, stated rather than assumed
+
+Whether any given chat-model adapter populates `StreamingMeta`, and with what index discipline, is
+not decidable from Pi or eino core — those adapters live in `eino-ext`. Until an adapter is chosen and
+read, pi-go must not assume indices arrive populated; the port type carries block identity itself.
