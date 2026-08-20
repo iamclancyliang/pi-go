@@ -193,13 +193,19 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 			turnMu.Unlock()
 
 			if preempt && turnNo == 1 {
-				select {
-				case <-tc.Preempted:
-					tr.add(layerControl, "preempt:contributed", "Preempted channel closed at safe point")
-				case <-time.After(2 * time.Second):
-					tr.add(layerControl, "preempt:timeout", "WATCHDOG: Preempted never closed")
-					return fmt.Errorf("watchdog: Preempted never closed at safe point")
-				}
+				// WAIT FOR THE CONDITION, not for a stretch of wall clock.
+				//
+				// A deadline here measures machine load as much as it measures the
+				// mechanism: under a parallel race build the hand-off can take
+				// longer than any budget small enough to be worth setting, so the
+				// timer reports a failure that did not happen.
+				//
+				// If the channel never closes, this blocks and the package timeout
+				// ends the run. That costs a slow failure and buys a goroutine dump
+				// naming the hand-off nothing arrived from, which a timer cannot
+				// say.
+				<-tc.Preempted
+				tr.add(layerControl, "preempt:contributed", "Preempted channel closed at safe point")
 			} else {
 				select {
 				case <-tc.Preempted:
