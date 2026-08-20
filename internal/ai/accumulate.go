@@ -189,6 +189,7 @@ func (a *Accumulator) Fail(reason StopReason, cause error) (StreamEvent, error) 
 	a.message.ErrorMessage = "unknown failure"
 	if cause != nil {
 		a.message.ErrorMessage = cause.Error()
+		a.message.Cause = cause
 	}
 	final := a.message.Clone()
 	return StreamEvent{Kind: StreamError, Final: &final}, nil

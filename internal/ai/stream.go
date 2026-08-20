@@ -61,6 +61,16 @@ type AssistantMessage struct {
 	// error it cannot act on.
 	ErrorMessage string
 
+	// Cause is the failure itself, kept so a caller can classify it.
+	//
+	// Text is for a reader; a decision needs the value. Matching on the message
+	// would misread an unrelated failure that happens to quote the same words,
+	// and would depend on wording nothing promised to keep.
+	//
+	// It does not survive leaving the process: a caller reading a stream back
+	// from a record has ErrorMessage and nothing else.
+	Cause error
+
 	Model string
 	Usage Usage
 }
@@ -72,6 +82,9 @@ type AssistantMessage struct {
 // that kept an event would watch it change. Every mutable descendant is copied —
 // the block slice, each block, and the tool call's arguments.
 func (m AssistantMessage) Clone() AssistantMessage {
+	// Cause is carried by reference on purpose: an error value is immutable in
+	// practice, and copying it would mean losing the wrapping a caller needs to
+	// classify it.
 	cloned := m
 	if m.Blocks != nil {
 		cloned.Blocks = make([]Block, len(m.Blocks))

@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -578,40 +577,18 @@ type observingPort struct {
 // is the operation failing — not an empty answer, which reads to a caller as the
 // model having nothing to say.
 func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent ai.Usage, cause error) (ai.Response, error) {
-	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
-		return ai.Response{}, err
-	}
 	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 		e.Detail.Err = cause.Error()
 	})
 
-	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
-		detail := "recovery already spent"
-		if o.summarize == nil {
-			detail = "no way to shorten the context"
-		}
-		// Recorded before it is returned, so reopening finds the same terminal
-		// state instead of starting the same losing attempt again.
-		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
-		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
-			return ai.Response{}, err
-		}
-		return ai.Response{}, failureError(recorded, cause)
-	}
-
-	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	retry, err := o.shortenForRetry(ctx, req, cause, spent)
 	if err != nil {
-		return ai.Response{}, fmt.Errorf("runtime: shortening the context: %w", err)
-	}
-	if err := o.session.Compact(summary, retained); err != nil {
 		return ai.Response{}, err
 	}
-
-	// Ask again from the SHORTENED projection. Reusing the request would send
-	// the context that was just refused.
-	retry := req
-	retry.Messages = o.session.Project().Messages
-	return o.Generate(ctx, retry)
+	if retry == nil {
+		return ai.Response{}, failureError(o.session.Failure(), cause)
+	}
+	return o.Generate(ctx, *retry)
 }
 
 // selectModel changes the model used from the next request onward, and reports
@@ -881,7 +858,7 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 
 		for event := range in {
 			if event.Kind == ai.StreamError && event.Final != nil &&
-				o.isOverflow(event.Final.ErrorMessage) {
+				errors.Is(event.Final.Cause, ai.ErrContextOverflow) {
 
 				// RECOVERY IS ONLY SAFE BEFORE ANYTHING WAS SHOWN.
 				//
@@ -891,7 +868,7 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 				// had said both things. The whole-answer path never has to
 				// decide this, because nothing is visible until it is complete.
 				if !delivered {
-					if next, ok := o.retryStream(ctx, req, requested, event); ok {
+					if next, ok := o.reopen(ctx, req, requested, event); ok {
 						retried = next
 						break
 					}
@@ -918,63 +895,81 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 	}
 }
 
-// isOverflow reports whether a terminal error was the provider refusing the
-// request for size.
-//
-// Matched on the recorded text because the event carries a message rather than an
-// error value: the reply crossed a channel, and an error does not survive that as
-// a comparable value.
-func (o *observingPort) isOverflow(message string) bool {
-	return message != "" && strings.Contains(message, ai.ErrContextOverflow.Error())
-}
-
-// retryStream spends the recovery budget and opens a shortened attempt.
-//
-// It reports false when there is nothing left to spend, having already recorded
-// the terminal failure — so the caller forwards the original error rather than
-// inventing a different one.
-func (o *observingPort) retryStream(ctx context.Context, req ai.Request, requested string,
+// reopen shortens the context and starts another stream, or reports that
+// recovery is over.
+func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested string,
 	failed ai.StreamEvent) (<-chan ai.StreamEvent, bool) {
-
-	spent := ai.Usage{}
-	if failed.Final != nil {
-		spent = failed.Final.Usage
-	}
-	if err := o.session.RecordOverflowAttempt(failed.Final.ErrorMessage, spent); err != nil {
-		return nil, false
-	}
-	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
-		detail := "recovery already spent"
-		if o.summarize == nil {
-			detail = "no way to shorten the context"
-		}
-		_ = o.session.Fail(CodeContextOverflow, detail)
-		return nil, false
-	}
-
-	summary, retained, err := o.summarize(ctx, o.session.Truth())
-	if err != nil {
-		return nil, false
-	}
-	if err := o.session.Compact(summary, retained); err != nil {
-		return nil, false
-	}
 
 	streaming, ok := o.inner.(ai.StreamingPort)
 	if !ok {
 		return nil, false
 	}
-	retry := req
-	retry.Messages = o.session.Project().Messages
+	retry, err := o.shortenForRetry(ctx, req, failed.Final.Cause, failed.Final.Usage)
+	if err != nil || retry == nil {
+		if err != nil && o.batch != nil {
+			o.batch.recordStreamFailure(err)
+		}
+		return nil, false
+	}
+
 	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
 		e.Detail.MessageCount = len(retry.Messages)
 		e.Detail.Model = requested
 	})
-	events1, err := streaming.Stream(ctx, retry)
+	next, err := streaming.Stream(ctx, *retry)
 	if err != nil {
+		if o.batch != nil {
+			o.batch.recordStreamFailure(err)
+		}
 		return nil, false
 	}
-	return events1, true
+	return next, true
+}
+
+// shortenForRetry spends the recovery budget and reports what to send next.
+//
+// ONE transition for both ways of asking. The budget, the terminal failure, the
+// shortening and the projection to retry from are the same decision whichever
+// shape the answer arrives in; two copies would let them drift, and the one that
+// drifted would be the one nobody tested.
+//
+// It returns the request to retry with. A nil request means recovery is over: the
+// terminal failure has already been recorded, so the caller reports the original
+// refusal rather than inventing a different one.
+func (o *observingPort) shortenForRetry(ctx context.Context, req ai.Request,
+	cause error, spent ai.Usage) (*ai.Request, error) {
+
+	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
+		return nil, err
+	}
+
+	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
+		detail := "recovery already spent"
+		if o.summarize == nil {
+			detail = "no way to shorten the context"
+		}
+		// Recorded before it is reported, so reopening finds the same terminal
+		// state instead of starting the same losing attempt again.
+		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
+		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	if err != nil {
+		return nil, fmt.Errorf("runtime: shortening the context: %w", err)
+	}
+	if err := o.session.Compact(summary, retained); err != nil {
+		return nil, err
+	}
+
+	// Ask again from the SHORTENED projection. Reusing the request would send
+	// the context that was just refused.
+	retry := req
+	retry.Messages = o.session.Project().Messages
+	return &retry, nil
 }
 
 // errStreamUnsupported reports that the provider behind this port answers only in

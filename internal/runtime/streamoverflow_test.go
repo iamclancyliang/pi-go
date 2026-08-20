@@ -196,3 +196,59 @@ func (alwaysOverflowing) Stream(context.Context, ai.Request) (<-chan ai.StreamEv
 	}()
 	return out, nil
 }
+
+// misleadingError fails with a message that quotes the overflow wording without
+// being an overflow.
+//
+// The wording is what a text match would key on, so this is the case that
+// separates classifying a failure from reading about one.
+type misleadingError struct{}
+
+func (misleadingError) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this fake only streams")
+}
+
+func (misleadingError) Stream(context.Context, ai.Request) (<-chan ai.StreamEvent, error) {
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+		// Not wrapped: a plain failure whose text happens to quote the phrase.
+		refusal := errors.New("upstream said: " + ai.ErrContextOverflow.Error())
+		if e, err := acc.Fail(ai.StopError, refusal); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
+
+// TestAFailureThatOnlyReadsLikeAnOverflowIsNotRecovered pins that recovery keys
+// on the failure, not on its wording.
+//
+// Spending the recovery budget on an unrelated failure shortens the context for
+// nothing and leaves a real overflow with no allowance left.
+func TestAFailureThatOnlyReadsLikeAnOverflowIsNotRecovered(t *testing.T) {
+	sess := session.New("You are pi-go.")
+	port, rec := overflowPort(t, misleadingError{}, sess)
+
+	stream, err := port.Stream(context.Background(), ai.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for range stream {
+	}
+
+	if got := sess.OverflowAttempts(); got != 0 {
+		t.Errorf("recovery attempts = %d, want 0: an unrelated failure spent the "+
+			"budget because its text quoted the overflow wording", got)
+	}
+	if got := countStreamKind(rec, events.KindModelRequest); got != 1 {
+		t.Errorf("model_request = %d, want 1: the context was shortened and the "+
+			"model asked again for a failure that had nothing to do with size", got)
+	}
+}
