@@ -173,14 +173,23 @@ decision rather than on implementation. What that does and does not mean:
   row's contract is partial — A1 — the test is partial with it.
 - The spike suite proves things about *eino*, not about pi-go. **Do not read green gates as scenario
   coverage.**
-- The intermittent failure once seen in `TestC1bSteeringContract` is **explained and fixed**. It was a
-  two-second wall-clock wait for the preempt hand-off, which measured machine load as much as the
-  mechanism and so reported failures that had not happened; the streaming variant shared the same
-  probe and the same fault. The wait is now on the condition, so a genuine stall ends the run through
-  the package timeout and prints a goroutine dump naming what nothing arrived from.
-- One intermittent failure remains: `TestSpike3ArmCTargetedGap`, reproduced 3 times in 240 executions,
-  every one reporting `ExitReason = nil`. **The cause is understood and the test, not the framework,
-  is wrong**: a graceful stop takes effect at the next safe point, so when the round's work finishes
-  at that same point there is nothing left to cancel — no cancel error, no interrupt context, no
-  checkpoint. The probe asserts a root-cause interrupt context unconditionally. **Not yet corrected**;
-  what the probe should assert is a decision about what it is proving.
+- The intermittent failure in `TestC1bSteeringContract` (and its streaming twin, which shares the
+  probe) is **fixed**. `TurnLoop.Push` returns a channel that closes when the preempt REQUEST is
+  resolved, and resolution includes a no-op — the request can finish having submitted no cancel at
+  all. The probe waited on the preempt itself, which never closes in that case; the two-second
+  deadline it waited under turned that into a failure report that named machine load rather than the
+  mechanism. It now waits on the request's own resolution and then observes, so "contributed" and
+  "resolved without contributing" are separate recorded outcomes and neither is a guess about timing.
+- One intermittent failure remains: `TestSpike3ArmCTargetedGap`, seen 3 times in 240 executions, every
+  one reporting `ExitReason = nil`.
+  **Established**: `Stop(WithGraceful())` is a request to cancel at the next chat or tool safe point,
+  not a guarantee that a cancel happens; `CancelHandle.Wait` names `ErrExecutionEnded` for a run that
+  ended before the cancel took effect; and `IsRootCause` marks a business interrupt, which a graceful
+  stop does not itself produce.
+  **Observed**: in every failing run the round completed its remaining model call and finished, so
+  there was nothing left to cancel.
+  **Not yet corrected.** The probe asserts a root-cause interrupt context unconditionally, which
+  assumes the stop always wins that race. The correction is to make the precondition deterministic —
+  run 1 must still have unfinished work after the safe point — and to require proof that the cancel
+  happened and the checkpoint exists before judging targeted resume; a run that fails those is an
+  invalid scenario and cannot support any conclusion about resume.

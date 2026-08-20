@@ -27,6 +27,17 @@ type pushingTool struct {
 	// preempt selects C1b (Push + WithPreempt) vs C1a (plain Push).
 	preempt bool
 	pushed  bool
+	// resolved is Push's preempt-request resolution channel. It closes either
+	// after a cancel was submitted for the target turn or as a no-op, so it says
+	// the request finished — not that it did anything.
+	resolved <-chan struct{}
+}
+
+// requestResolved returns the channel Push handed back for this run's preempt.
+func (p *pushingTool) requestResolved() <-chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.resolved
 }
 
 func (p *pushingTool) setLoop(l *adk.TurnLoop[*schema.Message, *schema.Message]) {
@@ -54,6 +65,9 @@ func (p *pushingTool) InvokableRun(ctx context.Context, args string, opts ...too
 		var done <-chan struct{}
 		if prem {
 			ok, done = l.Push(msg, adk.WithPreempt[*schema.Message, *schema.Message](adk.AfterToolCalls))
+			p.mu.Lock()
+			p.resolved = done
+			p.mu.Unlock()
 			p.tr.add(layerControl, "Push:withPreempt", fmt.Sprintf("accepted=%v doneNil=%v safePoint=AfterToolCalls", ok, done == nil))
 		} else {
 			ok, done = l.Push(msg)
@@ -192,19 +206,25 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 			turnMu.Unlock()
 
 			if preempt && turnNo == 1 {
-				// WAIT FOR THE CONDITION, not for a stretch of wall clock.
+				// WAIT ON THE REQUEST'S OWN RESOLUTION, then look.
 				//
-				// A deadline here measures machine load as much as it measures the
-				// mechanism: under a parallel race build the hand-off can take
-				// longer than any budget small enough to be worth setting, so the
-				// timer reports a failure that did not happen.
+				// Push returns a channel that closes when the preempt request is
+				// resolved — either after a cancel was submitted for the target
+				// turn, or as a NO-OP when there was no target turn to cancel.
+				// Both are resolutions, so waiting on Preempted instead blocks
+				// forever whenever the request resolved without contributing.
 				//
-				// If the channel never closes, this blocks and the package timeout
-				// ends the run. That costs a slow failure and buys a goroutine dump
-				// naming the hand-off nothing arrived from, which a timer cannot
-				// say.
-				<-tc.Preempted
-				tr.add(layerControl, "preempt:contributed", "Preempted channel closed at safe point")
+				// A clock cannot stand in for either: it measures machine load, and
+				// it cannot tell "not yet" from "never".
+				if resolved := pt.requestResolved(); resolved != nil {
+					<-resolved
+				}
+				select {
+				case <-tc.Preempted:
+					tr.add(layerControl, "preempt:contributed", "Preempted closed at safe point")
+				default:
+					tr.add(layerControl, "preempt:noop", "request resolved without contributing")
+				}
 			} else {
 				select {
 				case <-tc.Preempted:
