@@ -947,3 +947,56 @@ func (c *cutOffStreamModel) Stream(context.Context, ai.Request) (<-chan ai.Strea
 	}()
 	return out, nil
 }
+
+// refusesAssistantWrites accepts everything except the assistant's reply.
+type refusesAssistantWrites struct{ inner session.MemoryStore }
+
+func (r *refusesAssistantWrites) Append(ctx context.Context, entries ...session.Entry) error {
+	for _, e := range entries {
+		if e.Message != nil && e.Message.Role == ai.RoleAssistant {
+			return errors.New("store unavailable")
+		}
+	}
+	return r.inner.Append(ctx, entries...)
+}
+
+func (r *refusesAssistantWrites) Load(ctx context.Context) ([]session.Entry, error) {
+	return r.inner.Load(ctx)
+}
+
+// TestToolsDoNotRunWhenTheReplyCouldNotBeRecorded pins the order of those two
+// acts.
+//
+// The reply is recorded before it is acted on. If the record fails and the tools
+// run anyway, the transcript holds results for a request it does not contain —
+// and a restart reads a conversation where work happened for no reason anyone
+// can see.
+func TestToolsDoNotRunWhenTheReplyCouldNotBeRecorded(t *testing.T) {
+	registry := tools.NewRegistry()
+	writer := &countingWriteTool{}
+	registry.MustRegister(writer)
+
+	agent, err := runtime.New(runtime.Config{
+		Model:     &streamOnlyWriteModel{},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   session.WithStore("You are pi-go.", &refusesAssistantWrites{}),
+		Policy:    runtime.AllowAll,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "delete it"); err == nil {
+		t.Fatal("a run whose reply could not be recorded reported success")
+	}
+
+	if writer.runs != 0 {
+		t.Errorf("the tool ran %d times although the reply asking for it was never "+
+			"recorded: the transcript would hold a result for a request it does "+
+			"not contain", writer.runs)
+	}
+}

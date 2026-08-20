@@ -89,10 +89,31 @@ func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 	sr, sw := schema.Pipe[*schema.Message](streamBuffer)
 	go func() {
 		defer sw.Close()
+
+		// Tool calls are HELD until the reply ends.
+		//
+		// Today the framework concatenates a whole stream before acting, so
+		// sending them earlier changes nothing observable and no test here fails
+		// if this is removed. It is kept because the guarantee the runtime needs
+		// — that the round is opened before anything runs — would then rest on
+		// that framework behaviour rather than on anything stated, and this
+		// package exists to avoid depending on eino in ways it has not promised.
+		var calls []schema.ToolCall
+
 		for event := range events {
+			if event.Kind == ai.StreamToolCallEnd {
+				calls = append(calls, schema.ToolCall{
+					ID:       event.Call.ID,
+					Function: schema.FunctionCall{Name: event.Call.Name, Arguments: event.Call.Args},
+				})
+				continue
+			}
 			chunk, send := einoChunk(event)
 			if !send {
 				continue
+			}
+			if event.Terminal() && len(calls) > 0 {
+				chunk.ToolCalls = calls
 			}
 			if closed := sw.Send(chunk, einoTerminalError(event)); closed {
 				return
@@ -120,15 +141,9 @@ func einoChunk(e ai.StreamEvent) (*schema.Message, bool) {
 		return &schema.Message{Role: schema.Assistant, Content: e.Delta}, true
 	case ai.StreamThinkingDelta:
 		return &schema.Message{Role: schema.Assistant, ReasoningContent: e.Delta}, true
-	case ai.StreamToolCallEnd:
-		return &schema.Message{
-			Role: schema.Assistant,
-			ToolCalls: []schema.ToolCall{{
-				ID:       e.Call.ID,
-				Function: schema.FunctionCall{Name: e.Call.Name, Arguments: e.Call.Args},
-			}},
-		}, true
-	case ai.StreamError:
+	case ai.StreamDone, ai.StreamError:
+		// Carries no content of its own; it is the vehicle for the tool calls
+		// held back until the reply was complete, and for the failure.
 		return &schema.Message{Role: schema.Assistant}, true
 	default:
 		return nil, false

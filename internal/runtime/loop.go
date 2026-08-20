@@ -900,6 +900,24 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 			}
 
 			o.publishReply(ctx, event)
+			if event.Terminal() {
+				// Recorded BEFORE the ending crosses: the framework acts on the
+				// calls the ending carries, and it must not act before the round
+				// that governs them has been opened.
+				//
+				// If the record failed, the ending crosses as a FAILURE. Passing
+				// it on as a success would have the framework run calls from a
+				// reply history does not contain, leaving results for a request
+				// nothing asked.
+				if err := o.observeTerminal(ctx, event, requested); err != nil {
+					if o.batch != nil {
+						o.batch.recordStreamFailure(err)
+					}
+					event = unrecordable(event, err)
+				}
+				forward(ctx, out, event)
+				return
+			}
 			if !forward(ctx, out, event) {
 				// Nobody is reading any more. The reply still has an ending, and
 				// an observer that never receives one waits for an end that is
@@ -909,9 +927,6 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 				return
 			}
 			switch {
-			case event.Terminal():
-				o.recordTerminal(ctx, event, requested)
-				return
 			case event.Kind != ai.StreamStart:
 				delivered = true
 			}
@@ -1184,4 +1199,19 @@ func (o *observingPort) drainToEnd(ctx context.Context, in <-chan ai.StreamEvent
 		o.recordTerminal(ctx, event, requested)
 		return
 	}
+}
+
+// unrecordable turns a reply that could not be written into a failed one.
+//
+// The content is kept: it did arrive, and an observer that watched it appear
+// should not see it vanish. What changes is the ending, because a reply the
+// record does not hold cannot be acted on.
+func unrecordable(event ai.StreamEvent, cause error) ai.StreamEvent {
+	failed := *event.Final
+	failed.StopReason = ai.StopError
+	failed.ErrorMessage = cause.Error()
+	failed.Cause = cause
+	event.Kind = ai.StreamError
+	event.Final = &failed
+	return event
 }
