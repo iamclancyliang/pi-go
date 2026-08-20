@@ -350,3 +350,279 @@ func (m *streamOnlyToolModel) Stream(_ context.Context, req ai.Request) (<-chan 
 	}()
 	return out, nil
 }
+
+// recordingConsumer keeps every event a renderer would see.
+type recordingConsumer struct {
+	mu   sync.Mutex
+	seen []ai.StreamEvent
+}
+
+func (c *recordingConsumer) Reply(event ai.StreamEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seen = append(c.seen, event)
+}
+
+func (c *recordingConsumer) events() []ai.StreamEvent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]ai.StreamEvent(nil), c.seen...)
+}
+
+// TestAConsumerSeesBlocksTheFrameworkCannotKeep pins that the reply surface
+// carries what pi-go produced, not what the framework could represent.
+//
+// Two adjacent text blocks are the case that separates them: the framework joins
+// all text into one string with no boundary, so a reply routed back from its view
+// arrives as one block. Anything that reconstructs the consumer's events from the
+// framework fails here, and only here — every other assertion looks identical.
+func TestAConsumerSeesBlocksTheFrameworkCannotKeep(t *testing.T) {
+	consumer := &recordingConsumer{}
+	model := &streamOnlyModel{blocks: []ai.Chunk{
+		{Index: 0, Kind: ai.BlockText, Delta: "first"},
+		{Index: 1, Kind: ai.BlockText, Delta: "second"},
+	}}
+
+	agent, err := runtime.New(runtime.Config{
+		Model:          model,
+		ModelName:      "fake-1",
+		Tools:          tools.NewRegistry(),
+		Session:        session.New("You are pi-go."),
+		Policy:         runtime.DenyWrites,
+		Observers:      []events.Observer{runtime.NewRecorder()},
+		ReplyObservers: []runtime.ReplyObserver{consumer},
+		Now:            fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "ask something"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var final *ai.AssistantMessage
+	terminals := 0
+	for _, event := range consumer.events() {
+		if event.Terminal() {
+			terminals++
+			final = event.Final
+		}
+	}
+
+	if terminals != 1 {
+		t.Fatalf("terminals seen = %d, want exactly 1", terminals)
+	}
+	if final == nil || len(final.Blocks) != 2 {
+		t.Fatalf("consumer saw %d blocks, want 2: the reply reached it through the "+
+			"framework's flattening, where adjacent text has no boundary", len(final.Blocks))
+	}
+	if final.Blocks[0].Text != "first" || final.Blocks[1].Text != "second" {
+		t.Errorf("blocks = %q / %q, want %q / %q", final.Blocks[0].Text,
+			final.Blocks[1].Text, "first", "second")
+	}
+}
+
+// TestAStreamedCallTheePolicyRefusesDoesNotRun pins that a streamed call is
+// checked before it can act.
+//
+// A refused call that runs anyway looks identical in the event stream to one that
+// was allowed: the difference is only visible in whether the tool did its work.
+func TestAStreamedCallThePolicyRefusesDoesNotRun(t *testing.T) {
+	registry := tools.NewRegistry()
+	writer := &countingWriteTool{}
+	registry.MustRegister(writer)
+
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model:     &streamOnlyWriteModel{},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "delete it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if writer.runs != 0 {
+		t.Errorf("the tool ran %d times despite the policy refusing it: arriving in "+
+			"pieces exempted it from the check", writer.runs)
+	}
+	if !carries(sess.Truth(), "denied") {
+		t.Error("the model was not told the call was refused, so it will ask again")
+	}
+}
+
+type countingWriteTool struct{ runs int }
+
+func (c *countingWriteTool) Name() string               { return "delete_files" }
+func (c *countingWriteTool) Description() string        { return "test tool" }
+func (c *countingWriteTool) Execution() tools.Execution { return tools.Execution{} }
+func (c *countingWriteTool) Call(context.Context, string) (tools.Result, error) {
+	c.runs++
+	return tools.Result{Content: "deleted"}, nil
+}
+
+// streamOnlyWriteModel streams a call the policy will refuse.
+type streamOnlyWriteModel struct{}
+
+func (streamOnlyWriteModel) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (streamOnlyWriteModel) Stream(_ context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
+	settled := false
+	for _, msg := range req.Messages {
+		if msg.Role == ai.RoleTool {
+			settled = true
+		}
+	}
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+		chunk := ai.Chunk{Index: 0, Kind: ai.BlockText, Delta: "understood"}
+		if !settled {
+			chunk = ai.Chunk{
+				Index: 0, Kind: ai.BlockToolCall,
+				Call:  ai.ToolCall{ID: "call-1", Name: "delete_files"},
+				Delta: `{}`,
+			}
+		}
+		events, err := acc.Push(chunk)
+		if err != nil {
+			return
+		}
+		for _, e := range events {
+			out <- e
+		}
+		if e, err := acc.Close(0); err == nil {
+			out <- e
+		}
+		if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
+
+// TestStreamedCallsKeepTheOrderTheModelAskedFor pins source order through the
+// streaming path.
+//
+// Source order is not recoverable later: once the round starts, the only order
+// anything can observe is the order the calls happened to finish. A streamed
+// reply carries its calls in the order the blocks arrived, and that is the order
+// the round must open in.
+func TestStreamedCallsKeepTheOrderTheModelAskedFor(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.MustRegister(&timedTool{name: "slow_tool", delay: 40 * time.Millisecond})
+	registry.MustRegister(&timedTool{name: "fast_tool", delay: time.Millisecond})
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     &streamOnlyTwoCallModel{},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "do both"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The slow call was asked for first, so its result comes first even though it
+	// finished last.
+	results := idsOf(rec, events.KindToolResult)
+	if !equal(results, []string{"call-slow", "call-fast"}) {
+		t.Errorf("results = %v, want [call-slow call-fast]: the round opened in "+
+			"completion order rather than the order the model asked", results)
+	}
+}
+
+// streamOnlyTwoCallModel streams two calls, slow first.
+type streamOnlyTwoCallModel struct{}
+
+func (streamOnlyTwoCallModel) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (streamOnlyTwoCallModel) Stream(_ context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
+	settled := false
+	for _, msg := range req.Messages {
+		if msg.Role == ai.RoleTool {
+			settled = true
+		}
+	}
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+
+		if settled {
+			if evs, err := acc.Push(ai.Chunk{Index: 0, Kind: ai.BlockText, Delta: "both done"}); err == nil {
+				for _, e := range evs {
+					out <- e
+				}
+			}
+			if e, err := acc.Close(0); err == nil {
+				out <- e
+			}
+			if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+				out <- e
+			}
+			return
+		}
+
+		calls := []ai.Chunk{
+			{Index: 0, Kind: ai.BlockToolCall, Call: ai.ToolCall{ID: "call-slow", Name: "slow_tool"}, Delta: `{}`},
+			{Index: 1, Kind: ai.BlockToolCall, Call: ai.ToolCall{ID: "call-fast", Name: "fast_tool"}, Delta: `{}`},
+		}
+		for i, c := range calls {
+			if i > 0 {
+				if e, err := acc.Close(i - 1); err == nil {
+					out <- e
+				}
+			}
+			evs, err := acc.Push(c)
+			if err != nil {
+				return
+			}
+			for _, e := range evs {
+				out <- e
+			}
+		}
+		if e, err := acc.Close(len(calls) - 1); err == nil {
+			out <- e
+		}
+		if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
