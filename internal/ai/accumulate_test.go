@@ -190,3 +190,130 @@ func TestAnOpenBlockIsNotClosedForYou(t *testing.T) {
 		t.Errorf("the terminal carried block content %q, inventing an end", event.Content)
 	}
 }
+
+// TestAToolCallAccumulatesItsArguments pins the third block kind.
+//
+// A tool call's arguments arrive in fragments like any other content, but they
+// are not text: they belong to the call, and a consumer reading the block's text
+// would find nothing. The completed call is carried on the end event, because
+// that is the first moment its arguments are whole enough to act on.
+func TestAToolCallAccumulatesItsArguments(t *testing.T) {
+	acc := NewAccumulator("fake-1")
+	if _, err := acc.Begin(); err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+
+	opening := ToolCall{ID: "call-1", Name: "read_files"}
+	if _, err := acc.Push(Chunk{Index: 0, Kind: BlockToolCall, Call: opening, Delta: `{"pa`}); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	events, err := acc.Push(Chunk{Index: 0, Kind: BlockToolCall, Delta: `th":"/tmp/x"}`})
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	last := events[len(events)-1]
+	if last.Kind != StreamToolCallDelta {
+		t.Fatalf("kind = %q, want %q", last.Kind, StreamToolCallDelta)
+	}
+	block := last.Partial.Blocks[0]
+	if block.Text != "" {
+		t.Errorf("tool call arguments landed in the block's text (%q)", block.Text)
+	}
+	if got := block.Call.Args; got != `{"pa` {
+		// The delta that just arrived is included, so the block holds both halves.
+		if got != `{"path":"/tmp/x"}` {
+			t.Errorf("arguments = %q, want the fragments joined", got)
+		}
+	}
+
+	end, err := acc.Close(0)
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if end.Kind != StreamToolCallEnd {
+		t.Fatalf("kind = %q, want %q", end.Kind, StreamToolCallEnd)
+	}
+	if end.Call.ID != "call-1" || end.Call.Name != "read_files" {
+		t.Errorf("call = %+v, want the identity it opened with", end.Call)
+	}
+	if end.Call.Args != `{"path":"/tmp/x"}` {
+		t.Errorf("call arguments = %q, want the fragments joined", end.Call.Args)
+	}
+	if end.Content != "" {
+		t.Errorf("a tool call reported text content %q", end.Content)
+	}
+}
+
+// TestAClosedBlockTakesNoMore pins that a finished block stays finished.
+//
+// Its end event already told a consumer what the block says. Appending after that
+// would leave the consumer holding a value the stream has since contradicted.
+func TestAClosedBlockTakesNoMore(t *testing.T) {
+	acc := NewAccumulator("fake-1")
+	if _, err := acc.Begin(); err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := acc.Push(Chunk{Index: 0, Kind: BlockText, Delta: "done"}); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if _, err := acc.Close(0); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := acc.Push(Chunk{Index: 0, Kind: BlockText, Delta: "more"}); !errors.Is(err, ErrBlockIdentity) {
+		t.Errorf("error = %v, want a refusal: the block was already reported closed", err)
+	}
+	if _, err := acc.Close(0); !errors.Is(err, ErrBlockIdentity) {
+		t.Errorf("closing twice = %v, want a refusal", err)
+	}
+}
+
+// TestAStreamEndsOnce pins that a finished stream cannot be reopened or ended
+// twice.
+//
+// A second terminal would give a consumer two different final answers for one
+// reply, and nothing in the protocol says which to believe.
+func TestAStreamEndsOnce(t *testing.T) {
+	t.Run("no second start", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Begin(); err == nil {
+			t.Error("a second start was allowed, so a consumer would see one reply begin twice")
+		}
+	})
+
+	t.Run("no terminal after done", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Done(StopEnd, Usage{}); err != nil {
+			t.Fatalf("Done: %v", err)
+		}
+		if _, err := acc.Done(StopEnd, Usage{}); err == nil {
+			t.Error("a second done was allowed")
+		}
+		if _, err := acc.Fail(StopError, errors.New("late")); err == nil {
+			t.Error("a failure after a successful end was allowed")
+		}
+	})
+
+	t.Run("no terminal after failure", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Fail(StopError, errors.New("first")); err != nil {
+			t.Fatalf("Fail: %v", err)
+		}
+		if _, err := acc.Fail(StopError, errors.New("second")); err == nil {
+			t.Error("a second failure was allowed")
+		}
+		if _, err := acc.Done(StopEnd, Usage{}); err == nil {
+			t.Error("a success after a failure was allowed")
+		}
+	})
+}
