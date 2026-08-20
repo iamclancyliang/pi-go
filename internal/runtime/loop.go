@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -852,17 +853,120 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 	out := make(chan ai.StreamEvent)
 	go func() {
 		defer close(out)
-		for event := range events0 {
-			// Forward first: an observer's bookkeeping must not delay the reply
-			// reaching whoever is rendering it.
-			out <- event
-			if !event.Terminal() {
-				continue
-			}
-			o.observeTerminal(event, requested)
-		}
+		o.pump(ctx, req, requested, events0, out, false)
 	}()
 	return out, nil
+}
+
+// pump forwards one attempt, and may replace it with a shortened retry.
+//
+// delivered says whether any content has already reached the consumer. It is the
+// whole reason recovery is conditional here: see the overflow branch.
+func (o *observingPort) pump(ctx context.Context, req ai.Request, requested string,
+	in <-chan ai.StreamEvent, out chan<- ai.StreamEvent, delivered bool) {
+
+	// Iterative rather than recursive. A retry replaces the attempt rather than
+	// nesting inside it, so the recovery budget is what limits attempts and
+	// nothing depends on stack depth to stop.
+	for {
+		var retried <-chan ai.StreamEvent
+
+		for event := range in {
+			if event.Kind == ai.StreamError && event.Final != nil &&
+				o.isOverflow(event.Final.ErrorMessage) {
+
+				// RECOVERY IS ONLY SAFE BEFORE ANYTHING WAS SHOWN.
+				//
+				// A retry is a second attempt at the same reply. If the first
+				// attempt already delivered blocks, the consumer has them, and
+				// the retry's blocks would arrive after them as though one reply
+				// had said both things. The whole-answer path never has to
+				// decide this, because nothing is visible until it is complete.
+				if !delivered {
+					if next, ok := o.retryStream(ctx, req, requested, event); ok {
+						retried = next
+						break
+					}
+				}
+				out <- event
+				o.observeTerminal(event, requested)
+				return
+			}
+
+			out <- event
+			switch {
+			case event.Terminal():
+				o.observeTerminal(event, requested)
+				return
+			case event.Kind != ai.StreamStart:
+				delivered = true
+			}
+		}
+
+		if retried == nil {
+			return
+		}
+		in, delivered = retried, false
+	}
+}
+
+// isOverflow reports whether a terminal error was the provider refusing the
+// request for size.
+//
+// Matched on the recorded text because the event carries a message rather than an
+// error value: the reply crossed a channel, and an error does not survive that as
+// a comparable value.
+func (o *observingPort) isOverflow(message string) bool {
+	return message != "" && strings.Contains(message, ai.ErrContextOverflow.Error())
+}
+
+// retryStream spends the recovery budget and opens a shortened attempt.
+//
+// It reports false when there is nothing left to spend, having already recorded
+// the terminal failure — so the caller forwards the original error rather than
+// inventing a different one.
+func (o *observingPort) retryStream(ctx context.Context, req ai.Request, requested string,
+	failed ai.StreamEvent) (<-chan ai.StreamEvent, bool) {
+
+	spent := ai.Usage{}
+	if failed.Final != nil {
+		spent = failed.Final.Usage
+	}
+	if err := o.session.RecordOverflowAttempt(failed.Final.ErrorMessage, spent); err != nil {
+		return nil, false
+	}
+	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
+		detail := "recovery already spent"
+		if o.summarize == nil {
+			detail = "no way to shorten the context"
+		}
+		_ = o.session.Fail(CodeContextOverflow, detail)
+		return nil, false
+	}
+
+	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	if err != nil {
+		return nil, false
+	}
+	if err := o.session.Compact(summary, retained); err != nil {
+		return nil, false
+	}
+
+	streaming, ok := o.inner.(ai.StreamingPort)
+	if !ok {
+		return nil, false
+	}
+	retry := req
+	retry.Messages = o.session.Project().Messages
+	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+		e.Detail.MessageCount = len(retry.Messages)
+		e.Detail.Model = requested
+	})
+	events1, err := streaming.Stream(ctx, retry)
+	if err != nil {
+		return nil, false
+	}
+	return events1, true
 }
 
 // errStreamUnsupported reports that the provider behind this port answers only in
