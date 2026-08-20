@@ -391,8 +391,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// truncates at a safe point and starts a new execution,
 			// so continuity has to come from truth we hold.
 			proj := a.cfg.Session.Project()
+			_, streams := a.cfg.Model.(ai.StreamingPort)
 			return &adk.GenInputResult[*schema.Message, *schema.Message]{
-				Input: &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				Input: &adk.TypedAgentInput[*schema.Message]{
+					Messages: toEinoMessages(proj.Messages),
+					// Asked for only when the provider can actually do it. A
+					// runtime that requests streaming from a model that answers
+					// in one piece gets one chunk and learns nothing, while one
+					// that never requests it leaves the whole path unreachable.
+					EnableStreaming: streams,
+				},
 				RunOpts: []adk.AgentRunOption{
 					// Fires after a round of tool calls completes and BEFORE
 					// the next model call. That is the only point where a
@@ -889,14 +897,14 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 					}
 				}
 				out <- event
-				o.observeTerminal(event, requested)
+				o.recordTerminal(ctx, event, requested)
 				return
 			}
 
 			out <- event
 			switch {
 			case event.Terminal():
-				o.observeTerminal(event, requested)
+				o.recordTerminal(ctx, event, requested)
 				return
 			case event.Kind != ai.StreamStart:
 				delivered = true
@@ -979,10 +987,10 @@ var errStreamUnsupported = errors.New("runtime: this model does not stream")
 // protocol, carried on the model port for whoever renders it; this stream
 // describes the run, and folding thousands of deltas into it would drown the
 // events a client watches for.
-func (o *observingPort) observeTerminal(event ai.StreamEvent, requested string) {
+func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEvent, requested string) error {
 	final := event.Final
 	if final == nil {
-		return
+		return nil
 	}
 
 	// eino executes a model swap but never interprets it, so a reply served by a
@@ -994,11 +1002,72 @@ func (o *observingPort) observeTerminal(event ai.StreamEvent, requested string) 
 		})
 	}
 
+	text, calls := flatten(final)
+	ids := make([]string, 0, len(calls))
+	for _, c := range calls {
+		ids = append(ids, c.ID)
+	}
 	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 		e.Detail.Model = requested
-		e.Detail.MessageCount = len(final.Blocks)
+		e.Detail.Text = text
+		e.Detail.ToolCallIDs = ids
 		if event.Kind == ai.StreamError {
 			e.Detail.Err = final.ErrorMessage
 		}
 	})
+
+	// A FAILED reply is not recorded. Nothing acts on it, and writing a reply
+	// the model did not finish would leave history asserting something was said.
+	if event.Kind != ai.StreamDone {
+		return nil
+	}
+
+	// Recorded before it is acted on, exactly as a whole answer is: tool calls
+	// that follow must not refer to a request history does not contain.
+	if err := o.session.Append(ai.Message{
+		Role:      ai.RoleAssistant,
+		Content:   text,
+		ToolCalls: calls,
+	}); err != nil {
+		return err
+	}
+
+	// The round opens here, in the order the model asked for the calls. A
+	// streamed reply has no different claim on that ordering than any other.
+	if len(calls) > 0 && o.batch != nil {
+		o.batch.register(ctx, calls, o.sequentialFor, false)
+	}
+	return nil
+}
+
+// flatten reduces a streamed reply to what history keeps.
+//
+// History has no use for block boundaries — it records what was said, and the
+// block structure belongs to the reply as it arrived. Text blocks are joined in
+// order; thinking is left out, because it is the model reasoning rather than
+// something it said.
+func flatten(m *ai.AssistantMessage) (string, []ai.ToolCall) {
+	var text string
+	var calls []ai.ToolCall
+	for _, block := range m.Blocks {
+		switch block.Kind {
+		case ai.BlockText:
+			text += block.Text
+		case ai.BlockToolCall:
+			calls = append(calls, block.Call)
+		}
+	}
+	return text, calls
+}
+
+// recordTerminal publishes and records a finished stream, keeping any failure.
+//
+// The failure is carried to the turn rather than returned here: this runs on the
+// forwarding goroutine, which has no caller to return to, and a reply that could
+// not be recorded must end the turn rather than let the round proceed on a
+// history that is missing it.
+func (o *observingPort) recordTerminal(ctx context.Context, event ai.StreamEvent, requested string) {
+	if err := o.observeTerminal(ctx, event, requested); err != nil && o.batch != nil {
+		o.batch.recordStreamFailure(err)
+	}
 }
