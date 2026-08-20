@@ -49,10 +49,11 @@ func TestA4TruncatedMessageRunsNoToolCalls(t *testing.T) {
 	}
 }
 
-// TestA4UntruncatedMessageStillRuns is the control.
+// TestA4UntruncatedMessageStillRuns pins the other direction.
 //
-// Without it the test above passes against a runtime that never runs any tool at
-// all, which is the failure it is supposed to distinguish from correct refusal.
+// The same calls, carried by a message that was not cut short, all run. A runtime
+// that never ran any tool would also refuse the truncated ones, and only this
+// separates refusing because the message was cut from refusing everything.
 func TestA4UntruncatedMessageStillRuns(t *testing.T) {
 	counted := &countingTool{timedTool: timedTool{name: "counted_tool", delay: time.Millisecond}}
 	registry := tools.NewRegistry()

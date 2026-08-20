@@ -114,10 +114,11 @@ func TestA8AbortLeavesToolCallsWithoutResults(t *testing.T) {
 	}
 }
 
-// TestA8ControlCompletedRoundHasNoUnmatched is the paired control.
+// TestA8ControlCompletedRoundHasNoUnmatched pins the other direction.
 //
-// Without it the assertions above pass against a runtime that never pairs calls
-// with results at all, which is a different defect wearing the same shape.
+// A round that finished leaves NOTHING unmatched: every call it announced has a
+// result. A runtime that never paired calls with results at all would also leave
+// ids unmatched after an abort, and only this says the two are different states.
 func TestA8ControlCompletedRoundHasNoUnmatched(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.MustRegister(&timedTool{name: "quick_tool", delay: time.Millisecond})

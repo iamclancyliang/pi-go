@@ -111,10 +111,11 @@ func TestA9NextTurnMayChangeTheModel(t *testing.T) {
 	}
 }
 
-// TestA9NoHookNoChange is the control.
+// TestA9NoHookNoChange pins the quiet case.
 //
-// Without it the assertions above pass against a runtime that announces a change
-// on every turn, or that reports one it never made.
+// With nothing selecting a model per turn, the model never changes and no change
+// is reported. A runtime that announced one every turn, or reported a switch it
+// never made, would be indistinguishable from a working one without this.
 func TestA9NoHookNoChange(t *testing.T) {
 	model := &ai.Scripted{
 		Name:    "fast-model",
@@ -157,4 +158,154 @@ func TestA9NoHookNoChange(t *testing.T) {
 			t.Errorf("request %d used %q with no hook, want fast-model", index, req.Model)
 		}
 	}
+}
+
+// TestA9AProviderThatServesADifferentModelIsReported pins the case where the
+// answer did not come from the model that was asked for.
+//
+// Nothing else can report it. The framework carries the request and the response
+// without comparing them, and the provider is under no obligation to refuse: it
+// may answer with whatever it actually ran. A caller billing per model, or
+// reading a transcript to see what produced an answer, has only this event to go
+// on — so an unreported substitution reads as though the requested model replied.
+func TestA9AProviderThatServesADifferentModelIsReported(t *testing.T) {
+	substituting := &servingModel{name: "fake-1", serves: "fallback-9"}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     substituting,
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var changes []events.Event
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindModelChanged {
+			changes = append(changes, e)
+		}
+	}
+	if len(changes) != 1 {
+		t.Fatalf("model_changed events = %d, want 1: a substitution nobody reports "+
+			"reads as the requested model having answered", len(changes))
+	}
+	if changes[0].Detail.From != "fake-1" || changes[0].Detail.To != "fallback-9" {
+		t.Errorf("model_changed = %q -> %q, want %q -> %q: the event has to name both "+
+			"ends or it cannot say what was substituted for what",
+			changes[0].Detail.From, changes[0].Detail.To, "fake-1", "fallback-9")
+	}
+}
+
+// TestA9AProviderThatServesWhatWasAskedIsSilent pins the other direction.
+//
+// When the model that served the call is the one that was asked for, nothing was
+// substituted and no change is reported. A runtime that announces one on every
+// call would write substitutions into the event stream that never happened.
+func TestA9AProviderThatServesWhatWasAskedIsSilent(t *testing.T) {
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     &servingModel{name: "fake-1", serves: "fake-1"},
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindModelChanged {
+			t.Errorf("a call served by the model that was asked for reported a "+
+				"change %q -> %q", e.Detail.From, e.Detail.To)
+		}
+	}
+}
+
+// servingModel answers, and says which model actually served the call.
+type servingModel struct {
+	name   string
+	serves string
+}
+
+func (s *servingModel) Generate(_ context.Context, _ ai.Request) (ai.Response, error) {
+	return ai.Response{Content: "answered", Model: s.serves}, nil
+}
+
+// TestA9ReselectingTheCurrentModelIsNotAChange pins that a change means a
+// difference.
+//
+// A hook that pins the model every turn is asking for the same thing each time.
+// Reporting that as a change on every turn would fill the stream with events that
+// describe nothing happening, and a consumer counting them would see a run
+// switching models constantly while it never switched at all.
+func TestA9ReselectingTheCurrentModelIsNotAChange(t *testing.T) {
+	turns := 0
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model: &ai.Scripted{
+			Name: "pinned-model",
+			Replies: []ai.Response{ai.AssistantToolCalls(
+				ai.ToolCall{ID: "call-1", Name: "quick_tool", Args: `{}`},
+			)},
+			StopWhenToolsSettled: true,
+			Final:                ai.AssistantText("done"),
+		},
+		ModelName: "pinned-model",
+		Tools:     registryWith(&timedTool{name: "quick_tool", delay: time.Millisecond}),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+		// Asks for the model already in use, every turn.
+		PrepareNextTurn: func(context.Context) runtime.NextTurn {
+			turns++
+			return runtime.NextTurn{ModelName: "pinned-model"}
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if turns == 0 {
+		t.Fatal("the hook was never asked, so this test says nothing about what it " +
+			"returned")
+	}
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindModelChanged {
+			t.Errorf("re-selecting the model already in use reported a change %q -> %q",
+				e.Detail.From, e.Detail.To)
+		}
+	}
+}
+
+// registryWith is a registry holding exactly the given tools.
+func registryWith(ts ...tools.Tool) *tools.Registry {
+	r := tools.NewRegistry()
+	for _, t := range ts {
+		r.MustRegister(t)
+	}
+	return r
 }
