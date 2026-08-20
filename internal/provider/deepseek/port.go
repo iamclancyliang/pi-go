@@ -192,7 +192,15 @@ func (p *Port) buildRequest(req ai.Request, stream bool, maxTokens int) wireRequ
 		}{IncludeUsage: true}
 	}
 	for _, m := range req.Messages {
-		wm := wireMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}
+		// This provider requires an assistant's reasoning to come back with the
+		// next request. A history that carried it but did not resend it would
+		// look complete and still break the conversation.
+		wm := wireMessage{
+			Role:             string(m.Role),
+			Content:          m.Content,
+			ReasoningContent: m.Reasoning,
+			ToolCallID:       m.ToolCallID,
+		}
 		for i, c := range m.ToolCalls {
 			wc := wireCall{ID: c.ID, Type: "function", Index: i}
 			wc.Function.Name = c.Name

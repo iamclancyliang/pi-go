@@ -179,6 +179,7 @@ func fromEinoMessages(in []*schema.Message) []ai.Message {
 		msg := ai.Message{
 			Role:       fromEinoRole(m.Role),
 			Content:    m.Content,
+			Reasoning:  m.ReasoningContent,
 			ToolCallID: m.ToolCallID,
 		}
 		for _, tc := range m.ToolCalls {
@@ -204,10 +205,16 @@ func toEinoMessage(r ai.Response) *schema.Message {
 			},
 		})
 	}
-	if len(calls) == 0 {
-		return schema.AssistantMessage(r.Content, nil)
+	// Reasoning travels with the message it belongs to. A provider that requires
+	// it back on the next request gets a conversation it cannot continue if this
+	// round trip drops it — and dropping it is silent, because the reply itself
+	// still looks complete.
+	msg := schema.AssistantMessage(r.Content, nil)
+	if len(calls) > 0 {
+		msg = schema.AssistantMessage(r.Content, calls)
 	}
-	return schema.AssistantMessage(r.Content, calls)
+	msg.ReasoningContent = r.Reasoning
+	return msg
 }
 
 func fromEinoRole(r schema.RoleType) ai.Role {

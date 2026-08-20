@@ -763,6 +763,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   resp.Content,
+		Reasoning: resp.Reasoning,
 		ToolCalls: resp.ToolCalls,
 	}); err != nil {
 		return ai.Response{}, err
@@ -1068,7 +1069,7 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 		})
 	}
 
-	text, calls := flatten(final)
+	text, reasoning, calls := flatten(final)
 	ids := make([]string, 0, len(calls))
 	for _, c := range calls {
 		ids = append(ids, c.ID)
@@ -1093,6 +1094,7 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   text,
+		Reasoning: reasoning,
 		ToolCalls: calls,
 	}); err != nil {
 		return err
@@ -1117,18 +1119,23 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 // block structure belongs to the reply as it arrived. Text blocks are joined in
 // order; thinking is left out, because it is the model reasoning rather than
 // something it said.
-func flatten(m *ai.AssistantMessage) (string, []ai.ToolCall) {
-	var text string
+func flatten(m *ai.AssistantMessage) (string, string, []ai.ToolCall) {
+	var text, reasoning string
 	var calls []ai.ToolCall
 	for _, block := range m.Blocks {
 		switch block.Kind {
 		case ai.BlockText:
 			text += block.Text
+		case ai.BlockThinking:
+			// Kept, not merged: some providers require it back on the next
+			// request, and dropping it here would silently end the
+			// conversation's ability to continue.
+			reasoning += block.Text
 		case ai.BlockToolCall:
 			calls = append(calls, block.Call)
 		}
 	}
-	return text, calls
+	return text, reasoning, calls
 }
 
 // recordTerminal publishes and records a finished stream, keeping any failure.

@@ -37,20 +37,24 @@ func (p *Port) Generate(ctx context.Context, req ai.Request) (ai.Response, error
 		return ai.Response{}, final.Cause
 	}
 
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	var calls []ai.ToolCall
 	for _, b := range final.Blocks {
 		switch b.Kind {
 		case ai.BlockText:
 			text.WriteString(b.Text)
+		case ai.BlockThinking:
+			// Kept apart from Content — it is what the model worked through,
+			// not what it said — but kept, because this provider requires it
+			// back on the next request.
+			reasoning.WriteString(b.Text)
 		case ai.BlockToolCall:
 			calls = append(calls, b.Call)
 		}
-		// Thinking is deliberately not folded into Content: it is what the
-		// model worked through, not what it said.
 	}
 	return ai.Response{
 		Content:   text.String(),
+		Reasoning: reasoning.String(),
 		ToolCalls: calls,
 		Model:     final.Model,
 		Usage:     final.Usage,

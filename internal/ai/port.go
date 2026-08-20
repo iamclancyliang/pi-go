@@ -43,6 +43,16 @@ type Message struct {
 
 	// ToolCallID is set on tool messages, pairing back to the ToolCall.
 	ToolCallID string
+
+	// Reasoning is what an assistant worked through before answering, when the
+	// provider reports it separately from the answer.
+	//
+	// Kept apart from Content because they are different things: Content is
+	// what was said, and a renderer showing reasoning as the answer would be
+	// quoting the model's notes. It is kept AT ALL because some providers
+	// require the reasoning of earlier turns to be sent back with the next
+	// request, and a history that dropped it cannot continue that conversation.
+	Reasoning string
 }
 
 // ToolSpec describes a tool to the model. It is deliberately a copy of the
@@ -74,6 +84,11 @@ type Request struct {
 type Response struct {
 	Content   string
 	ToolCalls []ToolCall
+
+	// Reasoning is what the model worked through, when the provider reports it
+	// apart from the answer. It is not part of Content: a caller showing it as
+	// the answer would be quoting the model's notes rather than its reply.
+	Reasoning string
 
 	// Model is the model that actually served the request, which is not
 	// necessarily Request.Model — a middleware may substitute it. Reporting

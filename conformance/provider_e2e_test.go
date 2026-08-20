@@ -27,11 +27,13 @@ import (
 type scriptedTransport struct {
 	requests int
 	replies  []string
+	sent     []string
 }
 
 func (s *scriptedTransport) Do(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
-		_, _ = io.Copy(io.Discard, req.Body)
+		body, _ := io.ReadAll(req.Body)
+		s.sent = append(s.sent, string(body))
 	}
 	if s.requests >= len(s.replies) {
 		return nil, fmt.Errorf("the runtime asked for reply %d; only %d were scripted",
@@ -192,5 +194,102 @@ func TestAProviderFailureStopsTheRun(t *testing.T) {
 	}
 	if transport.requests != 1 {
 		t.Fatalf("sent %d requests, want 1: an interruption is not retried", transport.requests)
+	}
+}
+
+// TestReasoningReturnsToTheProviderOnTheNextRound.
+//
+// This provider requires an assistant's reasoning to be sent back with the next
+// request. History that keeps it but never resends it looks complete and still
+// breaks the conversation, so the assertion is on the SECOND request's body —
+// the only place the difference is visible.
+func TestReasoningReturnsToTheProviderOnTheNextRound(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"reasoning_content":"weighing the options"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		),
+		sseReply(`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`),
+	}}
+	_, sess := runWithProvider(t, transport)
+
+	if transport.requests != 2 {
+		t.Fatalf("made %d requests, want 2", transport.requests)
+	}
+	second := transport.sent[1]
+	if !strings.Contains(second, "weighing the options") {
+		t.Fatalf("the second request did not carry the first round's reasoning:\n%s", second)
+	}
+	if !strings.Contains(second, `"reasoning_content"`) {
+		t.Fatalf("reasoning was resent under the wrong field:\n%s", second)
+	}
+
+	// It is kept apart from the answer in history, not merged into it.
+	var found bool
+	for _, m := range sess.Truth() {
+		if m.Role == ai.RoleAssistant && m.Reasoning != "" {
+			found = true
+			if strings.Contains(m.Content, "weighing the options") {
+				t.Fatalf("reasoning was merged into the answer: %q", m.Content)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no assistant message in history carried the reasoning")
+	}
+}
+
+// generateOnly hides the streaming half of a port.
+//
+// The runtime streams whenever a port can, so without this the collected path
+// is never driven through the agent — and a defect that lives only there is
+// invisible to every other test.
+type generateOnly struct{ inner ai.Port }
+
+func (g generateOnly) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
+	return g.inner.Generate(ctx, req)
+}
+
+// TestReasoningReturnsOnTheCollectedPathToo runs the same round trip without
+// streaming, because the two paths reach the framework by different code.
+func TestReasoningReturnsOnTheCollectedPathToo(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"reasoning_content":"deliberating"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		),
+		sseReply(`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`),
+	}}
+	streaming, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model:     generateOnly{inner: streaming},
+		ModelName: "deepseek-v4-flash",
+		Tools:     registry,
+		Session:   sess,
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if transport.requests != 2 {
+		t.Fatalf("made %d requests, want 2", transport.requests)
+	}
+	if !strings.Contains(transport.sent[1], "deliberating") {
+		t.Fatalf("the collected path lost the reasoning before the second request:\n%s", transport.sent[1])
 	}
 }
