@@ -97,11 +97,27 @@ type Response struct {
 
 // Port is the model boundary.
 //
-// Generate is non-streaming. v0 needs a deterministic vertical slice; pi's real
-// path is streaming and a Stream method lands with the contracts that require
-// it, so that streaming is verified rather than assumed to work.
+// Generate answers in one piece. It remains the whole contract for a caller that
+// only wants the answer, and it is what the deterministic tests are written
+// against.
 type Port interface {
 	Generate(ctx context.Context, req Request) (Response, error)
+}
+
+// StreamingPort is a Port that can also deliver a reply as it arrives.
+//
+// Separate from Port because not every provider streams, and a provider that
+// does not should say so by not implementing this rather than by emitting one
+// chunk and calling it a stream.
+//
+// The returned channel carries the event protocol and is closed after a terminal
+// event. Cancelling ctx does not abandon it: the stream ends with an error event
+// carrying what had already arrived, because a partial answer the caller watched
+// arrive should not vanish because they stopped it.
+type StreamingPort interface {
+	Port
+
+	Stream(ctx context.Context, req Request) (<-chan StreamEvent, error)
 }
 
 // Usage is what one model call consumed.
