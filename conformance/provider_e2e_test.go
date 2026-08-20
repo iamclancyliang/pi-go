@@ -340,3 +340,87 @@ func TestAnUnreportedFieldStaysUnreportedInTheTotal(t *testing.T) {
 		t.Fatalf("input total %d", total.InputTokens)
 	}
 }
+
+// TestReasoningSurvivesReopeningTheSession: reasoning that only lived in memory
+// would be lost on restart, and the conversation could not continue with a
+// provider that requires it back.
+func TestReasoningSurvivesReopeningTheSession(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"reasoning_content":"remembered"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}`,
+		),
+	}}
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+
+	store := &session.MemoryStore{}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.WithStore("You are pi-go.", store)
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Reopen from what was persisted, as a restart would.
+	reopened, err := session.Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	var found bool
+	for _, m := range reopened.Truth() {
+		if m.Role == ai.RoleAssistant && m.Reasoning == "remembered" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reasoning did not survive the reopen: %+v", reopened.Truth())
+	}
+}
+
+// TestAFailedCallStillLedgersWhatItUsed: a request the provider read is a
+// request the provider charged for, whether or not the reply was usable.
+func TestAFailedCallStillLedgersWhatItUsed(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"insufficient_system_resource"}],"usage":{"prompt_tokens":42,"completion_tokens":3}}`,
+		),
+	}}
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err == nil {
+		t.Fatal("an interrupted reply was reported as a successful run")
+	}
+
+	total := sess.Usage()
+	if total.InputTokens != 42 {
+		t.Fatalf("a failed call ledgered %d input tokens; the provider read 42",
+			total.InputTokens)
+	}
+}

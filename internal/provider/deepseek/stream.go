@@ -124,6 +124,15 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		if err != nil {
 			return
 		}
+		// A failure carries what the call had already used. The provider read
+		// the request whether or not it could answer it, so dropping the counts
+		// here would make failed calls look free.
+		if ev.Final != nil {
+			ev.Final.Usage = usage
+			if served != "" {
+				ev.Final.Model = served
+			}
+		}
 		send(ev)
 	}
 

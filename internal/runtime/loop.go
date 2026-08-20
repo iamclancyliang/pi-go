@@ -1087,13 +1087,16 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 		}
 	})
 
+	// Usage is recorded whether or not the reply is usable. A reply that failed
+	// partway still had its request read, and a ledger that dropped those
+	// tokens would be optimistic about exactly the calls that went wrong.
+	o.session.RecordUsage(final.Usage)
+
 	// A FAILED reply is not recorded. Nothing acts on it, and writing a reply
 	// the model did not finish would leave history asserting something was said.
 	if event.Kind != ai.StreamDone {
 		return nil
 	}
-
-	o.session.RecordUsage(final.Usage)
 
 	// Recorded before it is acted on, exactly as a whole answer is: tool calls
 	// that follow must not refer to a request history does not contain.
