@@ -987,6 +987,9 @@ func TestACancelledStreamStillEnds(t *testing.T) {
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// Released on every path, including the t.Fatal below: the mid-stream
+	// cancel this test performs is a separate act.
+	defer cancel()
 	events, err := p.Stream(ctx, ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
