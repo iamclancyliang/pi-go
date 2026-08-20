@@ -1,7 +1,6 @@
 package deepseek
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 )
@@ -134,7 +133,3 @@ func stopReason(raw string) (ok bool, truncated bool, failure Failure) {
 		return false, false, FailureUnknown
 	}
 }
-
-// ErrNotClassified guards the one place a failure could be built without a
-// classification.
-var ErrNotClassified = errors.New("deepseek: failure without a classification")

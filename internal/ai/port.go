@@ -81,8 +81,9 @@ type Response struct {
 	// assumed.
 	Model string
 
-	// Usage is what the provider says the call cost. Zero means the provider
-	// reported nothing, which is different from a call that cost nothing.
+	// Usage is the token counts the provider reported for this call. It is not
+	// a money figure: no provider here reports one, and any currency attached
+	// downstream is computed from published prices rather than stated.
 	Usage Usage
 
 	// Truncated reports that the model stopped because it ran out of room
@@ -135,8 +136,8 @@ type Usage struct {
 	// Zero is a real answer: a model that did no reasoning reports no reasoning
 	// tokens, and a request that missed the cache reports no cache reads.
 	// Collapsing "did none" into "did not say" leaves a ledger unable to tell a
-	// provider that reasons for free from one that does not say what it charged
-	// for. A pointer is the smallest thing that can hold that difference.
+	// provider that reasoned without billing tokens from one that never said how
+	// many it used. A pointer is the smallest thing that can hold that difference.
 	//
 	// ReasoningTokens is a SUBSET of OutputTokens, not an addition to it.
 	// Adding them double-counts.
@@ -144,12 +145,12 @@ type Usage struct {
 	ReasoningTokens *int
 
 	// Reported distinguishes a provider that said nothing about usage from one
-	// that reported a call costing nothing. Callers that record spend must not
-	// treat silence as free.
+	// that reported a call using no tokens. Callers that record consumption must
+	// not treat silence as nothing used.
 	Reported bool
 }
 
-// Total is the whole cost of the call.
+// Total is every token the call reported using.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
 
 // ErrContextOverflow reports that a request was refused for exceeding the

@@ -115,9 +115,14 @@ func TestAProviderReplyReachesTheRuntime(t *testing.T) {
 	}
 }
 
-// TestAProviderToolCallIsGovernedLikeAnyOther: arriving from a network buys no
-// exemption from the rules that already govern tool calls.
-func TestAProviderToolCallIsGovernedLikeAnyOther(t *testing.T) {
+// TestAProviderToolCallCompletesItsRoundTrip covers the path only: a call from
+// a real provider runs and its result reaches history paired to the call.
+//
+// It does NOT prove the full governance those calls are subject to — policy
+// refusal, source ordering and record-before-act are asserted elsewhere against
+// the runtime, and a title claiming them here would be describing coverage this
+// test does not have.
+func TestAProviderToolCallCompletesItsRoundTrip(t *testing.T) {
 	transport := &scriptedTransport{replies: []string{
 		sseReply(
 			`{"choices":[{"delta":{"tool_calls":[{"id":"tc1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}`,
@@ -159,6 +164,7 @@ func TestAProviderFailureStopsTheRun(t *testing.T) {
 	}}
 	port, err := deepseek.New(deepseek.Config{
 		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
 	})
 	if err != nil {
 		t.Fatalf("deepseek.New: %v", err)

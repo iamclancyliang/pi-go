@@ -1,9 +1,9 @@
 # Provider and credential contract
 
-**Status:** sections 1-13 state what holds. Each is established from source at the pin, except where
-a section marks a claim as a deliberate divergence or as not established. Section 14 states how each
-is checked. Section 15 states what this contract does not cover. No implementation exists against it
-yet.
+**Status:** implemented against, in `internal/provider/deepseek`. Sections 1-13 state what holds.
+Each is established from source at the pin, except where a section marks a claim as a deliberate
+divergence or as not established. Section 14 states how each is checked. Section 15 states what this
+contract does not cover.
 
 **Pi baseline:** [`086c32e74530564922d011ade23ff582c9d63116`](https://github.com/earendil-works/pi/commit/086c32e74530564922d011ade23ff582c9d63116)
 

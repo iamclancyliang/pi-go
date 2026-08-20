@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
@@ -18,8 +21,8 @@ const DefaultBaseURL = "https://api.deepseek.com"
 //
 // Injected, and there is no default: a caller supplies it, so a test cannot
 // reach the network by omission. It is also where requests are counted, which
-// is how the cost of a call is established by observation rather than by
-// reading configuration.
+// is how the number of requests a call makes is established by observation
+// rather than by reading configuration.
 type Transport interface {
 	Do(req *http.Request) (*http.Response, error)
 }
@@ -37,7 +40,8 @@ type Config struct {
 	// BaseURL defaults to DefaultBaseURL.
 	BaseURL string
 
-	// StoredKey, when set, wins over the environment.
+	// StoredKey, when set, wins over the environment. It is unexported once
+	// held, and never reaches a formatted value: see Port's String method.
 	StoredKey string
 
 	// MaxOutputTokens caps the reply. It reaches the wire as max_tokens, which
@@ -59,6 +63,15 @@ type Port struct {
 	cfg Config
 }
 
+// String and GoString keep the configured credential out of anything that
+// formats this value. A struct holding a secret will eventually be printed —
+// by a log line, a test failure, or %+v in someone's debugging — so the
+// protection belongs on the type rather than on everyone who touches it.
+func (p *Port) String() string {
+	return "deepseek.Port{Model:" + p.cfg.Model + ", BaseURL:" + p.cfg.BaseURL + "}"
+}
+func (p *Port) GoString() string { return p.String() }
+
 // New builds a Port, rejecting a configuration that could not work.
 //
 // The checks are here rather than at the first call because a missing transport
@@ -73,6 +86,11 @@ func New(cfg Config) (*Port, error) {
 	}
 	if cfg.Environment == nil {
 		return nil, fmt.Errorf("deepseek: an environment is required; there is no default")
+	}
+	if cfg.MaxOutputTokens <= 0 {
+		// A zero would be dropped by omitempty and the request would carry no
+		// cap at all. An uncapped reply is a bill nobody chose.
+		return nil, fmt.Errorf("deepseek: MaxOutputTokens must be positive, got %d", cfg.MaxOutputTokens)
 	}
 	if cfg.ContextWindow < 0 {
 		return nil, fmt.Errorf("deepseek: context window %d is negative", cfg.ContextWindow)
@@ -122,7 +140,7 @@ type wireRequest struct {
 	// reads. The modern OpenAI field is max_completion_tokens; sending that one
 	// here is not rejected loudly — whether it is ignored is not documented —
 	// so a cap sent under the wrong name may simply not exist.
-	MaxTokens int `json:"max_tokens,omitempty"`
+	MaxTokens int `json:"max_tokens"`
 
 	// StreamOptions asks for usage. Without it the reply is fine and the ledger
 	// is empty, so a spend check would compare against nothing.
@@ -194,17 +212,69 @@ func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, erro
 	httpReq.Header.Set("Authorization", "Bearer "+cred.Key())
 	resp, err := p.cfg.Transport.Do(httpReq)
 	if err != nil {
-		return nil, &Error{Failure: FailureTransient, Detail: err.Error()}
+		// Cancellation and a deadline are the caller's own outcomes, not the
+		// provider's. Rewriting them as a transient provider failure would tell
+		// a caller to retry the request it just cancelled, and would hide the
+		// cause from errors.Is.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, &Error{Failure: FailureTransient, Detail: scrub(err.Error(), cred.Key())}
 	}
 	return resp, nil
 }
 
 // failureFrom builds a classified error from a non-2xx response.
-func failureFrom(resp *http.Response) error {
-	detail, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+//
+// The body is NOT copied verbatim. A provider that echoes the request — or a
+// proxy that echoes headers — would put the credential into an error that a
+// caller then logs. Only the provider's own message field is kept, and it is
+// scrubbed of anything credential-shaped even so.
+func failureFrom(resp *http.Response, key string) error {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	detail := ""
+	if err := json.Unmarshal(raw, &body); err == nil {
+		detail = strings.TrimSpace(body.Error.Message)
+		if body.Error.Code != "" {
+			detail = body.Error.Code + ": " + detail
+		}
+	}
+	if detail == "" {
+		// Nothing recognisable. Report the shape, never the content.
+		detail = fmt.Sprintf("unparsed body, %d bytes", len(raw))
+	}
 	return &Error{
 		Failure: classifyStatus(resp.StatusCode),
 		Status:  resp.StatusCode,
-		Detail:  string(bytes.TrimSpace(detail)),
+		Detail:  scrub(detail, key),
 	}
+}
+
+// scrub removes the credential from text that is about to become an error.
+func scrub(text, key string) string {
+	if key != "" {
+		text = strings.ReplaceAll(text, key, "<redacted>")
+	}
+	return credentialShape.ReplaceAllString(text, "<redacted>")
+}
+
+// credentialShape matches this provider's key format and bearer headers, so a
+// value that is not the configured key still does not survive into a report.
+var credentialShape = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|bearer\s+\S+)`)
+
+// credentialForScrubbing resolves the key only so that it can be removed from a
+// message. It returns empty rather than failing: scrubbing must never be the
+// thing that breaks reporting a failure.
+func (p *Port) credentialForScrubbing(ctx context.Context) string {
+	cred, err := Resolve(ctx, p.cfg.Environment, p.cfg.StoredKey)
+	if err != nil {
+		return ""
+	}
+	return cred.Key()
 }

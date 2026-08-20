@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -64,13 +65,20 @@ type wireChunk struct {
 // collects what this produces rather than repeating the work, because two
 // request-building paths drift and only one of them ends up exercised.
 func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
-	resp, err := p.post(ctx, p.buildRequest(req, true, p.cfg.MaxOutputTokens))
+	body := p.buildRequest(req, true, p.cfg.MaxOutputTokens)
+	if body.Model == "" {
+		// No catalog exists here to consult and no default is invented: a
+		// request that names no model would otherwise reach whichever model
+		// the configuration happened to hold.
+		return nil, &Error{Failure: FailureRefused, Detail: "no model named for this request"}
+	}
+	resp, err := p.post(ctx, body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		defer resp.Body.Close()
-		return nil, failureFrom(resp)
+		return nil, failureFrom(resp, p.credentialForScrubbing(ctx))
 	}
 
 	out := make(chan ai.StreamEvent)
@@ -84,16 +92,24 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 
 // pump turns the wire into events. It emits exactly one terminal event.
 //
-// Block identity belongs to the accumulator, not to this file: the wire has no
-// block indices, only two fields that may alternate, so a boundary here is a
-// change of field and the accumulator decides what that means for the reply.
+// Block identity belongs to the accumulator, not to this file. Text and
+// reasoning arrive as two fields that may alternate, so a boundary between them
+// is a change of field. Tool calls do carry a wire index, which is what keeps
+// the fragments of one call together; that index is the provider's numbering of
+// calls, not a block position, so it is mapped rather than used directly.
 func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEvent) {
 	acc := ai.NewAccumulator(p.cfg.Model)
 	var (
-		usage   ai.Usage
-		index   int
-		kind    ai.BlockKind
+		usage  ai.Usage
+		served string
+		index  int
+		kind   ai.BlockKind
+
 		started bool
+		// callBlocks maps a wire tool-call index to the block that holds it,
+		// so fragments of the same call keep landing in the same block.
+		callBlocks = map[int]int{}
+		sawCall    bool
 	)
 
 	send := func(events ...ai.StreamEvent) bool {
@@ -142,6 +158,12 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		if chunk.Usage != nil {
 			usage = chunk.Usage.toUsage()
 		}
+		// What served the request is what the provider says served it, not what
+		// was asked for: reporting the requested model would make a substitution
+		// invisible.
+		if chunk.Model != "" {
+			served = chunk.Model
+		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
@@ -181,21 +203,30 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			}
 		}
 
+		// A tool call arrives across many chunks: the first carries id and
+		// name, the rest carry argument fragments and repeat only the wire
+		// index. Closing and reopening a block per delta would turn one call
+		// into several — most of them nameless.
 		for _, call := range choice.Delta.ToolCalls {
-			if started {
-				closed, err := acc.Close(index)
-				if err != nil {
-					fail(FailureUnknown, err.Error())
-					return
+			blockIndex, known := callBlocks[call.Index]
+			if !known {
+				if started {
+					closed, err := acc.Close(index)
+					if err != nil {
+						fail(FailureUnknown, err.Error())
+						return
+					}
+					if !send(closed) {
+						return
+					}
+					index++
 				}
-				if !send(closed) {
-					return
-				}
-				index++
+				blockIndex = index
+				callBlocks[call.Index] = blockIndex
+				started, kind = true, ai.BlockToolCall
 			}
-			started, kind = true, ai.BlockToolCall
 			events, err := acc.Push(ai.Chunk{
-				Index: index,
+				Index: blockIndex,
 				Kind:  ai.BlockToolCall,
 				Delta: call.Function.Arguments,
 				Call:  ai.ToolCall{ID: call.ID, Name: call.Function.Name},
@@ -211,6 +242,9 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 
 		if choice.FinishReason == nil {
 			continue
+		}
+		if len(choice.Delta.ToolCalls) > 0 || len(callBlocks) > 0 {
+			sawCall = true
 		}
 		ok, truncated, failure := stopReason(*choice.FinishReason)
 		if !ok {
@@ -230,13 +264,36 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			}
 		}
 		reason := ai.StopEnd
-		if truncated {
+		switch {
+		case truncated:
 			reason = ai.StopLength
+		case *choice.FinishReason == "tool_calls" || sawCall:
+			// A reply asking for tools has not finished answering, and a caller
+			// that reads it as an ending would drop the request.
+			reason = ai.StopToolUse
+		}
+		// Two count-based overflow checks, before the reply is completed: the
+		// accumulator has one ending, and a reply already declared finished
+		// cannot then be reported as a failure. Both read typed numbers and
+		// neither reads text. They run only against a window someone measured
+		// or was given — a rounded figure from documentation would classify
+		// replies this provider accepts as overflows and buy a shortened retry
+		// of each.
+		if f := p.overflow(reason, usage); f != nil {
+			ev, err := acc.Fail(ai.StopError, f)
+			if err != nil {
+				return
+			}
+			send(ev)
+			return
 		}
 		done, err := acc.Done(reason, usage)
 		if err != nil {
 			fail(FailureUnknown, err.Error())
 			return
+		}
+		if served != "" && done.Final != nil {
+			done.Final.Model = served
 		}
 		send(done)
 		return
@@ -249,4 +306,35 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 	// complete. Reporting it as finished would hand back a partial answer as
 	// the model's last word.
 	fail(FailureUnknown, "the stream ended without a finish reason")
+}
+
+// overflow reports a context overflow inferred from reported counts.
+//
+// Absent usage disables both checks rather than reading as zero, which is why
+// Usage keeps "not reported" apart from "reported zero": treating silence as
+// zero would make the second check fire on every reply.
+func (p *Port) overflow(reason ai.StopReason, usage ai.Usage) error {
+	window := p.cfg.ContextWindow
+	if window <= 0 || !usage.Reported {
+		return nil
+	}
+	input := usage.InputTokens
+	if usage.CacheReadTokens != nil {
+		input += *usage.CacheReadTokens
+	}
+
+	// A reply that ended normally while its input exceeded the window: the
+	// provider accepted more than fits and silently dropped the rest.
+	if reason == ai.StopEnd && input > window {
+		return fmt.Errorf("%w: %d input tokens against a %d window",
+			ai.ErrContextOverflow, input, window)
+	}
+
+	// A length stop that produced nothing, with the window full: the input
+	// consumed the whole context and left no room to answer in.
+	if reason == ai.StopLength && usage.OutputTokens == 0 && input >= window*99/100 {
+		return fmt.Errorf("%w: %d input tokens filled a %d window, leaving no output",
+			ai.ErrContextOverflow, input, window)
+	}
+	return nil
 }
