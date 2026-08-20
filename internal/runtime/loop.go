@@ -402,13 +402,19 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 						if !batch.ShouldTerminate() {
 							return nil
 						}
-						// Stop() ends the LOOP, and it does so by cancelling:
-						// the cancellation is delivered asynchronously, so on
-						// its own it races the next model call and sometimes
-						// loses. Returning an error from this hook is what
-						// stops the round deterministically, because the hook
-						// runs synchronously at the point the graph would
-						// otherwise proceed to the model.
+						// TWO SIGNALS, TWO JOBS. Neither replaces the other,
+						// and removing either changes behaviour that no single
+						// test failure would name.
+						//
+						// The returned error stops the ROUND, synchronously, at
+						// the one point before the graph would proceed to the
+						// model. Stop() is delivered asynchronously and on its
+						// own races that next call and sometimes loses.
+						//
+						// Stop() ends the LOOP. Without it the loop stays open
+						// until it has been idle for the settle window, so a
+						// run that was asked to stop keeps its caller waiting
+						// that long for a decision already taken.
 						l.Stop(adk.WithImmediate(), adk.WithStopCause(stopCauseToolTerminate))
 						return errToolTerminate
 					}),
