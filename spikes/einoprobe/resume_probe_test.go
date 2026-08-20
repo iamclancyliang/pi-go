@@ -212,7 +212,21 @@ func runArmC(t *testing.T, mech injectMech, cpID string, skipFinalCheckpoint boo
 		}
 	}
 	if rootID == "" {
-		t.Fatal("run 1 produced no root-cause interrupt context")
+		// Name what actually came back. Without it this failure says only that
+		// the expected shape was absent, which cannot distinguish "the framework
+		// reported a different exit" from "the interrupt contexts were empty" —
+		// and the two want opposite investigations.
+		reason := "nil"
+		if exit1 != nil && exit1.ExitReason != nil {
+			reason = fmt.Sprintf("%T: %v", exit1.ExitReason, exit1.ExitReason)
+		}
+		contexts := "not a *adk.CancelError"
+		if errors.As(exit1.ExitReason, &ce) {
+			contexts = fmt.Sprintf("%d interrupt context(s), none root-cause",
+				len(ce.InterruptContexts))
+		}
+		t.Fatalf("run 1 produced no root-cause interrupt context; ExitReason = %s; %s\n%s",
+			reason, contexts, tr.render())
 	}
 	// run1 facts promoted from log lines to assertions.
 	if ce == nil {

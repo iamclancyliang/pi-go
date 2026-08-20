@@ -55,6 +55,13 @@ type Config struct {
 	// Policy is the pre-execution policy seam. Defaults to AllowAll.
 	Policy Policy
 
+	// ReplyObservers receive each reply as it arrives, block by block.
+	//
+	// Nothing else exposes the block structure: the framework is handed a
+	// flattened view and the run event stream deliberately carries lifecycle
+	// only, so a renderer that wants to show a reply forming subscribes here.
+	ReplyObservers []ReplyObserver
+
 	// Observers receive the event stream.
 	Observers []events.Observer
 
@@ -292,13 +299,14 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		a.cfg.Tools.Declaration)
 
 	observed := &observingPort{
-		inner:         a.cfg.Model,
-		emitter:       a.emitter,
-		session:       a.cfg.Session,
-		modelName:     a.cfg.ModelName,
-		batch:         batch,
-		sequentialFor: a.sequentialFor,
-		summarize:     a.cfg.Summarize,
+		inner:          a.cfg.Model,
+		replyObservers: a.cfg.ReplyObservers,
+		emitter:        a.emitter,
+		session:        a.cfg.Session,
+		modelName:      a.cfg.ModelName,
+		batch:          batch,
+		sequentialFor:  a.sequentialFor,
+		summarize:      a.cfg.Summarize,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -390,8 +398,16 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// truncates at a safe point and starts a new execution,
 			// so continuity has to come from truth we hold.
 			proj := a.cfg.Session.Project()
+			_, streams := a.cfg.Model.(ai.StreamingPort)
 			return &adk.GenInputResult[*schema.Message, *schema.Message]{
-				Input: &adk.TypedAgentInput[*schema.Message]{Messages: toEinoMessages(proj.Messages)},
+				Input: &adk.TypedAgentInput[*schema.Message]{
+					Messages: toEinoMessages(proj.Messages),
+					// Asked for only when the provider can actually do it. A
+					// runtime that requests streaming from a model that answers
+					// in one piece gets one chunk and learns nothing, while one
+					// that never requests it leaves the whole path unreachable.
+					EnableStreaming: streams,
+				},
 				RunOpts: []adk.AgentRunOption{
 					// Fires after a round of tool calls completes and BEFORE
 					// the next model call. That is the only point where a
@@ -552,14 +568,20 @@ var errToolTerminate = errors.New("runtime: the round asked to stop")
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
-	mu            sync.Mutex
-	inner         ai.Port
-	emitter       *emitter
-	session       *session.Session
-	modelName     string
-	batch         *toolBatch
-	sequentialFor func(name string) bool
-	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+	mu             sync.Mutex
+	inner          ai.Port
+	replyObservers []ReplyObserver
+	emitter        *emitter
+	session        *session.Session
+	modelName      string
+	batch          *toolBatch
+	sequentialFor  func(name string) bool
+	summarize      func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+
+	// failed is why recovery could not be attempted, when that is a different
+	// failure from the one being recovered from.
+	failedMu sync.Mutex
+	failed   error
 }
 
 // recoverFromOverflow compacts once and asks again, or gives up.
@@ -569,40 +591,18 @@ type observingPort struct {
 // is the operation failing — not an empty answer, which reads to a caller as the
 // model having nothing to say.
 func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent ai.Usage, cause error) (ai.Response, error) {
-	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
-		return ai.Response{}, err
-	}
 	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 		e.Detail.Err = cause.Error()
 	})
 
-	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
-		detail := "recovery already spent"
-		if o.summarize == nil {
-			detail = "no way to shorten the context"
-		}
-		// Recorded before it is returned, so reopening finds the same terminal
-		// state instead of starting the same losing attempt again.
-		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
-		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
-			return ai.Response{}, err
-		}
-		return ai.Response{}, failureError(recorded, cause)
-	}
-
-	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	retry, err := o.shortenForRetry(ctx, req, cause, spent)
 	if err != nil {
-		return ai.Response{}, fmt.Errorf("runtime: shortening the context: %w", err)
-	}
-	if err := o.session.Compact(summary, retained); err != nil {
 		return ai.Response{}, err
 	}
-
-	// Ask again from the SHORTENED projection. Reusing the request would send
-	// the context that was just refused.
-	retry := req
-	retry.Messages = o.session.Project().Messages
-	return o.Generate(ctx, retry)
+	if retry == nil {
+		return ai.Response{}, failureError(o.session.Failure(), cause)
+	}
+	return o.Generate(ctx, *retry)
 }
 
 // selectModel changes the model used from the next request onward, and reports
@@ -810,4 +810,457 @@ func toEinoRole(r ai.Role) schema.RoleType {
 	default:
 		return schema.RoleType(r)
 	}
+}
+
+// Stream delivers a reply as it arrives, with the same guards the whole-answer
+// path applies.
+//
+// Without this the observing port would not satisfy ai.StreamingPort, the model
+// adapter's type assertion would fail, and every reply would quietly fall back to
+// arriving in one piece — streaming would be implemented and never reached.
+func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
+	// An input that already failed terminally is not asked again, streamed or
+	// otherwise. Reopening it would spend the same money to reach the same
+	// conclusion.
+	if failure := o.session.Failure(); failure != nil {
+		return nil, failureError(failure, nil)
+	}
+
+	streaming, ok := o.inner.(ai.StreamingPort)
+	if !ok {
+		return nil, errStreamUnsupported
+	}
+
+	requested := req.Model
+	if requested == "" {
+		requested = o.currentModel()
+	}
+	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+		e.Detail.MessageCount = len(req.Messages)
+		e.Detail.Model = requested
+	})
+
+	events0, err := streaming.Stream(ctx, req)
+	if err != nil {
+		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+			e.Detail.Model = requested
+			e.Detail.Err = err.Error()
+		})
+		// A reply that failed before it began is still a reply that ended. An
+		// observer told nothing waits for an end that is not coming, and cannot
+		// tell this from a stream still being set up.
+		o.publishReply(ctx, preStartFailure(err))
+		return nil, err
+	}
+
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		o.pump(ctx, req, requested, events0, out, false)
+	}()
+	return out, nil
+}
+
+// pump forwards one attempt, and may replace it with a shortened retry.
+//
+// delivered says whether any content has already reached the consumer. It is the
+// whole reason recovery is conditional here: see the overflow branch.
+func (o *observingPort) pump(ctx context.Context, req ai.Request, requested string,
+	in <-chan ai.StreamEvent, out chan<- ai.StreamEvent, delivered bool) {
+
+	// Iterative rather than recursive. A retry replaces the attempt rather than
+	// nesting inside it, so the recovery budget is what limits attempts and
+	// nothing depends on stack depth to stop.
+	announced := false
+	for {
+		var retried <-chan ai.StreamEvent
+
+		for event := range in {
+			// ONE START PER REPLY. A retry is another attempt at the same reply,
+			// not a second reply: the consumer was told once that this reply
+			// began, and telling it again would describe two.
+			if event.Kind == ai.StreamStart {
+				if announced {
+					continue
+				}
+				announced = true
+			}
+
+			if event.Kind == ai.StreamError && event.Final != nil &&
+				errors.Is(event.Final.Cause, ai.ErrContextOverflow) {
+
+				// RECOVERY IS ONLY SAFE BEFORE ANYTHING WAS SHOWN.
+				//
+				// A retry is a second attempt at the same reply. If the first
+				// attempt already delivered blocks, the consumer has them, and
+				// the retry's blocks would arrive after them as though one reply
+				// had said both things. The whole-answer path never has to
+				// decide this, because nothing is visible until it is complete.
+				if !delivered {
+					if next, ok := o.reopen(ctx, req, requested, event); ok {
+						retried = next
+						break
+					}
+					if cause := o.recoveryFailure(); cause != nil {
+						event = unrecordable(event, cause)
+					}
+				}
+				o.publishReply(ctx, event)
+				forward(ctx, out, event)
+				o.recordTerminal(ctx, event, requested)
+				return
+			}
+
+			if event.Terminal() {
+				// Recorded BEFORE the ending goes anywhere: the framework acts on
+				// the calls the ending carries, and it must not act before the
+				// round that governs them has been opened.
+				//
+				// If the record failed, the ending becomes a FAILURE. Passing it
+				// on as a success would have the framework run calls from a reply
+				// history does not contain, leaving results for a request nothing
+				// asked.
+				if err := o.observeTerminal(ctx, event, requested); err != nil {
+					if o.batch != nil {
+						o.batch.recordStreamFailure(err)
+					}
+					event = unrecordable(event, err)
+				}
+				// Published only once the outcome is settled, so an observer and
+				// the framework are told the same thing. Told separately, a
+				// renderer would show a reply completing while the run reported
+				// failure, and neither view would reveal the disagreement.
+				o.publishReply(ctx, event)
+				forward(ctx, out, event)
+				return
+			}
+			o.publishReply(ctx, event)
+			if !forward(ctx, out, event) {
+				// Nobody is reading any more. The reply still has an ending, and
+				// an observer that never receives one waits for an end that is
+				// not coming — so the rest is drained to reach it rather than
+				// abandoned here.
+				o.drainToEnd(ctx, in, requested)
+				return
+			}
+			switch {
+			case event.Kind != ai.StreamStart:
+				delivered = true
+			}
+		}
+
+		if retried == nil {
+			return
+		}
+		in, delivered = retried, false
+	}
+}
+
+// reopen shortens the context and starts another stream, or reports that
+// recovery is over.
+func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested string,
+	failed ai.StreamEvent) (<-chan ai.StreamEvent, bool) {
+
+	streaming, ok := o.inner.(ai.StreamingPort)
+	if !ok {
+		return nil, false
+	}
+	retry, err := o.shortenForRetry(ctx, req, failed.Final.Cause, failed.Final.Usage)
+	if err != nil {
+		// Recovery itself failed. Reporting the refusal it was recovering from
+		// sends a reader after the context size when the shortening is what
+		// broke, so the reason that surfaces is this one.
+		o.failedMu.Lock()
+		o.failed = err
+		o.failedMu.Unlock()
+		if o.batch != nil {
+			o.batch.recordStreamFailure(err)
+		}
+		return nil, false
+	}
+	if retry == nil {
+		return nil, false
+	}
+
+	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+		e.Detail.MessageCount = len(retry.Messages)
+		e.Detail.Model = requested
+	})
+	next, err := streaming.Stream(ctx, *retry)
+	if err != nil {
+		if o.batch != nil {
+			o.batch.recordStreamFailure(err)
+		}
+		return nil, false
+	}
+	return next, true
+}
+
+// shortenForRetry spends the recovery budget and reports what to send next.
+//
+// ONE transition for both ways of asking. The budget, the terminal failure, the
+// shortening and the projection to retry from are the same decision whichever
+// shape the answer arrives in. Two copies would drift into two different
+// recovery semantics, so how a reply is delivered would decide how much
+// allowance it gets and what a second refusal means.
+//
+// It returns the request to retry with. A nil request means recovery is over: the
+// terminal failure has already been recorded, so the caller reports the original
+// refusal rather than inventing a different one.
+func (o *observingPort) shortenForRetry(ctx context.Context, req ai.Request,
+	cause error, spent ai.Usage) (*ai.Request, error) {
+
+	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
+		return nil, err
+	}
+
+	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
+		detail := "recovery already spent"
+		if o.summarize == nil {
+			detail = "no way to shorten the context"
+		}
+		// Recorded before it is reported, so reopening finds the same terminal
+		// state instead of starting the same losing attempt again.
+		recorded := &session.OperationFailure{Code: CodeContextOverflow, Detail: detail}
+		if err := o.session.Fail(recorded.Code, recorded.Detail); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	summary, retained, err := o.summarize(ctx, o.session.Truth())
+	if err != nil {
+		return nil, fmt.Errorf("runtime: shortening the context: %w", err)
+	}
+	if err := o.session.Compact(summary, retained); err != nil {
+		return nil, err
+	}
+
+	// Ask again from the SHORTENED projection. Reusing the request would send
+	// the context that was just refused.
+	retry := req
+	retry.Messages = o.session.Project().Messages
+	return &retry, nil
+}
+
+// errStreamUnsupported reports that the provider behind this port answers only in
+// one piece.
+var errStreamUnsupported = errors.New("runtime: this model does not stream")
+
+// observeTerminal publishes what a finished stream means to the event surface.
+//
+// The per-block events are not republished here. They are the reply's own
+// protocol, carried on the model port for whoever renders it; this stream
+// describes the run, and folding thousands of deltas into it would drown the
+// events a client watches for.
+func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEvent, requested string) error {
+	final := event.Final
+	if final == nil {
+		return nil
+	}
+
+	// eino executes a model swap but never interprets it, so a reply served by a
+	// model other than the one asked for is only visible if pi-go says so.
+	if served := final.Model; served != "" && served != requested {
+		o.emitter.emit(events.KindModelChanged, func(e *events.Event) {
+			e.Detail.From = requested
+			e.Detail.To = served
+		})
+	}
+
+	text, calls := flatten(final)
+	ids := make([]string, 0, len(calls))
+	for _, c := range calls {
+		ids = append(ids, c.ID)
+	}
+	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+		e.Detail.Model = requested
+		e.Detail.Text = text
+		e.Detail.ToolCallIDs = ids
+		if event.Kind == ai.StreamError {
+			e.Detail.Err = final.ErrorMessage
+		}
+	})
+
+	// A FAILED reply is not recorded. Nothing acts on it, and writing a reply
+	// the model did not finish would leave history asserting something was said.
+	if event.Kind != ai.StreamDone {
+		return nil
+	}
+
+	// Recorded before it is acted on, exactly as a whole answer is: tool calls
+	// that follow must not refer to a request history does not contain.
+	if err := o.session.Append(ai.Message{
+		Role:      ai.RoleAssistant,
+		Content:   text,
+		ToolCalls: calls,
+	}); err != nil {
+		return err
+	}
+
+	// The round opens here, in the order the model asked for the calls. A
+	// streamed reply has no different claim on that ordering than any other.
+	//
+	// A reply that stopped at the length limit is CUT SHORT, and its calls carry
+	// whatever arguments had arrived when the cut fell. Cut arguments can still
+	// parse — half a path is a path — so the round is opened as truncated and
+	// every call it carried is refused rather than run.
+	if len(calls) > 0 && o.batch != nil {
+		o.batch.register(ctx, calls, o.sequentialFor, final.StopReason == ai.StopLength)
+	}
+	return nil
+}
+
+// flatten reduces a streamed reply to what history keeps.
+//
+// History has no use for block boundaries — it records what was said, and the
+// block structure belongs to the reply as it arrived. Text blocks are joined in
+// order; thinking is left out, because it is the model reasoning rather than
+// something it said.
+func flatten(m *ai.AssistantMessage) (string, []ai.ToolCall) {
+	var text string
+	var calls []ai.ToolCall
+	for _, block := range m.Blocks {
+		switch block.Kind {
+		case ai.BlockText:
+			text += block.Text
+		case ai.BlockToolCall:
+			calls = append(calls, block.Call)
+		}
+	}
+	return text, calls
+}
+
+// recordTerminal publishes and records a finished stream, keeping any failure.
+//
+// The failure is carried to the turn rather than returned here: this runs on the
+// forwarding goroutine, which has no caller to return to, and a reply that could
+// not be recorded must end the turn rather than let the round proceed on a
+// history that is missing it.
+func (o *observingPort) recordTerminal(ctx context.Context, event ai.StreamEvent, requested string) {
+	if err := o.observeTerminal(ctx, event, requested); err != nil && o.batch != nil {
+		o.batch.recordStreamFailure(err)
+	}
+}
+
+// ReplyObserver receives a reply as it arrives.
+//
+// Separate from events.Observer, which watches the run: lifecycle events describe
+// what the agent is doing, and folding thousands of content deltas into that
+// stream drowns the events a client watches for. This is the surface a renderer
+// subscribes to, and without it the block structure the port produces has nowhere
+// to go.
+type ReplyObserver interface {
+	// Reply is called for every event of every reply, in order, before the
+	// stream advances.
+	//
+	// IT IS CALLED SYNCHRONOUSLY, and that is the contract rather than an
+	// implementation detail: an observer that blocks holds up delivery to
+	// everyone, including the runtime. Buffering instead would let a slow
+	// observer fall arbitrarily far behind and then see a reply that finished
+	// long ago, which is not "as it arrives" in any useful sense — and the
+	// memory it took to pretend otherwise would be unbounded.
+	//
+	// An observer that cannot keep up should hand the event to its own buffer
+	// and return, choosing what to drop. That decision belongs to whoever is
+	// rendering, which is the only place that knows what may be skipped.
+	//
+	// Exactly one terminal event arrives per reply. A retry after a refused
+	// attempt is the same reply continuing, not a second one.
+	Reply(event ai.StreamEvent)
+}
+
+// ReplyObserverFunc adapts a function to ReplyObserver.
+type ReplyObserverFunc func(ai.StreamEvent)
+
+// Reply implements ReplyObserver.
+func (f ReplyObserverFunc) Reply(e ai.StreamEvent) { f(e) }
+
+// publishReply hands one event to every reply observer.
+//
+// Fed from the events the runtime forwards, not from the provider's raw stream:
+// a refused attempt's terminal and the retry's start are both real events from a
+// provider, and both describe a reply that is still arriving. An observer told
+// about them would render one reply as two, the first of which appears to fail.
+func (o *observingPort) publishReply(ctx context.Context, event ai.StreamEvent) {
+	// A cancelled run stops publishing, except for the terminal. Continuing to
+	// deliver content after the caller gave up wastes their time on a reply they
+	// stopped; withholding the terminal too would leave an observer waiting for
+	// an end that never comes, with no way to tell a cancelled reply from one
+	// still arriving.
+	if ctx.Err() != nil && !event.Terminal() {
+		return
+	}
+	for _, observer := range o.replyObservers {
+		observer.Reply(event)
+	}
+}
+
+// forward hands one event on, and reports whether the reply is still wanted.
+//
+// A send that only waits for a reader waits forever when there is no longer one:
+// an abandoned run leaves this goroutine blocked, and the provider's goroutine
+// behind it, for the life of the process. Watching the run's own context is what
+// lets both notice that nobody is listening.
+func forward(ctx context.Context, out chan<- ai.StreamEvent, event ai.StreamEvent) bool {
+	select {
+	case out <- event:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// drainToEnd consumes what is left of an abandoned reply, publishing its ending.
+//
+// Content is dropped: the reader that would have shown it is gone. The terminal
+// is not, because an observer is still owed one — and draining rather than
+// walking away is also what lets the provider's goroutine finish instead of
+// blocking on a send nobody will take.
+func (o *observingPort) drainToEnd(ctx context.Context, in <-chan ai.StreamEvent, requested string) {
+	for event := range in {
+		if !event.Terminal() {
+			continue
+		}
+		o.publishReply(ctx, event)
+		o.recordTerminal(ctx, event, requested)
+		return
+	}
+}
+
+// unrecordable turns a reply that could not be written into a failed one.
+//
+// The content is kept: it did arrive, and an observer that watched it appear
+// should not see it vanish. What changes is the ending, because a reply the
+// record does not hold cannot be acted on.
+func unrecordable(event ai.StreamEvent, cause error) ai.StreamEvent {
+	failed := *event.Final
+	failed.StopReason = ai.StopError
+	failed.ErrorMessage = cause.Error()
+	failed.Cause = cause
+	event.Kind = ai.StreamError
+	event.Final = &failed
+	return event
+}
+
+// preStartFailure is the ending of a reply that never began.
+func preStartFailure(cause error) ai.StreamEvent {
+	return ai.StreamEvent{
+		Kind: ai.StreamError,
+		Final: &ai.AssistantMessage{
+			StopReason:   ai.StopError,
+			ErrorMessage: cause.Error(),
+			Cause:        cause,
+		},
+	}
+}
+
+// recoveryFailure reports why recovery could not be attempted, if that is what
+// happened, and clears it.
+func (o *observingPort) recoveryFailure() error {
+	o.failedMu.Lock()
+	defer o.failedMu.Unlock()
+	cause := o.failed
+	o.failed = nil
+	return cause
 }

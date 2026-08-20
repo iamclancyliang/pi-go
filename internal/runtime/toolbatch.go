@@ -486,6 +486,20 @@ func (b *toolBatch) drop(callID string) {
 	}
 }
 
+// recordStreamFailure carries out a failure that happened while recording a
+// streamed reply.
+//
+// It joins the same channel a failed result write uses, because the consequence
+// is the same: the turn must end rather than continue on a history that is
+// missing something the model said.
+func (b *toolBatch) recordStreamFailure(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.storeErr == nil {
+		b.storeErr = err
+	}
+}
+
 // recordingFailure reports the first failure to persist a result, if any.
 func (b *toolBatch) recordingFailure() error {
 	b.mu.Lock()

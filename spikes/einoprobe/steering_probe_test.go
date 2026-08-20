@@ -27,6 +27,17 @@ type pushingTool struct {
 	// preempt selects C1b (Push + WithPreempt) vs C1a (plain Push).
 	preempt bool
 	pushed  bool
+	// resolved is Push's preempt-request resolution channel. It closes either
+	// after a cancel was submitted for the target turn or as a no-op, so it says
+	// the request finished — not that it did anything.
+	resolved <-chan struct{}
+}
+
+// requestResolved returns the channel Push handed back for this run's preempt.
+func (p *pushingTool) requestResolved() <-chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.resolved
 }
 
 func (p *pushingTool) setLoop(l *adk.TurnLoop[*schema.Message, *schema.Message]) {
@@ -54,6 +65,9 @@ func (p *pushingTool) InvokableRun(ctx context.Context, args string, opts ...too
 		var done <-chan struct{}
 		if prem {
 			ok, done = l.Push(msg, adk.WithPreempt[*schema.Message, *schema.Message](adk.AfterToolCalls))
+			p.mu.Lock()
+			p.resolved = done
+			p.mu.Unlock()
 			p.tr.add(layerControl, "Push:withPreempt", fmt.Sprintf("accepted=%v doneNil=%v safePoint=AfterToolCalls", ok, done == nil))
 		} else {
 			ok, done = l.Push(msg)
@@ -179,13 +193,12 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 			//
 			// Drain completion and the watcher closing the channel are separate
 			// goroutines, so a single non-blocking peek is racy. In the preempt
-			// scenario we WAIT for closure (timeout is a failure watchdog only and
-			// takes no part in injection timing); in the plain scenario we assert it
-			// stays open. Recorded before returning, hence before the next GenInput.
-			// Only the turn that actually contained the preempting Push should wait
-			// for closure. Waiting on later turns would fire the watchdog for a
-			// turn that was never preempted — a passing test must not print a
-			// WATCHDOG line, or the line stops meaning anything.
+			// scenario we WAIT for closure; in the plain scenario we assert it stays
+			// open. Recorded before returning, hence before the next GenInput.
+			//
+			// Only the turn that actually contained the preempting Push waits. A
+			// later turn was never preempted, so waiting on it would block for a
+			// closure that is not coming and stall the run instead of testing it.
 			turnNo := 0
 			turnMu.Lock()
 			turnCount++
@@ -193,12 +206,32 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 			turnMu.Unlock()
 
 			if preempt && turnNo == 1 {
-				select {
-				case <-tc.Preempted:
-					tr.add(layerControl, "preempt:contributed", "Preempted channel closed at safe point")
-				case <-time.After(2 * time.Second):
-					tr.add(layerControl, "preempt:timeout", "WATCHDOG: Preempted never closed")
-					return fmt.Errorf("watchdog: Preempted never closed at safe point")
+				// WAIT ON THE REQUEST'S OWN RESOLUTION, then look.
+				//
+				// Push returns a channel that closes when the preempt request is
+				// resolved — either after a cancel was submitted for the target
+				// turn, or as a NO-OP when there was no target turn to cancel.
+				// Both are resolutions, so waiting on Preempted instead blocks
+				// forever whenever the request resolved without contributing.
+				//
+				// A clock cannot stand in for either: it measures machine load, and
+				// it cannot tell "not yet" from "never".
+				// THREE OUTCOMES, kept apart. Collapsing the first two reports a
+				// preempt that was never requested as one that was requested and
+				// achieved nothing, which sends a reader looking for a framework
+				// fault where the push simply carried no preempt.
+				switch resolved := pt.requestResolved(); {
+				case resolved == nil:
+					tr.add(layerControl, "preempt:norequest",
+						"no resolution channel: this push carried no preempt")
+				default:
+					<-resolved
+					select {
+					case <-tc.Preempted:
+						tr.add(layerControl, "preempt:contributed", "Preempted closed at safe point")
+					default:
+						tr.add(layerControl, "preempt:noop", "request resolved without contributing")
+					}
 				}
 			} else {
 				select {
@@ -241,7 +274,7 @@ func TestC1aFollowUpContract(t *testing.T) {
 	if !strings.Contains(tr.detailsMatching("Push:plain")[0], "accepted=true") {
 		t.Errorf("plain Push not accepted: %s", tr.detailsMatching("Push:plain")[0])
 	}
-	for _, ev := range []string{"preempt:contributed", "preempt:timeout", "preempt:unexpected"} {
+	for _, ev := range []string{"preempt:contributed", "preempt:unexpected"} {
 		if n := tr.countEvents(ev); n != 0 {
 			t.Errorf("%s occurred %d times without WithPreempt, want 0", ev, n)
 		}
@@ -298,7 +331,7 @@ func assertC1b(t *testing.T, tr *trace, modelEvent string) {
 	if n := tr.countEvents("preempt:contributed"); n != 1 {
 		t.Errorf("preempt:contributed = %d, want exactly 1", n)
 	}
-	for _, bad := range []string{"preempt:timeout", "preempt:unexpected", "history:materialize_error"} {
+	for _, bad := range []string{"preempt:unexpected", "history:materialize_error"} {
 		if n := tr.countEvents(bad); n != 0 {
 			t.Errorf("%s occurred %d times, want 0", bad, n)
 		}
