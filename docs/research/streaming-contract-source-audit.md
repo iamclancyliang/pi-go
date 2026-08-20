@@ -253,3 +253,59 @@ boundaries from field changes.
 - Cancellation is represented by terminal `error` with reason `aborted`, not by a
   separate event type
   ([`types.ts`, lines 523-539](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/types.ts#L523-L539)).
+
+## Follow-up audit: `f910c9e`
+
+**Verdict: NO-GO before implementation.** The prior seven corrections are substantially
+closed, and the central decision that pi-go must own explicit heterogeneous block identity
+is source-backed. Four remaining corrections are required.
+
+### 1. `errorMessage` is not mandatory in the Pi contract
+
+The terminal table still says every `error` has `errorMessage` set. The public
+`AssistantMessage.errorMessage` field is optional
+([`types.ts`, lines 415-435](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/types.ts#L415-L435)),
+and the `pi-messages` wire error also makes it optional
+([`pi-messages.ts`, lines 76-83](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/api/pi-messages.ts#L76-L83)).
+If pi-go requires a nonempty message for every terminal error, record that as another
+stronger guarantee rather than Pi parity.
+
+### 2. The claimed Pi `index` cleanup gap is not present
+
+The absence of `delete index` in `openai-codex-responses.ts` and
+`mistral-conversations.ts` is not evidence that either adapter persists an `index` field.
+OpenAI Responses keeps the provider output index in an `outputSlots` map; its block scratch
+type contains only `partialJson` and `customInput`
+([`openai-responses-shared.ts`, lines 402-440](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/api/openai-responses-shared.ts#L402-L440),
+[`463-524`](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/api/openai-responses-shared.ts#L463-L524)).
+Mistral uses `toolCall.index` only to form a local correlation key and stores the content-list
+position in `toolBlocksByKey`; the block itself contains `partialArgs`, not `index`
+([`mistral-conversations.ts`, lines 681-712](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/api/mistral-conversations.ts#L681-L712)).
+Remove the “known gap” and “deliberate improvement” claim. Uniformly excluding scratch from
+pi-go's public type remains a sound design, but it is not a correction of these two adapters.
+
+### 3. The success-path cleanup citation is incomplete
+
+The contract distinguishes per-block success cleanup from the error sweep but cites only the
+Anthropic catch path. Cite the success path as well: `content_block_stop` removes `index` and,
+for tool calls, `partialJson` before the end event
+([`anthropic-messages.ts`, lines 690-719](https://github.com/earendil-works/pi/blob/086c32e74530564922d011ade23ff582c9d63116/packages/ai/src/api/anthropic-messages.ts#L690-L719)).
+
+### 4. Eino metadata has three lifecycle and enforcement limits
+
+- Legacy `schema.Message` loses `MessageOutputPart.StreamingMeta` on JSON because that field is
+  `json:"-"` (`schema/message.go:259-294`). Raw `schema.AgenticMessage` blocks differ:
+  `ContentBlock.StreamingMeta` is serialized as `streaming_meta` (`schema/agentic_message.go:167-177`).
+- Multi-chunk `ConcatAgenticMessages` consumes the agentic index to group and sort, then creates
+  a new block without restoring `StreamingMeta` (`schema/agentic_message.go:971-989,1272-1295`).
+  Therefore raw chunk metadata can survive JSON, but the merged result normally no longer
+  carries it.
+- The mixed-meta and same-index/type checks apply to actual multi-message concatenation. A
+  single input returns immediately without validation (`schema/agentic_message.go:912-914`).
+  Eino also does not allocate or guarantee unique heterogeneous indices: the constructor stores
+  the caller's value, and an internal wrapper can stamp one supplied index onto every block in
+  a message (`schema/agentic_message.go:654-658`, `adk/wrappers.go:597-606`).
+
+So `schema.AgenticMessage` is a capable carrier and concatenator, not the owner of Pi block
+identity. pi-go must allocate and validate that identity before conversion, and should not state
+the hard-error or serialization properties without the limits above.

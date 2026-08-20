@@ -68,24 +68,29 @@ scratch fields are removed, so later is not a superset of earlier.
 | Terminal | `reason` | Carries |
 | --- | --- | --- |
 | `done` | `stop`, `length`, `toolUse`, `deferred` | final message |
-| `error` | `error`, `aborted` | final message, `errorMessage` set |
+| `error` | `error`, `aborted` | final message |
 
 Cancellation is not a separate event: it terminates as `error` with reason `aborted`.
+
+`errorMessage` is **optional** in Pi (`types.ts:427,474`) and optional on the wire. pi-go always
+supplies non-empty text on a terminal error. **That is a stronger guarantee than Pi makes, not
+alignment** — an error a user cannot read is an error they cannot act on.
 
 ## 6. Streaming scratch state must not survive
 
 Scratch fields are removed before the terminal event on two different paths: **per block as it
-closes** on the success path, and **a catch-all sweep** on the error path
-(`anthropic-messages.ts:775-785`).
+closes** on the success path (`anthropic-messages.ts:690-719`, in `content_block_stop`), and **a
+catch-all sweep** on the error path (`:775-785`).
 
 Fields observed across providers: `index`, `partialJson`, `partialArgs`, `customInput` (with a nested
 `jsonBuffer`), `streamIndex`.
 
 **Checkable:** nothing in the final message says how it was chunked.
 
-**Known gap in Pi, not to be copied:** `openai-codex-responses.ts` and `mistral-conversations.ts` do
-not strip `index`. pi-go strips uniformly; that is a deliberate improvement, recorded here so it is
-not mistaken for divergence by omission.
+Which fields exist is per provider: a provider strips what it stored. `openai-codex-responses.ts`
+stores only `partialJson` and `customInput` and strips both; `mistral-conversations.ts` stores only
+`partialArgs` and strips it. Neither ever puts `index` on a block, so neither has anything to strip —
+absence of a strip call is not a leak.
 
 ## 7. Cancellation and partial work — pi-go is STRONGER
 
@@ -117,19 +122,35 @@ terminal are still withheld**. That, and only that, rules out buffering to compl
   sorted by index rather than arrival (`:1350-1363`).
 - `ToolCall.Index` is a tool-call space, not a block space.
 
-`schema.AgenticMessage` **can**: `ContentBlock` is an ordered sum type over reasoning, text and tool
-calls, and `ContentBlock.StreamingMeta.Index` spans all of them with sorted, type-checked merging
-(`schema/agentic_message.go:102-124`, `:929-989`, `:1252-1267`).
+`schema.AgenticMessage` **can carry** it: `ContentBlock` is an ordered sum type over reasoning, text
+and tool calls, and `ContentBlock.StreamingMeta.Index` spans all of them with sorted, type-checked
+merging (`schema/agentic_message.go:102-124`, `:929-989`, `:1252-1267`).
 
-**Rule:** the input seam must carry explicit ordered block identity. pi-go's own port type owns that
-identity; where a framework type is involved it must be the agentic one. **If block identity is
-absent, fail closed — do not infer boundaries from field transitions.**
+**Carrier, not owner.** The framework will transport identity; it does not establish it:
 
-Note: `MessageStreamingMeta` is `json:"-"` and does not survive serialization, so block identity
-cannot be recovered from a serialized chunk.
+- eino neither allocates the index nor guarantees it is unique across heterogeneous blocks.
+- Concatenating multiple chunks drops the streaming metadata, and a single-input concat bypasses the
+  mixed-metadata and type checks entirely — so validation cannot be assumed to have happened.
+
+**Rule:** pi-go allocates block identity on its own port and validates it there, then converts
+outward to the framework. Identity is never inferred from field transitions, and never taken on trust
+from a framework value.
+
+Two related facts, easy to conflate: `ContentBlock.StreamingMeta` is `json:"streaming_meta,omitempty"`
+and **does** serialize; the type that does not is `MessageStreamingMeta`
+(`schema/message.go:294`, `json:"-"`), which belongs to the flat message.
 
 ## 10. Open question, stated rather than assumed
 
 Whether any given chat-model adapter populates `StreamingMeta`, and with what index discipline, is
 not decidable from Pi or eino core — those adapters live in `eino-ext`. Until an adapter is chosen and
 read, pi-go must not assume indices arrive populated; the port type carries block identity itself.
+
+## 11. What this costs to implement
+
+Not a field swap on the existing adapter. `ai.Response` today carries no reasoning content, no block
+order and no block identity, and both the runtime and the framework loop pass `*schema.Message`.
+
+So the work is, in order: extend the port with a native streaming surface that owns block identity;
+state which single ingress lane carries that identity; and only then convert outward to the framework
+type. Anything that starts by reshaping the existing adapter will be inferring boundaries again.
