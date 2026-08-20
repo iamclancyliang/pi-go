@@ -55,6 +55,13 @@ type Config struct {
 	// Policy is the pre-execution policy seam. Defaults to AllowAll.
 	Policy Policy
 
+	// ReplyObservers receive each reply as it arrives, block by block.
+	//
+	// Nothing else exposes the block structure: the framework is handed a
+	// flattened view and the run event stream deliberately carries lifecycle
+	// only, so a renderer that wants to show a reply forming subscribes here.
+	ReplyObservers []ReplyObserver
+
 	// Observers receive the event stream.
 	Observers []events.Observer
 
@@ -292,13 +299,14 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		a.cfg.Tools.Declaration)
 
 	observed := &observingPort{
-		inner:         a.cfg.Model,
-		emitter:       a.emitter,
-		session:       a.cfg.Session,
-		modelName:     a.cfg.ModelName,
-		batch:         batch,
-		sequentialFor: a.sequentialFor,
-		summarize:     a.cfg.Summarize,
+		inner:          a.cfg.Model,
+		replyObservers: a.cfg.ReplyObservers,
+		emitter:        a.emitter,
+		session:        a.cfg.Session,
+		modelName:      a.cfg.ModelName,
+		batch:          batch,
+		sequentialFor:  a.sequentialFor,
+		summarize:      a.cfg.Summarize,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -560,14 +568,15 @@ var errToolTerminate = errors.New("runtime: the round asked to stop")
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
-	mu            sync.Mutex
-	inner         ai.Port
-	emitter       *emitter
-	session       *session.Session
-	modelName     string
-	batch         *toolBatch
-	sequentialFor func(name string) bool
-	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+	mu             sync.Mutex
+	inner          ai.Port
+	replyObservers []ReplyObserver
+	emitter        *emitter
+	session        *session.Session
+	modelName      string
+	batch          *toolBatch
+	sequentialFor  func(name string) bool
+	summarize      func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
 }
 
 // recoverFromOverflow compacts once and asks again, or gives up.
@@ -858,6 +867,8 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 		var retried <-chan ai.StreamEvent
 
 		for event := range in {
+			o.publishReply(event)
+
 			// ONE START PER REPLY. A retry is another attempt at the same reply,
 			// not a second reply: the consumer was told once that this reply
 			// began, and telling it again would describe two.
@@ -1075,5 +1086,35 @@ func flatten(m *ai.AssistantMessage) (string, []ai.ToolCall) {
 func (o *observingPort) recordTerminal(ctx context.Context, event ai.StreamEvent, requested string) {
 	if err := o.observeTerminal(ctx, event, requested); err != nil && o.batch != nil {
 		o.batch.recordStreamFailure(err)
+	}
+}
+
+// ReplyObserver receives a reply as it arrives.
+//
+// Separate from events.Observer, which watches the run: lifecycle events describe
+// what the agent is doing, and folding thousands of content deltas into that
+// stream drowns the events a client watches for. This is the surface a renderer
+// subscribes to, and without it the block structure the port produces has nowhere
+// to go.
+type ReplyObserver interface {
+	// Reply is called for every event of every reply, in order, before the
+	// stream advances. An implementation that blocks holds up delivery, which
+	// is the trade for seeing content as it arrives rather than afterwards.
+	Reply(event ai.StreamEvent)
+}
+
+// ReplyObserverFunc adapts a function to ReplyObserver.
+type ReplyObserverFunc func(ai.StreamEvent)
+
+// Reply implements ReplyObserver.
+func (f ReplyObserverFunc) Reply(e ai.StreamEvent) { f(e) }
+
+// publishReply hands one event to every reply observer.
+//
+// Called before the event is forwarded, so a renderer sees a block form at the
+// same point the rest of the runtime does rather than after the reply is over.
+func (o *observingPort) publishReply(event ai.StreamEvent) {
+	for _, observer := range o.replyObservers {
+		observer.Reply(event)
 	}
 }
