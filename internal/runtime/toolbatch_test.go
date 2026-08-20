@@ -20,11 +20,11 @@ import (
 // marked the call, because the round marks a call only where it observes the cut
 // itself. A cut call must not go on to run, whichever branch happened to win.
 //
-// Driven directly rather than through a run. Through a run the two events
-// coincide only rarely — the end-to-end control catches this in roughly one
-// attempt in five hundred, which is indistinguishable from a flake at any sane
-// repeat count. Here the call is parked in the wait first, and only then are both
-// wake-ups made ready, so every iteration puts the question.
+// Driven directly rather than through a run, because the window between the wait
+// returning and the decision cannot be aimed at from outside: driving a whole run
+// leaves the two events coinciding by chance, and rarely. Here the call is parked
+// in the wait first and only then is the cut applied, so every iteration puts the
+// question.
 func TestBeginDropsACutCallEvenWhenItWinsTheHandoff(t *testing.T) {
 	const attempts = 200
 

@@ -40,9 +40,8 @@ type toolBatch struct {
 	//
 	// It exists because the case it guards cannot be reached from outside: the
 	// cut has to land in the window between the wait returning and the decision,
-	// and a caller has no way to aim at that window. Without this the check below
-	// could only be believed, not shown — and a guard nothing can exercise is how
-	// a defect of exactly this kind survived in the first place.
+	// and nothing driving the round from outside can aim at that window. A guard
+	// that cannot be exercised is one whose absence would go unnoticed.
 	afterHandoff func()
 
 	// declare reports what a tool currently says about repeating a call. Read

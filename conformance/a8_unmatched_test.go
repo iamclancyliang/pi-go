@@ -232,17 +232,16 @@ func TestA8SequentialAbortDoesNotHang(t *testing.T) {
 // The tool IGNORES cancellation, deliberately. One that honours it would stop by
 // itself and prove nothing about whether the round prevented the call.
 func TestA8CutCallIsNotExecuted(t *testing.T) {
-	// REPEATED, and that is the point rather than paranoia.
+	// REPEATED, because a single attempt decides almost nothing here.
 	//
-	// The framework ALSO declines to dispatch after a cut, most of the time. So
-	// most interleavings never reach pi-go's own check, and a single run that
-	// passes says almost nothing: with the check deleted, one attempt still
-	// passes roughly nine times in ten. Repetition is what turns this from a
-	// control that looks like one into a control that is one.
+	// The framework also declines to dispatch after a cut most of the time, so
+	// most interleavings never reach the round's own check and pass for a reason
+	// that has nothing to do with the rule. Only the minority of interleavings
+	// that get that far put the question, and repetition is what reaches them.
 	//
 	// Relying on the framework instead is not an option: eino is an
-	// implementation detail of the runtime, and a contract that holds only
-	// because of what the current version happens to do is not a contract.
+	// implementation detail of the runtime, and a rule that holds only because of
+	// what the current version happens to do is not a rule.
 	const attempts = 50
 	for attempt := 0; attempt < attempts; attempt++ {
 		cutCallIsNotExecuted(t)
