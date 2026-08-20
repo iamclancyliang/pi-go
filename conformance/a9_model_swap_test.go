@@ -158,3 +158,91 @@ func TestA9NoHookNoChange(t *testing.T) {
 		}
 	}
 }
+
+// TestA9AProviderThatServesADifferentModelIsReported pins the case where the
+// answer did not come from the model that was asked for.
+//
+// Nothing else can report it. The framework carries the request and the response
+// without comparing them, and the provider is under no obligation to refuse: it
+// may answer with whatever it actually ran. A caller billing per model, or
+// reading a transcript to see what produced an answer, has only this event to go
+// on — so an unreported substitution reads as though the requested model replied.
+func TestA9AProviderThatServesADifferentModelIsReported(t *testing.T) {
+	substituting := &servingModel{name: "fake-1", serves: "fallback-9"}
+
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     substituting,
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var changes []events.Event
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindModelChanged {
+			changes = append(changes, e)
+		}
+	}
+	if len(changes) != 1 {
+		t.Fatalf("model_changed events = %d, want 1: a substitution nobody reports "+
+			"reads as the requested model having answered", len(changes))
+	}
+	if changes[0].Detail.From != "fake-1" || changes[0].Detail.To != "fallback-9" {
+		t.Errorf("model_changed = %q -> %q, want %q -> %q: the event has to name both "+
+			"ends or it cannot say what was substituted for what",
+			changes[0].Detail.From, changes[0].Detail.To, "fake-1", "fallback-9")
+	}
+}
+
+// TestA9AProviderThatServesWhatWasAskedIsSilent is the paired control.
+//
+// Without it the assertions above are satisfied by a runtime that announces a
+// change on every call, which reports substitutions that never happened.
+func TestA9AProviderThatServesWhatWasAskedIsSilent(t *testing.T) {
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model:     &servingModel{name: "fake-1", serves: "fake-1"},
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{rec},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindModelChanged {
+			t.Errorf("a call served by the model that was asked for reported a "+
+				"change %q -> %q", e.Detail.From, e.Detail.To)
+		}
+	}
+}
+
+// servingModel answers, and says which model actually served the call.
+type servingModel struct {
+	name   string
+	serves string
+}
+
+func (s *servingModel) Generate(_ context.Context, _ ai.Request) (ai.Response, error) {
+	return ai.Response{Content: "answered", Model: s.serves}, nil
+}
