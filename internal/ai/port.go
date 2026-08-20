@@ -128,6 +128,25 @@ type StreamingPort interface {
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
+
+	// CacheReadTokens and ReasoningTokens are absent when the provider did not
+	// report them, which is not the same as reporting zero.
+	//
+	// Zero is a real answer: a model that did no reasoning reports no reasoning
+	// tokens, and a request that missed the cache reports no cache reads.
+	// Collapsing "did none" into "did not say" leaves a ledger unable to tell a
+	// provider that reasons for free from one that does not say what it charged
+	// for. A pointer is the smallest thing that can hold that difference.
+	//
+	// ReasoningTokens is a SUBSET of OutputTokens, not an addition to it.
+	// Adding them double-counts.
+	CacheReadTokens *int
+	ReasoningTokens *int
+
+	// Reported distinguishes a provider that said nothing about usage from one
+	// that reported a call costing nothing. Callers that record spend must not
+	// treat silence as free.
+	Reported bool
 }
 
 // Total is the whole cost of the call.
