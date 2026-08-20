@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/events"
@@ -422,5 +423,142 @@ func TestAFailedCallStillLedgersWhatItUsed(t *testing.T) {
 	if total.InputTokens != 42 {
 		t.Fatalf("a failed call ledgered %d input tokens; the provider read 42",
 			total.InputTokens)
+	}
+}
+
+// TestRetriedAttemptsEachReachTheLedger: a call that retried spent on every
+// attempt, and a ledger holding only the one that worked is short by exactly
+// what the retry added.
+func TestRetriedAttemptsEachReachTheLedger(t *testing.T) {
+	failed := &http.Response{
+		StatusCode: 503,
+		Body: io.NopCloser(strings.NewReader(
+			`{"error":{"message":"busy"},"usage":{"prompt_tokens":70,"completion_tokens":0}}`)),
+	}
+	transport := &sequenceTransport{responses: []*http.Response{
+		failed,
+		{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseReply(
+			`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":30,"completion_tokens":5}}`)))},
+	}}
+
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+		Retry:           deepseek.RetryPolicy{MaxRetries: 2, BaseDelay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if transport.requests != 2 {
+		t.Fatalf("made %d requests, want 2", transport.requests)
+	}
+	attempts := sess.Attempts()
+	if len(attempts) != 2 {
+		t.Fatalf("ledger attempts = %d, want 2: the failed attempt read the request too",
+			len(attempts))
+	}
+	if total := sess.Usage(); total.InputTokens != 100 {
+		t.Fatalf("total input %d; 70 on the attempt that failed plus 30 on the one that worked is 100",
+			total.InputTokens)
+	}
+}
+
+// sequenceTransport answers from a fixed sequence.
+type sequenceTransport struct {
+	requests  int
+	responses []*http.Response
+}
+
+func (s *sequenceTransport) Do(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	s.requests++
+	if s.requests > len(s.responses) {
+		return nil, errors.New("more requests than scripted")
+	}
+	return s.responses[s.requests-1], nil
+}
+
+// TestAProviderToolCallIsRefusedByPolicyAndRecordedFirst.
+//
+// A tool call arriving from a real provider is subject to the rules that
+// already govern any call: a policy may refuse it, the refusal reaches the
+// model as the call's result, the tool does not run, and the request is in
+// history before any of that happens.
+func TestAProviderToolCallIsRefusedByPolicyAndRecordedFirst(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		),
+		sseReply(`{"choices":[{"delta":{"content":"understood"},"finish_reason":"stop"}]}`),
+	}}
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+
+	registry, _, listFiles := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+
+	// The refusal asserts, at the moment of the decision, that the call it is
+	// refusing is ALREADY in history. Record-before-act is only meaningful if
+	// checked while the act is still pending.
+	recordedFirst := false
+	policy := runtime.PolicyFunc(func(_ context.Context, call runtime.PolicyCall) runtime.Decision {
+		for _, m := range sess.Truth() {
+			for _, c := range m.ToolCalls {
+				if c.ID == call.ToolCallID {
+					recordedFirst = true
+				}
+			}
+		}
+		return runtime.Decision{Denied: true, Reason: "refused by policy"}
+	})
+
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Policy: policy, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !recordedFirst {
+		t.Fatal("the call was not in history when the policy was asked about it")
+	}
+	if ran := listFiles.Calls(); ran != 0 {
+		t.Fatalf("a refused tool ran %d times", ran)
+	}
+
+	var sawRefusal bool
+	for _, m := range sess.Truth() {
+		if m.Role == ai.RoleTool && m.ToolCallID == "tc1" && strings.Contains(m.Content, "refused by policy") {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatal("the refusal never reached the model as the call's result, so the model " +
+			"cannot tell a refusal from a call that vanished")
 	}
 }

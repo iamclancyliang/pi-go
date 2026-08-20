@@ -96,6 +96,12 @@ type Response struct {
 	// assumed.
 	Model string
 
+	// EarlierAttempts is what attempts before this one reported using.
+	//
+	// A call that retried spent on every attempt, and a ledger holding only the
+	// one that succeeded undercounts exactly the spend the retry created.
+	EarlierAttempts []Usage
+
 	// Usage is the token counts the provider reported for this call. It is not
 	// a money figure: no provider here reports one, and any currency attached
 	// downstream is computed from published prices rather than stated.

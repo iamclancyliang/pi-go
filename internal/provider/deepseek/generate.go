@@ -53,12 +53,13 @@ func (p *Port) Generate(ctx context.Context, req ai.Request) (ai.Response, error
 		}
 	}
 	return ai.Response{
-		Content:   text.String(),
-		Reasoning: reasoning.String(),
-		ToolCalls: calls,
-		Model:     final.Model,
-		Usage:     final.Usage,
-		Truncated: final.StopReason == ai.StopLength,
+		EarlierAttempts: final.EarlierAttempts,
+		Content:         text.String(),
+		Reasoning:       reasoning.String(),
+		ToolCalls:       calls,
+		Model:           final.Model,
+		Usage:           final.Usage,
+		Truncated:       final.StopReason == ai.StopLength,
 	}, nil
 }
 

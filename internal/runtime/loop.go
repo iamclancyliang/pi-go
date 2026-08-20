@@ -759,6 +759,9 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 
 	// What the call reported using is recorded whether or not the reply is
 	// usable: tokens read before a failure were still read.
+	for _, earlier := range resp.EarlierAttempts {
+		o.session.RecordUsage(earlier)
+	}
 	o.session.RecordUsage(resp.Usage)
 
 	// The reply is recorded before it is acted on. A reply that was answered
@@ -1090,6 +1093,9 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 	// Usage is recorded whether or not the reply is usable. A reply that failed
 	// partway still had its request read, and a ledger that dropped those
 	// tokens would be optimistic about exactly the calls that went wrong.
+	for _, earlier := range final.EarlierAttempts {
+		o.session.RecordUsage(earlier)
+	}
 	o.session.RecordUsage(final.Usage)
 
 	// A FAILED reply is not recorded. Nothing acts on it, and writing a reply

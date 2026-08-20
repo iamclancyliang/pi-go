@@ -181,11 +181,10 @@ type wireTool struct {
 // from a generated catalog, so the shape does not depend on an artefact this
 // repository does not control.
 func (p *Port) buildRequest(req ai.Request, stream bool, maxTokens int) wireRequest {
-	model := req.Model
-	if model == "" {
-		model = p.cfg.Model
-	}
-	out := wireRequest{Model: model, Stream: stream, MaxTokens: maxTokens}
+	// No fallback to the configured model. A request that names nothing would
+	// otherwise reach whatever this port happened to be built with, and a
+	// caller reading the reply would have no way to know which.
+	out := wireRequest{Model: req.Model, Stream: stream, MaxTokens: maxTokens}
 	if stream {
 		out.StreamOptions = &struct {
 			IncludeUsage bool `json:"include_usage"`
@@ -371,10 +370,28 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			defer resp.Body.Close()
 			return nil, attempts, failureFrom(resp, p.credentialForScrubbing(ctx))
 		}
-		attempts = append(attempts, Attempt{Status: resp.StatusCode})
+		// What a failed attempt reported using, if it said. A rate-limit body
+		// rarely carries usage, but an attempt that did read the request and
+		// then failed must not be recorded as free.
+		attempts = append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBody(resp)})
 		resp.Body.Close()
 		if waitErr := wait(ctx, decision.after); waitErr != nil {
 			return nil, attempts, waitErr
 		}
 	}
+}
+
+// usageFromBody reads usage from a non-streaming error body, when one is there.
+func usageFromBody(resp *http.Response) ai.Usage {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if err != nil {
+		return ai.Usage{}
+	}
+	var body struct {
+		Usage *wireUsage `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || body.Usage == nil {
+		return ai.Usage{}
+	}
+	return body.Usage.toUsage()
 }

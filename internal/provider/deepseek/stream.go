@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -27,16 +28,28 @@ type wireUsage struct {
 
 // toUsage keeps "not reported" distinct from "reported zero".
 func (w *wireUsage) toUsage() ai.Usage {
+	// prompt_tokens is the whole prompt, cached part included. InputTokens is
+	// the uncached remainder, matching how Pi reports it: keeping the total
+	// here and then adding the cache count anywhere downstream counts the same
+	// tokens twice.
+	cached := 0
+	if w.PromptTokensDetails != nil && w.PromptTokensDetails.CachedTokens != nil {
+		cached = *w.PromptTokensDetails.CachedTokens
+	} else if w.PromptCacheHit != nil {
+		cached = *w.PromptCacheHit
+	}
+	input := w.PromptTokens - cached
+	if input < 0 {
+		input = 0
+	}
 	u := ai.Usage{
-		InputTokens:  w.PromptTokens,
+		InputTokens:  input,
 		OutputTokens: w.CompletionTokens,
 		Reported:     true,
 	}
-	if w.PromptTokensDetails != nil && w.PromptTokensDetails.CachedTokens != nil {
-		v := *w.PromptTokensDetails.CachedTokens
-		u.CacheReadTokens = &v
-	} else if w.PromptCacheHit != nil {
-		v := *w.PromptCacheHit
+	if w.PromptTokensDetails != nil && w.PromptTokensDetails.CachedTokens != nil ||
+		w.PromptCacheHit != nil {
+		v := cached
 		u.CacheReadTokens = &v
 	}
 	if w.CompletionTokensDetails != nil && w.CompletionTokensDetails.ReasoningTokens != nil {
@@ -76,13 +89,12 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	if err != nil {
 		return nil, err
 	}
-	_ = attempts
 
 	out := make(chan ai.StreamEvent)
 	go func() {
 		defer close(out)
 		defer resp.Body.Close()
-		p.pump(ctx, resp.Body, out)
+		p.pump(ctx, resp.Body, out, attempts)
 	}()
 	return out, nil
 }
@@ -94,8 +106,12 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 // is a change of field. Tool calls do carry a wire index, which is what keeps
 // the fragments of one call together; that index is the provider's numbering of
 // calls, not a block position, so it is mapped rather than used directly.
-func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEvent) {
+func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEvent, earlier []Attempt) {
 	acc := ai.NewAccumulator(p.cfg.Model)
+	earlierUsage := make([]ai.Usage, 0, len(earlier))
+	for _, a := range earlier {
+		earlierUsage = append(earlierUsage, a.Usage)
+	}
 	var (
 		usage  ai.Usage
 		served string
@@ -109,16 +125,43 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		sawCall    bool
 	)
 
+	cancelled := false
 	send := func(events ...ai.StreamEvent) bool {
 		for _, ev := range events {
 			select {
 			case out <- ev:
 			case <-ctx.Done():
+				cancelled = true
 				return false
 			}
 		}
 		return true
 	}
+
+	// A cancelled stream still ends with a terminal event carrying what had
+	// already arrived. A consumer that watched a reply appear should not have
+	// it vanish because they stopped it, and a channel that simply closes tells
+	// them nothing about what they have.
+	endCancelled := func() {
+		ev, err := acc.Fail(ai.StopAborted, ctx.Err())
+		if err != nil {
+			return
+		}
+		if ev.Final != nil {
+			ev.Final.Usage = usage
+			ev.Final.EarlierAttempts = earlierUsage
+		}
+		select {
+		case out <- ev:
+		default:
+			// The consumer is gone; the event has nowhere useful to go.
+		}
+	}
+	defer func() {
+		if cancelled {
+			endCancelled()
+		}
+	}()
 	fail := func(f Failure, detail string) {
 		ev, err := acc.Fail(ai.StopError, &Error{Failure: f, Detail: detail})
 		if err != nil {
@@ -129,6 +172,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		// here would make failed calls look free.
 		if ev.Final != nil {
 			ev.Final.Usage = usage
+			ev.Final.EarlierAttempts = earlierUsage
 			if served != "" {
 				ev.Final.Model = served
 			}
@@ -216,7 +260,12 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		for _, call := range choice.Delta.ToolCalls {
 			blockIndex, known := callBlocks[call.Index]
 			if !known {
-				if started {
+				// Close a TEXT or THINKING block before the first call, but
+				// never a tool-call block: a provider may interleave the
+				// fragments of several calls (0, 1, 0, 1), and closing the
+				// earlier one would leave its remaining arguments with nowhere
+				// to land.
+				if started && kind != ai.BlockToolCall {
 					closed, err := acc.Close(index)
 					if err != nil {
 						fail(FailureUnknown, err.Error())
@@ -225,6 +274,8 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 					if !send(closed) {
 						return
 					}
+					index++
+				} else if started {
 					index++
 				}
 				blockIndex = index
@@ -260,13 +311,27 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			return
 		}
 		if started {
-			closed, err := acc.Close(index)
-			if err != nil {
-				fail(FailureUnknown, err.Error())
-				return
+			// Every block still open closes here. With interleaved calls there
+			// is more than one, and a reply cannot end while a block it
+			// contains is unfinished.
+			open := []int{}
+			if kind == ai.BlockToolCall {
+				for _, at := range callBlocks {
+					open = append(open, at)
+				}
+				sort.Ints(open)
+			} else {
+				open = append(open, index)
 			}
-			if !send(closed) {
-				return
+			for _, at := range open {
+				closed, err := acc.Close(at)
+				if err != nil {
+					fail(FailureUnknown, err.Error())
+					return
+				}
+				if !send(closed) {
+					return
+				}
 			}
 		}
 		reason := ai.StopEnd
@@ -290,6 +355,14 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			if err != nil {
 				return
 			}
+			// The call consumed what it consumed, overflow or not.
+			if ev.Final != nil {
+				ev.Final.Usage = usage
+				ev.Final.EarlierAttempts = earlierUsage
+				if served != "" {
+					ev.Final.Model = served
+				}
+			}
 			send(ev)
 			return
 		}
@@ -298,8 +371,11 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			fail(FailureUnknown, err.Error())
 			return
 		}
-		if served != "" && done.Final != nil {
-			done.Final.Model = served
+		if done.Final != nil {
+			done.Final.EarlierAttempts = earlierUsage
+			if served != "" {
+				done.Final.Model = served
+			}
 		}
 		send(done)
 		return

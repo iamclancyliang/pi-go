@@ -90,6 +90,19 @@ type MemoryStore struct {
 	locks map[string]*sync.Mutex
 }
 
+// String and GoString keep held secrets out of a formatted store.
+//
+// Redacting Stored is not enough: fmt reaches unexported fields by reflection
+// and cannot call a method on what it finds there, so formatting the container
+// prints the values structurally — secret included. The protection has to sit
+// on whatever actually holds the map.
+func (m *MemoryStore) String() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return fmt.Sprintf("deepseek.MemoryStore{providers:%d}", len(m.creds))
+}
+func (m *MemoryStore) GoString() string { return m.String() }
+
 // NewMemoryStore returns an empty store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{creds: map[string]Stored{}, locks: map[string]*sync.Mutex{}}

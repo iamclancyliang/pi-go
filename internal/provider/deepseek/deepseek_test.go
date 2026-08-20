@@ -75,7 +75,7 @@ func TestOneCallSendsOneRequest(t *testing.T) {
 	}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
-	resp, err := p.Generate(context.Background(), ai.Request{})
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestTheRequestCarriesTheFieldsThisProviderReads(t *testing.T) {
 		return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
 	}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-	if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+	if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestQuotaAndThrottleReachOppositeOutcomes(t *testing.T) {
 			}}
 			p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
-			_, err := p.Generate(context.Background(), ai.Request{})
+			_, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 			var got *deepseek.Error
 			if !errors.As(err, &got) {
 				t.Fatalf("error %v is not classified", err)
@@ -167,7 +167,7 @@ func TestA200ThatReportsFailureIsNotASuccess(t *testing.T) {
 			}}
 			p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
-			_, err := p.Generate(context.Background(), ai.Request{})
+			_, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 			var got *deepseek.Error
 			if !errors.As(err, &got) {
 				t.Fatalf("a 200 reporting %s produced %v, which is not a classified failure", tc.reason, err)
@@ -272,7 +272,7 @@ func TestUsageKeepsUnreportedApartFromZero(t *testing.T) {
 			return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"completion_tokens_details":{"reasoning_tokens":0}}}`)
 		}}
 		p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-		resp, err := p.Generate(context.Background(), ai.Request{})
+		resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +286,7 @@ func TestUsageKeepsUnreportedApartFromZero(t *testing.T) {
 			return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`)
 		}}
 		p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-		resp, err := p.Generate(context.Background(), ai.Request{})
+		resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +303,7 @@ func TestUsageKeepsUnreportedApartFromZero(t *testing.T) {
 			return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
 		}}
 		p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-		resp, err := p.Generate(context.Background(), ai.Request{})
+		resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -328,7 +328,7 @@ func TestAToolCallSplitAcrossChunksStaysOneCall(t *testing.T) {
 	}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
-	resp, err := p.Generate(context.Background(), ai.Request{})
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestAReplyAskingForToolsSaysSo(t *testing.T) {
 	}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
 
-	events, err := p.Stream(context.Background(), ai.Request{})
+	events, err := p.Stream(context.Background(), ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestTheServedModelIsReported(t *testing.T) {
 		return sse(`{"model":"deepseek-something-else","choices":[{"delta":{"content":"x"},"finish_reason":"stop"}]}`)
 	}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-	resp, err := p.Generate(context.Background(), ai.Request{})
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,26 +396,29 @@ func TestAnUncappedRequestCannotBeBuilt(t *testing.T) {
 	}
 }
 
-// TestNoModelIsRefusedBeforeAnythingIsSent: a request naming no model must not
-// silently reach whichever model configuration happened to hold.
+// TestNoModelIsRefusedBeforeAnythingIsSent: a request naming no model must fail
+// as a typed error and send nothing, rather than quietly reaching whichever
+// model this port happened to be configured with.
 func TestNoModelIsRefusedBeforeAnythingIsSent(t *testing.T) {
-	tr := &countingTransport{}
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(`{"choices":[{"delta":{"content":"should not happen"},"finish_reason":"stop"}]}`)
+	}}
 	p, err := deepseek.New(deepseek.Config{
-		Model: "configured", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"}, MaxOutputTokens: 8,
+		Model: "configured", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"},
+		MaxOutputTokens: 8,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The configured model is the default; an explicitly blank one on a port
-	// with no configured model is what must fail.
-	bare, err := deepseek.New(deepseek.Config{
-		Model: "x", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"}, MaxOutputTokens: 8,
-	})
-	if err != nil {
-		t.Fatal(err)
+
+	_, genErr := p.Generate(context.Background(), ai.Request{})
+	var classified *deepseek.Error
+	if !errors.As(genErr, &classified) {
+		t.Fatalf("an unnamed model produced %v, which a caller cannot branch on", genErr)
 	}
-	_ = p
-	_ = bare
+	if tr.requests != 0 {
+		t.Fatalf("sent %d requests for a call that named no model", tr.requests)
+	}
 }
 
 // TestTheKeyIsNotInAnyErrorOrFormattedPort covers the two paths a credential
@@ -441,7 +444,7 @@ func TestTheKeyIsNotInAnyErrorOrFormattedPort(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, genErr := p.Generate(context.Background(), ai.Request{})
+	_, genErr := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if genErr == nil {
 		t.Fatal("expected a failure")
 	}
@@ -460,8 +463,8 @@ func TestTheKeyIsNotInAnyErrorOrFormattedPort(t *testing.T) {
 	}
 }
 
-// TestCountBasedOverflowDetection covers the two checks B did not defer: both
-// read typed numbers, neither reads text.
+// TestCountBasedOverflowDetection covers the two checks that infer an overflow
+// from reported counts. Both read typed numbers; neither reads any text.
 func TestCountBasedOverflowDetection(t *testing.T) {
 	newWindowed := func(t *testing.T, tr deepseek.Transport, window int) *deepseek.Port {
 		t.Helper()
@@ -479,7 +482,7 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 		tr := &countingTransport{respond: func(int) *http.Response {
 			return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1100001,"completion_tokens":1}}`)
 		}}
-		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{})
+		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{Model: "m"})
 		if !errors.Is(err, ai.ErrContextOverflow) {
 			t.Fatalf("input past the window produced %v, so the shortening path never runs", err)
 		}
@@ -489,22 +492,24 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 		tr := &countingTransport{respond: func(int) *http.Response {
 			return sse(`{"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":1099999,"completion_tokens":0}}`)
 		}}
-		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{})
+		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{Model: "m"})
 		if !errors.Is(err, ai.ErrContextOverflow) {
 			t.Fatalf("a filled window with no room to answer produced %v", err)
 		}
 	})
 
 	t.Run("cached input still occupies the window", func(t *testing.T) {
-		// Prompt tokens served from cache are cheaper, not smaller: they take
-		// the same room. Counting only the uncached ones would miss an overflow
-		// on exactly the requests a cache makes common.
+		// Prompt tokens served from cache are cheaper, not smaller: they occupy
+		// the same room. prompt_tokens is the whole prompt including them, so
+		// the window comparison must use the whole thing — while the reported
+		// input is the uncached remainder, and adding the two would count the
+		// cached part twice.
 		tr := &countingTransport{respond: func(int) *http.Response {
-			return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":600000,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":600000}}}`)
+			return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1200000,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":600000}}}`)
 		}}
-		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{})
+		_, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{Model: "m"})
 		if !errors.Is(err, ai.ErrContextOverflow) {
-			t.Fatalf("600k uncached plus 600k cached against a 1.1M window produced %v", err)
+			t.Fatalf("a 1.2M prompt (600k of it cached) against a 1.1M window produced %v", err)
 		}
 	})
 
@@ -512,7 +517,7 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 		tr := &countingTransport{respond: func(int) *http.Response {
 			return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}`)
 		}}
-		if _, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{}); err != nil {
+		if _, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 			t.Fatalf("an ordinary reply was rejected: %v", err)
 		}
 	})
@@ -521,7 +526,7 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 		tr := &countingTransport{respond: func(int) *http.Response {
 			return sse(`{"choices":[{"delta":{},"finish_reason":"length"}]}`)
 		}}
-		if _, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{}); err != nil {
+		if _, err := newWindowed(t, tr, 1_100_000).Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 			t.Fatalf("silence about usage was read as zero and became an overflow: %v", err)
 		}
 	})
@@ -531,7 +536,7 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 			return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9999999,"completion_tokens":1}}`)
 		}}
 		p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-		if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+		if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 			t.Fatalf("a port with no measured window invented an overflow: %v", err)
 		}
 	})
@@ -546,7 +551,7 @@ func TestCancellationStaysCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := p.Generate(ctx, ai.Request{})
+	_, err := p.Generate(ctx, ai.Request{Model: "m"})
 	if err == nil {
 		t.Fatal("a cancelled call succeeded")
 	}
@@ -654,6 +659,17 @@ func TestListIsNonSecretAndSideEffectFree(t *testing.T) {
 		t.Fatalf("listing disclosed the key: %s", rendered)
 	}
 
+	// The CONTAINER must redact too. fmt reaches unexported fields by
+	// reflection and cannot call a method on what it finds there, so a store
+	// without its own String prints the map structurally — secret included.
+	for _, r := range []string{
+		fmt.Sprintf("%v", store), fmt.Sprintf("%+v", store), fmt.Sprintf("%#v", store),
+	} {
+		if strings.Contains(r, "sk-listing-secret") {
+			t.Fatalf("the store disclosed a held key when formatted: %s", r)
+		}
+	}
+
 	// A stored credential formats without its secret too.
 	held, _ := store.Read(ctx, "deepseek")
 	for _, r := range []string{fmt.Sprintf("%v", held), fmt.Sprintf("%+v", held), fmt.Sprintf("%#v", held)} {
@@ -726,7 +742,7 @@ func retryingPort(t *testing.T, tr deepseek.Transport, policy deepseek.RetryPoli
 func TestTheShippedBudgetSendsOneRequest(t *testing.T) {
 	tr := &retryTransport{responses: []*http.Response{status(503, `{"error":{"message":"busy"}}`)}}
 	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
-	if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+	if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err == nil {
 		t.Fatal("expected a failure")
 	}
 	if tr.requests != 1 {
@@ -743,7 +759,7 @@ func TestARetryableFailureIsRetriedUnderAPositiveBudget(t *testing.T) {
 	}}
 	p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 2, BaseDelay: time.Millisecond})
 
-	resp, err := p.Generate(context.Background(), ai.Request{})
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -764,7 +780,7 @@ func TestAnExhaustedBalanceIsTerminalBeforeAnyRetry(t *testing.T) {
 	}}
 	p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 5, BaseDelay: time.Millisecond})
 
-	_, err := p.Generate(context.Background(), ai.Request{})
+	_, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	var classified *deepseek.Error
 	if !errors.As(err, &classified) || classified.Failure != deepseek.FailureQuota {
 		t.Fatalf("classified %v", err)
@@ -783,7 +799,7 @@ func TestTheProvidersOwnInstructionOutranksTheStatus(t *testing.T) {
 			sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
 		}}
 		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
-		if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+		if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err == nil {
 			t.Fatal("expected a failure")
 		}
 		if tr.requests != 1 {
@@ -797,7 +813,7 @@ func TestTheProvidersOwnInstructionOutranksTheStatus(t *testing.T) {
 			sse(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`),
 		}}
 		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
-		if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+		if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 			t.Fatalf("Generate: %v", err)
 		}
 		if tr.requests != 2 {
@@ -811,7 +827,7 @@ func TestTheProvidersOwnInstructionOutranksTheStatus(t *testing.T) {
 			sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
 		}}
 		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
-		if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+		if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err == nil {
 			t.Fatal("expected a failure")
 		}
 		if tr.requests != 1 {
@@ -831,7 +847,7 @@ func TestAServerRequestedWaitBeyondTheCapIsRefused(t *testing.T) {
 	})
 
 	start := time.Now()
-	_, err := p.Generate(context.Background(), ai.Request{})
+	_, err := p.Generate(context.Background(), ai.Request{Model: "m"})
 	if err == nil {
 		t.Fatal("expected a failure")
 	}
@@ -857,7 +873,7 @@ func TestTheServerRequestedWaitIsHonoured(t *testing.T) {
 	})
 
 	start := time.Now()
-	if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+	if _, err := p.Generate(context.Background(), ai.Request{Model: "m"}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	elapsed := time.Since(start)
@@ -896,11 +912,102 @@ func TestCancellingABackoffStaysCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
 
-	_, genErr := p.Generate(ctx, ai.Request{})
+	_, genErr := p.Generate(ctx, ai.Request{Model: "m"})
 	if !errors.Is(genErr, context.Canceled) {
 		t.Fatalf("a cancelled backoff produced %v, which invites retrying what the caller stopped", genErr)
 	}
 	if tr.requests != 1 {
 		t.Fatalf("made %d requests after cancellation", tr.requests)
+	}
+}
+
+// TestInterleavedToolCallFragmentsStayApart: a provider may stream two calls at
+// once, alternating their fragments. Closing one block when the other's
+// fragment arrives leaves the first call's remaining arguments homeless.
+func TestInterleavedToolCallFragmentsStayApart(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc0","type":"function","function":{"name":"first","arguments":"{\"a"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"tc1","type":"function","function":{"name":"second","arguments":"{\"b"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":1}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\":2}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("two interleaved calls became %d: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	want := map[string]string{"tc0": `{"a":1}`, "tc1": `{"b":2}`}
+	for _, c := range resp.ToolCalls {
+		if want[c.ID] != c.Args {
+			t.Fatalf("call %s reassembled as %q, want %q", c.ID, c.Args, want[c.ID])
+		}
+	}
+	if resp.ToolCalls[0].ID != "tc0" || resp.ToolCalls[1].ID != "tc1" {
+		t.Fatalf("calls arrived out of the order the model asked for: %+v", resp.ToolCalls)
+	}
+}
+
+// TestCachedPromptTokensAreNotCountedTwice: prompt_tokens already includes the
+// cached part, so reporting it as input and then adding the cache count would
+// inflate every cached request — and could invent an overflow on one that fits.
+func TestCachedPromptTokensAreNotCountedTwice(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":600}}}`)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.InputTokens != 400 {
+		t.Fatalf("input reported as %d; 1000 prompt tokens of which 600 were cached is 400 uncached",
+			resp.Usage.InputTokens)
+	}
+	if resp.Usage.CacheReadTokens == nil || *resp.Usage.CacheReadTokens != 600 {
+		t.Fatalf("cache read reported as %v", resp.Usage.CacheReadTokens)
+	}
+}
+
+// TestACancelledStreamStillEnds: a consumer that watched a reply arrive keeps
+// what arrived, and is told the reply was aborted rather than left guessing at
+// a closed channel.
+func TestACancelledStreamStillEnds(t *testing.T) {
+	body := "data: " + `{"choices":[{"delta":{"content":"first"},"finish_reason":null}]}` + "\n\n" +
+		"data: " + `{"choices":[{"delta":{"content":"second"},"finish_reason":null}]}` + "\n\n"
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := p.Stream(ctx, ai.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var terminal *ai.AssistantMessage
+	read := 0
+	for ev := range events {
+		read++
+		if read == 2 {
+			cancel()
+		}
+		if ev.Final != nil {
+			terminal = ev.Final
+		}
+	}
+	if terminal == nil {
+		t.Fatal("a cancelled stream closed with no terminal event, so a consumer cannot tell " +
+			"an abort from a completed reply")
+	}
+	if terminal.StopReason != ai.StopAborted {
+		t.Fatalf("terminal reason %v, want %v", terminal.StopReason, ai.StopAborted)
 	}
 }
