@@ -180,6 +180,10 @@ decision rather than on implementation. What that does and does not mean:
   deadline it waited under turned that into a failure report that named machine load rather than the
   mechanism. It now waits on the request's own resolution and then observes, so "contributed" and
   "resolved without contributing" are separate recorded outcomes and neither is a guess about timing.
+  The asymmetry is the framework's and is what makes the new wait bounded: consuming a preempt request
+  acknowledges it unconditionally, while the preempt channel is closed only when the cancel actually
+  contributed. Evidence: a dropped `WithPreempt` now fails in about three seconds naming "resolved
+  without contributing", where the previous version blocked until the package timeout.
 - One intermittent failure remains: `TestSpike3ArmCTargetedGap`, seen 3 times in 240 executions, every
   one reporting `ExitReason = nil`.
   **Established**: `Stop(WithGraceful())` is a request to cancel at the next chat or tool safe point,
