@@ -173,8 +173,10 @@ decision rather than on implementation. What that does and does not mean:
   row's contract is partial — A1 — the test is partial with it.
 - The spike suite proves things about *eino*, not about pi-go. **Do not read green gates as scenario
   coverage.**
-- The intermittent failure in `TestC1bSteeringContract` (and its streaming twin, which shares the
-  probe) is **fixed**. `TurnLoop.Push` returns a channel that closes when the preempt REQUEST is
+- `TestC1bSteeringContract` (and its streaming twin, which shares the probe) had two separate
+  problems, and only one of them is closed.
+  **Closed**: the probe could block forever. `TurnLoop.Push` returns a channel that closes when the
+  preempt REQUEST is
   resolved, and resolution includes a no-op — the request can finish having submitted no cancel at
   all. The probe waited on the preempt itself, which never closes in that case; the two-second
   deadline it waited under turned that into a failure report that named machine load rather than the
@@ -184,6 +186,13 @@ decision rather than on implementation. What that does and does not mean:
   acknowledges it unconditionally, while the preempt channel is closed only when the cancel actually
   contributed. Evidence: a dropped `WithPreempt` now fails in about three seconds naming "resolved
   without contributing", where the previous version blocked until the package timeout.
+  **Open, and the more serious of the two**: with the wait no longer hiding it, the underlying
+  behaviour is intermittently wrong rather than merely unobservable. At high repetition the
+  preempting message does not cut in at the safe point — the second model call runs without it and it
+  arrives at the third, which is a steering request degrading into an ordinary follow-up. Both
+  variants show it, one resolving without contributing and one contributing too late. **This is a
+  contract failure, not a synchronisation artefact of the probe**, and it is unresolved. A passing run
+  is identifiable: the injected message appears in the SECOND model call, not the third.
 - One intermittent failure remains: `TestSpike3ArmCTargetedGap`, seen 3 times in 240 executions, every
   one reporting `ExitReason = nil`.
   **Established**: `Stop(WithGraceful())` is a request to cancel at the next chat or tool safe point,
