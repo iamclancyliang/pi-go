@@ -216,14 +216,22 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 				//
 				// A clock cannot stand in for either: it measures machine load, and
 				// it cannot tell "not yet" from "never".
-				if resolved := pt.requestResolved(); resolved != nil {
-					<-resolved
-				}
-				select {
-				case <-tc.Preempted:
-					tr.add(layerControl, "preempt:contributed", "Preempted closed at safe point")
+				// THREE OUTCOMES, kept apart. Collapsing the first two reports a
+				// preempt that was never requested as one that was requested and
+				// achieved nothing, which sends a reader looking for a framework
+				// fault where the push simply carried no preempt.
+				switch resolved := pt.requestResolved(); {
+				case resolved == nil:
+					tr.add(layerControl, "preempt:norequest",
+						"no resolution channel: this push carried no preempt")
 				default:
-					tr.add(layerControl, "preempt:noop", "request resolved without contributing")
+					<-resolved
+					select {
+					case <-tc.Preempted:
+						tr.add(layerControl, "preempt:contributed", "Preempted closed at safe point")
+					default:
+						tr.add(layerControl, "preempt:noop", "request resolved without contributing")
+					}
 				}
 			} else {
 				select {

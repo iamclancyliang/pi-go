@@ -184,8 +184,10 @@ decision rather than on implementation. What that does and does not mean:
   "resolved without contributing" are separate recorded outcomes and neither is a guess about timing.
   The asymmetry is the framework's and is what makes the new wait bounded: consuming a preempt request
   acknowledges it unconditionally, while the preempt channel is closed only when the cancel actually
-  contributed. Evidence: a dropped `WithPreempt` now fails in about three seconds naming "resolved
-  without contributing", where the previous version blocked until the package timeout.
+  contributed. Evidence: a push carrying no preempt now fails in about three seconds naming that it
+  carried none, where the previous version blocked until the package timeout. Three outcomes are kept
+  apart — no request made, request resolved without contributing, and contributed — because reporting
+  the first as the second sends a reader hunting a framework fault that is not there.
   **Open, and the more serious of the two**: with the wait no longer hiding it, the underlying
   behaviour is intermittently wrong rather than merely unobservable. At high repetition the
   preempting message does not cut in at the safe point — the second model call runs without it and it
