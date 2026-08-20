@@ -1091,7 +1091,8 @@ func TestA11ACallWhoseAttemptCannotBeRecordedDoesNotRun(t *testing.T) {
 	}
 }
 
-// TestRestoreReportsAStoreItCannotRead is the paired control for reopening.
+// TestRestoreReportsAStoreItCannotRead pins what reopening does when the record
+// cannot be read at all.
 //
 // A conversation that cannot be read back is not an empty conversation. Returning
 // one would hand the caller a fresh, blank history and let it carry on writing into
