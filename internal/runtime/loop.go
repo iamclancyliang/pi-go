@@ -1058,8 +1058,13 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 
 	// The round opens here, in the order the model asked for the calls. A
 	// streamed reply has no different claim on that ordering than any other.
+	//
+	// A reply that stopped at the length limit is CUT SHORT, and its calls carry
+	// whatever arguments had arrived when the cut fell. Cut arguments can still
+	// parse — half a path is a path — so the round is opened as truncated and
+	// every call it carried is refused rather than run.
 	if len(calls) > 0 && o.batch != nil {
-		o.batch.register(ctx, calls, o.sequentialFor, false)
+		o.batch.register(ctx, calls, o.sequentialFor, final.StopReason == ai.StopLength)
 	}
 	return nil
 }

@@ -857,3 +857,93 @@ func (h *heldModel) Stream(ctx context.Context, _ ai.Request) (<-chan ai.StreamE
 	}()
 	return out, nil
 }
+
+// TestACutOffStreamedReplyRunsNoTools pins that being cut short is not a licence
+// to act.
+//
+// A reply that hit the length limit stopped mid-sentence, so its arguments are
+// whatever had arrived when the cut fell. Cut arguments can still parse — half a
+// path is a path — so whether they look valid says nothing about whether they are
+// what the model meant.
+func TestACutOffStreamedReplyRunsNoTools(t *testing.T) {
+	registry := tools.NewRegistry()
+	writer := &countingWriteTool{}
+	registry.MustRegister(writer)
+
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model:     &cutOffStreamModel{},
+		ModelName: "fake-1",
+		Tools:     registry,
+		Session:   sess,
+		Policy:    runtime.AllowAll,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = agent.Run(ctx, "do something long")
+
+	if writer.runs != 0 {
+		t.Errorf("the tool ran %d times from a reply that was cut off: its arguments "+
+			"are whatever had arrived when the cut fell", writer.runs)
+	}
+}
+
+// cutOffStreamModel streams a tool call and then ends on the length limit.
+type cutOffStreamModel struct{ calls int }
+
+func (c *cutOffStreamModel) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (c *cutOffStreamModel) Stream(context.Context, ai.Request) (<-chan ai.StreamEvent, error) {
+	c.calls++
+	first := c.calls == 1
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		acc := ai.NewAccumulator("fake-1")
+		start, err := acc.Begin()
+		if err != nil {
+			return
+		}
+		out <- start
+		if !first {
+			if evs, err := acc.Push(ai.Chunk{Index: 0, Kind: ai.BlockText, Delta: "ok"}); err == nil {
+				for _, e := range evs {
+					out <- e
+				}
+			}
+			if e, err := acc.Close(0); err == nil {
+				out <- e
+			}
+			if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
+				out <- e
+			}
+			return
+		}
+		evs, err := acc.Push(ai.Chunk{
+			Index: 0, Kind: ai.BlockToolCall,
+			Call:  ai.ToolCall{ID: "call-1", Name: "delete_files"},
+			Delta: `{}`,
+		})
+		if err != nil {
+			return
+		}
+		for _, e := range evs {
+			out <- e
+		}
+		if e, err := acc.Close(0); err == nil {
+			out <- e
+		}
+		// The model ran out of room, not out of things to say.
+		if e, err := acc.Done(ai.StopLength, ai.Usage{}); err == nil {
+			out <- e
+		}
+	}()
+	return out, nil
+}
