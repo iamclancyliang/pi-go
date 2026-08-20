@@ -106,11 +106,11 @@ func TestA2SteeringDuringToolRound(t *testing.T) {
 
 	// Steer while the tool round is provably in flight.
 	//
-	// Steer returns only once the preempt has been registered, so releasing
-	// the tool afterwards cannot race it. The earlier version released the
-	// tool as soon as the push was accepted, which left "the preempt is in
-	// effect" assumed rather than established — and under load the turn
-	// sometimes finished first, turning the steer into a follow-up.
+	// Steer returns only once the preempt has been registered, so releasing the
+	// tool afterwards cannot race it. Releasing as soon as the push is accepted
+	// would leave "the preempt is in effect" assumed rather than established:
+	// under load the turn can finish first, which turns the steer into an
+	// ordinary follow-up and tests nothing about steering.
 	gate.waitEntered(t)
 	if err := run.Steer("INJECTED"); err != nil {
 		t.Fatalf("Steer: %v", err)

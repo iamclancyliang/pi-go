@@ -88,9 +88,9 @@ func (a *Agent) Repeat(ctx context.Context, resultID string) error {
 	if !known {
 		return fmt.Errorf("%w: %s", ErrToolGone, intent.Tool)
 	}
-	// The same rule recovery used to ask the question: both sides must say safe,
-	// and the version must match. Asked once and answered later, the terms could
-	// have changed in between.
+	// The same rule by which recovery asks the question: both sides must say safe
+	// and the version must match. The question is asked once and answered later,
+	// so the terms can change in between.
 	if policy != tools.ReplaySafe || intent.Replay != tools.ReplaySafe ||
 		version != intent.ToolVersion {
 		return fmt.Errorf("%w: %s", ErrTermsChanged, intent.Tool)
