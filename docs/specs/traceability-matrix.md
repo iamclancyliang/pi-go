@@ -173,5 +173,14 @@ decision rather than on implementation. What that does and does not mean:
   row's contract is partial — A1 — the test is partial with it.
 - The spike suite proves things about *eino*, not about pi-go. **Do not read green gates as scenario
   coverage.**
-- One known intermittent failure remains in the spike suite (`TestC1bSteeringContract`), observed once
-  in roughly 110 executions and not reproduced since. It is unexplained, not fixed.
+- The intermittent failure once seen in `TestC1bSteeringContract` is **explained and fixed**. It was a
+  two-second wall-clock wait for the preempt hand-off, which measured machine load as much as the
+  mechanism and so reported failures that had not happened; the streaming variant shared the same
+  probe and the same fault. The wait is now on the condition, so a genuine stall ends the run through
+  the package timeout and prints a goroutine dump naming what nothing arrived from.
+- One intermittent failure remains: `TestSpike3ArmCTargetedGap`, reproduced 3 times in 240 executions,
+  every one reporting `ExitReason = nil`. **The cause is understood and the test, not the framework,
+  is wrong**: a graceful stop takes effect at the next safe point, so when the round's work finishes
+  at that same point there is nothing left to cancel — no cancel error, no interrupt context, no
+  checkpoint. The probe asserts a root-cause interrupt context unconditionally. **Not yet corrected**;
+  what the probe should assert is a decision about what it is proving.

@@ -179,13 +179,12 @@ func runSteeringProbe(t *testing.T, preempt bool, streaming bool) *trace {
 			//
 			// Drain completion and the watcher closing the channel are separate
 			// goroutines, so a single non-blocking peek is racy. In the preempt
-			// scenario we WAIT for closure (timeout is a failure watchdog only and
-			// takes no part in injection timing); in the plain scenario we assert it
-			// stays open. Recorded before returning, hence before the next GenInput.
-			// Only the turn that actually contained the preempting Push should wait
-			// for closure. Waiting on later turns would fire the watchdog for a
-			// turn that was never preempted — a passing test must not print a
-			// WATCHDOG line, or the line stops meaning anything.
+			// scenario we WAIT for closure; in the plain scenario we assert it stays
+			// open. Recorded before returning, hence before the next GenInput.
+			//
+			// Only the turn that actually contained the preempting Push waits. A
+			// later turn was never preempted, so waiting on it would block for a
+			// closure that is not coming and stall the run instead of testing it.
 			turnNo := 0
 			turnMu.Lock()
 			turnCount++
@@ -247,7 +246,7 @@ func TestC1aFollowUpContract(t *testing.T) {
 	if !strings.Contains(tr.detailsMatching("Push:plain")[0], "accepted=true") {
 		t.Errorf("plain Push not accepted: %s", tr.detailsMatching("Push:plain")[0])
 	}
-	for _, ev := range []string{"preempt:contributed", "preempt:timeout", "preempt:unexpected"} {
+	for _, ev := range []string{"preempt:contributed", "preempt:unexpected"} {
 		if n := tr.countEvents(ev); n != 0 {
 			t.Errorf("%s occurred %d times without WithPreempt, want 0", ev, n)
 		}
@@ -304,7 +303,7 @@ func assertC1b(t *testing.T, tr *trace, modelEvent string) {
 	if n := tr.countEvents("preempt:contributed"); n != 1 {
 		t.Errorf("preempt:contributed = %d, want exactly 1", n)
 	}
-	for _, bad := range []string{"preempt:timeout", "preempt:unexpected", "history:materialize_error"} {
+	for _, bad := range []string{"preempt:unexpected", "history:materialize_error"} {
 		if n := tr.countEvents(bad); n != 0 {
 			t.Errorf("%s occurred %d times, want 0", bad, n)
 		}
