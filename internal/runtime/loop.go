@@ -894,13 +894,20 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 					}
 				}
 				o.publishReply(ctx, event)
-				out <- event
+				forward(ctx, out, event)
 				o.recordTerminal(ctx, event, requested)
 				return
 			}
 
 			o.publishReply(ctx, event)
-			out <- event
+			if !forward(ctx, out, event) {
+				// Nobody is reading any more. The reply still has an ending, and
+				// an observer that never receives one waits for an end that is
+				// not coming — so the rest is drained to reach it rather than
+				// abandoned here.
+				o.drainToEnd(ctx, in, requested)
+				return
+			}
 			switch {
 			case event.Terminal():
 				o.recordTerminal(ctx, event, requested)
@@ -1139,5 +1146,37 @@ func (o *observingPort) publishReply(ctx context.Context, event ai.StreamEvent) 
 	}
 	for _, observer := range o.replyObservers {
 		observer.Reply(event)
+	}
+}
+
+// forward hands one event on, and reports whether the reply is still wanted.
+//
+// A send that only waits for a reader waits forever when there is no longer one:
+// an abandoned run leaves this goroutine blocked, and the provider's goroutine
+// behind it, for the life of the process. Watching the run's own context is what
+// lets both notice that nobody is listening.
+func forward(ctx context.Context, out chan<- ai.StreamEvent, event ai.StreamEvent) bool {
+	select {
+	case out <- event:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// drainToEnd consumes what is left of an abandoned reply, publishing its ending.
+//
+// Content is dropped: the reader that would have shown it is gone. The terminal
+// is not, because an observer is still owed one — and draining rather than
+// walking away is also what lets the provider's goroutine finish instead of
+// blocking on a send nobody will take.
+func (o *observingPort) drainToEnd(ctx context.Context, in <-chan ai.StreamEvent, requested string) {
+	for event := range in {
+		if !event.Terminal() {
+			continue
+		}
+		o.publishReply(ctx, event)
+		o.recordTerminal(ctx, event, requested)
+		return
 	}
 }
