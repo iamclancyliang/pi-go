@@ -159,14 +159,29 @@ func (a *Accumulator) Close(index int) (StreamEvent, error) {
 	return event, nil
 }
 
+// ErrTerminal reports a terminal that the protocol does not allow.
+var ErrTerminal = errors.New("ai: invalid terminal")
+
 // Done ends the stream successfully.
 //
-// Blocks left open are not closed for it: an unclosed block is a fact about what
-// arrived, and inventing its end event would tell a consumer the model finished
-// something it did not.
+// Every block must be closed first. Only a failure may leave one open: a reply
+// that finished normally with an unfinished block would tell a consumer the model
+// both completed and did not complete the same thing, and there is no event left
+// to resolve it. Inventing the missing end instead would assert the model
+// finished something it never did.
 func (a *Accumulator) Done(reason StopReason, usage Usage) (StreamEvent, error) {
 	if a.ended {
 		return StreamEvent{}, errors.New("ai: the stream already ended")
+	}
+	switch reason {
+	case StopEnd, StopLength, StopToolUse, StopDeferred:
+	default:
+		return StreamEvent{}, fmt.Errorf("%w: %q ends a reply that failed", ErrTerminal, reason)
+	}
+	for index, open := range a.open {
+		if open {
+			return StreamEvent{}, fmt.Errorf("%w: block %d is still open", ErrTerminal, index)
+		}
 	}
 	a.ended = true
 	a.message.StopReason = reason
@@ -183,6 +198,11 @@ func (a *Accumulator) Done(reason StopReason, usage Usage) (StreamEvent, error) 
 func (a *Accumulator) Fail(reason StopReason, cause error) (StreamEvent, error) {
 	if a.ended {
 		return StreamEvent{}, errors.New("ai: the stream already ended")
+	}
+	// A failure says how it failed. Ending with a success reason here would put
+	// a reply in the record as complete while carrying an error.
+	if reason != StopError && reason != StopAborted {
+		return StreamEvent{}, fmt.Errorf("%w: %q does not describe a failure", ErrTerminal, reason)
 	}
 	a.ended = true
 	a.message.StopReason = reason

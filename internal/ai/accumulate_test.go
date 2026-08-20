@@ -35,6 +35,9 @@ func TestSnapshotsDoNotShareStorage(t *testing.T) {
 	held.Blocks[0].Text = "REWRITTEN"
 	held.Blocks = append(held.Blocks, Block{Kind: BlockText, Text: "INVENTED"})
 
+	if _, err := acc.Close(0); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 	done, err := acc.Done(StopEnd, Usage{})
 	if err != nil {
 		t.Fatalf("Done: %v", err)
@@ -89,6 +92,11 @@ func TestBlocksKeepTheirOwnIdentity(t *testing.T) {
 		}
 	}
 
+	for index := 0; index < 3; index++ {
+		if _, err := acc.Close(index); err != nil {
+			t.Fatalf("Close(%d): %v", index, err)
+		}
+	}
 	done, err := acc.Done(StopEnd, Usage{})
 	if err != nil {
 		t.Fatalf("Done: %v", err)
@@ -314,6 +322,63 @@ func TestAStreamEndsOnce(t *testing.T) {
 		}
 		if _, err := acc.Done(StopEnd, Usage{}); err == nil {
 			t.Error("a success after a failure was allowed")
+		}
+	})
+}
+
+// TestTheTerminalProtocolIsEnforced pins that a caller cannot end a reply in a
+// way the protocol does not allow.
+//
+// Left to convention these hold until someone forgets, and the result reaches a
+// consumer as a reply that both finished and did not, or one recorded as complete
+// while carrying an error.
+func TestTheTerminalProtocolIsEnforced(t *testing.T) {
+	t.Run("a normal ending closes every block", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Push(Chunk{Index: 0, Kind: BlockText, Delta: "unfinished"}); err != nil {
+			t.Fatalf("Push: %v", err)
+		}
+		if _, err := acc.Done(StopEnd, Usage{}); !errors.Is(err, ErrTerminal) {
+			t.Errorf("error = %v, want a refusal: the reply ended normally with a "+
+				"block still open", err)
+		}
+	})
+
+	t.Run("a failure may leave a block open", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Push(Chunk{Index: 0, Kind: BlockText, Delta: "cut off"}); err != nil {
+			t.Fatalf("Push: %v", err)
+		}
+		if _, err := acc.Fail(StopError, errors.New("hung up")); err != nil {
+			t.Errorf("Fail with an open block = %v, want it allowed: that is what "+
+				"being cut off looks like", err)
+		}
+	})
+
+	t.Run("a success reason cannot end a failure", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Fail(StopEnd, errors.New("boom")); !errors.Is(err, ErrTerminal) {
+			t.Errorf("error = %v, want a refusal: the reply would be recorded "+
+				"complete while carrying an error", err)
+		}
+	})
+
+	t.Run("a failure reason cannot end a success", func(t *testing.T) {
+		acc := NewAccumulator("fake-1")
+		if _, err := acc.Begin(); err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if _, err := acc.Done(StopError, Usage{}); !errors.Is(err, ErrTerminal) {
+			t.Errorf("error = %v, want a refusal", err)
 		}
 	})
 }

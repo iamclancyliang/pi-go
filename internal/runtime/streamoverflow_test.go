@@ -61,6 +61,9 @@ func (o *overflowingStream) Stream(context.Context, ai.Request) (<-chan ai.Strea
 				out <- e
 			}
 		}
+		if e, err := acc.Close(0); err == nil {
+			out <- e
+		}
 		if e, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
 			out <- e
 		}
@@ -250,5 +253,34 @@ func TestAFailureThatOnlyReadsLikeAnOverflowIsNotRecovered(t *testing.T) {
 	if got := countStreamKind(rec, events.KindModelRequest); got != 1 {
 		t.Errorf("model_request = %d, want 1: the context was shortened and the "+
 			"model asked again for a failure that had nothing to do with size", got)
+	}
+}
+
+// TestARetriedReplyBeginsOnce pins that recovery does not describe two replies.
+//
+// The consumer was told this reply began before the first attempt was refused.
+// Announcing it again would have it render one answer as two, and the second
+// start carries a partial that contradicts the first.
+func TestARetriedReplyBeginsOnce(t *testing.T) {
+	port, _ := overflowPort(t, &overflowingStream{}, session.New("You are pi-go."))
+
+	stream, err := port.Stream(context.Background(), ai.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	starts, terminals := 0, 0
+	for event := range stream {
+		switch {
+		case event.Kind == ai.StreamStart:
+			starts++
+		case event.Terminal():
+			terminals++
+		}
+	}
+	if starts != 1 {
+		t.Errorf("observable starts = %d, want 1: one reply was described as two", starts)
+	}
+	if terminals != 1 {
+		t.Errorf("terminals = %d, want 1", terminals)
 	}
 }

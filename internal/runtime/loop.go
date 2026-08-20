@@ -853,10 +853,21 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 	// Iterative rather than recursive. A retry replaces the attempt rather than
 	// nesting inside it, so the recovery budget is what limits attempts and
 	// nothing depends on stack depth to stop.
+	announced := false
 	for {
 		var retried <-chan ai.StreamEvent
 
 		for event := range in {
+			// ONE START PER REPLY. A retry is another attempt at the same reply,
+			// not a second reply: the consumer was told once that this reply
+			// began, and telling it again would describe two.
+			if event.Kind == ai.StreamStart {
+				if announced {
+					continue
+				}
+				announced = true
+			}
+
 			if event.Kind == ai.StreamError && event.Final != nil &&
 				errors.Is(event.Final.Cause, ai.ErrContextOverflow) {
 

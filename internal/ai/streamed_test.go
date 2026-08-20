@@ -64,6 +64,13 @@ func (p *gatedProvider) Stream(ctx context.Context, _ Request) (<-chan StreamEve
 				out <- event
 			}
 		}
+		// Every block is closed before the reply ends: a normal ending with an
+		// unfinished block is not something the protocol allows.
+		for i := range p.chunks {
+			if event, err := acc.Close(i); err == nil {
+				out <- event
+			}
+		}
 		if event, err := acc.Done(StopEnd, Usage{InputTokens: 1, OutputTokens: 2}); err == nil {
 			out <- event
 		}

@@ -153,6 +153,9 @@ func (s *substitutingStream) Stream(context.Context, ai.Request) (<-chan ai.Stre
 		for _, e := range events {
 			out <- e
 		}
+		if closed, err := acc.Close(0); err == nil {
+			out <- closed
+		}
 		if done, err := acc.Done(ai.StopEnd, ai.Usage{}); err == nil {
 			out <- done
 		}
