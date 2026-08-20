@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -49,25 +50,103 @@ func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, o
 	return toEinoMessage(resp), nil
 }
 
-// Stream satisfies eino's interface by delivering the non-streaming result as a
-// single chunk.
+// Stream delivers the reply to the framework as it arrives.
 //
-// This is deliberately NOT presented as streaming support. pi's real path is
-// streaming and it needs its own verification; emitting one chunk would make a
-// streaming test pass without proving anything about incremental delivery. v0
-// slice is deterministic, so the honest position is that streaming is
-// unimplemented, not that it works.
+// THE FRAMEWORK GETS A LOSSY VIEW, and that is a decision rather than an
+// oversight. Its message carries text and reasoning as two flat strings and tool
+// calls as a third field, so block boundaries and their order do not survive the
+// crossing: two adjacent text blocks arrive as one. The framework does not need
+// them — it drives the loop — while pi-go's own event surface keeps the block
+// structure for anything that renders the reply.
+//
+// A port that cannot stream falls back to one chunk. That is not presented as
+// streaming: it is the whole answer, delivered once, which is what a
+// non-streaming provider has to give.
 func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	msg, err := m.Generate(ctx, input, opts...)
+	streaming, ok := m.port.(ai.StreamingPort)
+	if !ok {
+		msg, err := m.Generate(ctx, input, opts...)
+		if err != nil {
+			return nil, err
+		}
+		sr, sw := schema.Pipe[*schema.Message](1)
+		go func() {
+			defer sw.Close()
+			sw.Send(msg, nil)
+		}()
+		return sr, nil
+	}
+
+	events, err := streaming.Stream(ctx, ai.Request{
+		Messages: fromEinoMessages(input),
+		Tools:    toolSpecsFromOptions(opts),
+		Model:    m.defaultModel(),
+	})
 	if err != nil {
 		return nil, err
 	}
-	sr, sw := schema.Pipe[*schema.Message](1)
+
+	sr, sw := schema.Pipe[*schema.Message](streamBuffer)
 	go func() {
 		defer sw.Close()
-		sw.Send(msg, nil)
+		for event := range events {
+			chunk, send := einoChunk(event)
+			if !send {
+				continue
+			}
+			if closed := sw.Send(chunk, einoTerminalError(event)); closed {
+				return
+			}
+		}
 	}()
 	return sr, nil
+}
+
+// streamBuffer is how many chunks may sit between the provider and the framework.
+//
+// Small on purpose: a large buffer would let the provider run far ahead of the
+// consumer, which turns delivery-as-it-arrives back into delivery-in-a-burst
+// without anything reporting that it had.
+const streamBuffer = 1
+
+// einoChunk converts one event, and reports whether the framework should see it.
+//
+// Only the increments cross. The start, the block boundaries and the terminal
+// carry no new content, and forwarding them would make the framework's own
+// concatenation count the same text twice.
+func einoChunk(e ai.StreamEvent) (*schema.Message, bool) {
+	switch e.Kind {
+	case ai.StreamTextDelta:
+		return &schema.Message{Role: schema.Assistant, Content: e.Delta}, true
+	case ai.StreamThinkingDelta:
+		return &schema.Message{Role: schema.Assistant, ReasoningContent: e.Delta}, true
+	case ai.StreamToolCallEnd:
+		return &schema.Message{
+			Role: schema.Assistant,
+			ToolCalls: []schema.ToolCall{{
+				ID:       e.Call.ID,
+				Function: schema.FunctionCall{Name: e.Call.Name, Arguments: e.Call.Args},
+			}},
+		}, true
+	case ai.StreamError:
+		return &schema.Message{Role: schema.Assistant}, true
+	default:
+		return nil, false
+	}
+}
+
+// einoTerminalError is the error the framework is given, if any.
+//
+// A failed reply must fail the stream. Sending its text and stopping quietly
+// would present a cut-off answer as a complete one.
+func einoTerminalError(e ai.StreamEvent) error {
+	if e.Kind != ai.StreamError || e.Final == nil {
+		return nil
+	}
+	if e.Final.StopReason == ai.StopAborted {
+		return context.Canceled
+	}
+	return errors.New("runtime: " + e.Final.ErrorMessage)
 }
 
 var _ model.BaseChatModel = (*einoChatModel)(nil)
