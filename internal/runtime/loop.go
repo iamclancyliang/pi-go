@@ -811,3 +811,90 @@ func toEinoRole(r ai.Role) schema.RoleType {
 		return schema.RoleType(r)
 	}
 }
+
+// Stream delivers a reply as it arrives, with the same guards the whole-answer
+// path applies.
+//
+// Without this the observing port would not satisfy ai.StreamingPort, the model
+// adapter's type assertion would fail, and every reply would quietly fall back to
+// arriving in one piece — streaming would be implemented and never reached.
+func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
+	// An input that already failed terminally is not asked again, streamed or
+	// otherwise. Reopening it would spend the same money to reach the same
+	// conclusion.
+	if failure := o.session.Failure(); failure != nil {
+		return nil, failureError(failure, nil)
+	}
+
+	streaming, ok := o.inner.(ai.StreamingPort)
+	if !ok {
+		return nil, errStreamUnsupported
+	}
+
+	requested := req.Model
+	if requested == "" {
+		requested = o.currentModel()
+	}
+	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+		e.Detail.MessageCount = len(req.Messages)
+		e.Detail.Model = requested
+	})
+
+	events0, err := streaming.Stream(ctx, req)
+	if err != nil {
+		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+			e.Detail.Model = requested
+			e.Detail.Err = err.Error()
+		})
+		return nil, err
+	}
+
+	out := make(chan ai.StreamEvent)
+	go func() {
+		defer close(out)
+		for event := range events0 {
+			// Forward first: an observer's bookkeeping must not delay the reply
+			// reaching whoever is rendering it.
+			out <- event
+			if !event.Terminal() {
+				continue
+			}
+			o.observeTerminal(event, requested)
+		}
+	}()
+	return out, nil
+}
+
+// errStreamUnsupported reports that the provider behind this port answers only in
+// one piece.
+var errStreamUnsupported = errors.New("runtime: this model does not stream")
+
+// observeTerminal publishes what a finished stream means to the event surface.
+//
+// The per-block events are not republished here. They are the reply's own
+// protocol, carried on the model port for whoever renders it; this stream
+// describes the run, and folding thousands of deltas into it would drown the
+// events a client watches for.
+func (o *observingPort) observeTerminal(event ai.StreamEvent, requested string) {
+	final := event.Final
+	if final == nil {
+		return
+	}
+
+	// eino executes a model swap but never interprets it, so a reply served by a
+	// model other than the one asked for is only visible if pi-go says so.
+	if served := final.Model; served != "" && served != requested {
+		o.emitter.emit(events.KindModelChanged, func(e *events.Event) {
+			e.Detail.From = requested
+			e.Detail.To = served
+		})
+	}
+
+	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+		e.Detail.Model = requested
+		e.Detail.MessageCount = len(final.Blocks)
+		if event.Kind == ai.StreamError {
+			e.Detail.Err = final.ErrorMessage
+		}
+	})
+}
