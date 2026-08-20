@@ -577,6 +577,11 @@ type observingPort struct {
 	batch          *toolBatch
 	sequentialFor  func(name string) bool
 	summarize      func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+
+	// failed is why recovery could not be attempted, when that is a different
+	// failure from the one being recovered from.
+	failedMu sync.Mutex
+	failed   error
 }
 
 // recoverFromOverflow compacts once and asks again, or gives up.
@@ -841,6 +846,10 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()
 		})
+		// A reply that failed before it began is still a reply that ended. An
+		// observer told nothing waits for an end that is not coming, and cannot
+		// tell this from a stream still being set up.
+		o.publishReply(ctx, preStartFailure(err))
 		return nil, err
 	}
 
@@ -891,6 +900,9 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 					if next, ok := o.reopen(ctx, req, requested, event); ok {
 						retried = next
 						break
+					}
+					if cause := o.recoveryFailure(); cause != nil {
+						event = unrecordable(event, cause)
 					}
 				}
 				o.publishReply(ctx, event)
@@ -949,10 +961,19 @@ func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested st
 		return nil, false
 	}
 	retry, err := o.shortenForRetry(ctx, req, failed.Final.Cause, failed.Final.Usage)
-	if err != nil || retry == nil {
-		if err != nil && o.batch != nil {
+	if err != nil {
+		// Recovery itself failed. Reporting the refusal it was recovering from
+		// sends a reader after the context size when the shortening is what
+		// broke, so the reason that surfaces is this one.
+		o.failedMu.Lock()
+		o.failed = err
+		o.failedMu.Unlock()
+		if o.batch != nil {
 			o.batch.recordStreamFailure(err)
 		}
+		return nil, false
+	}
+	if retry == nil {
 		return nil, false
 	}
 
@@ -1214,4 +1235,26 @@ func unrecordable(event ai.StreamEvent, cause error) ai.StreamEvent {
 	event.Kind = ai.StreamError
 	event.Final = &failed
 	return event
+}
+
+// preStartFailure is the ending of a reply that never began.
+func preStartFailure(cause error) ai.StreamEvent {
+	return ai.StreamEvent{
+		Kind: ai.StreamError,
+		Final: &ai.AssistantMessage{
+			StopReason:   ai.StopError,
+			ErrorMessage: cause.Error(),
+			Cause:        cause,
+		},
+	}
+}
+
+// recoveryFailure reports why recovery could not be attempted, if that is what
+// happened, and clears it.
+func (o *observingPort) recoveryFailure() error {
+	o.failedMu.Lock()
+	defer o.failedMu.Unlock()
+	cause := o.failed
+	o.failed = nil
+	return cause
 }

@@ -161,6 +161,12 @@ func einoTerminalError(e ai.StreamEvent) error {
 	if e.Final.StopReason == ai.StopAborted {
 		return context.Canceled
 	}
+	// The cause itself, so a caller can recognise what failed rather than read
+	// about it. Rebuilding an error from its text loses every wrapping the
+	// caller might branch on.
+	if e.Final.Cause != nil {
+		return e.Final.Cause
+	}
 	return errors.New("runtime: " + e.Final.ErrorMessage)
 }
 

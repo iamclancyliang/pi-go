@@ -1000,3 +1000,78 @@ func TestToolsDoNotRunWhenTheReplyCouldNotBeRecorded(t *testing.T) {
 			"not contain", writer.runs)
 	}
 }
+
+// TestASetupFailureStillEndsTheReply pins that an observer is told even when the
+// reply never started.
+func TestASetupFailureStillEndsTheReply(t *testing.T) {
+	consumer := &recordingConsumer{}
+	agent, err := runtime.New(runtime.Config{
+		Model:          setupFailingModel{},
+		ModelName:      "fake-1",
+		Tools:          tools.NewRegistry(),
+		Session:        session.New("You are pi-go."),
+		Policy:         runtime.DenyWrites,
+		Observers:      []events.Observer{runtime.NewRecorder()},
+		ReplyObservers: []runtime.ReplyObserver{consumer},
+		Now:            fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "ask"); err == nil {
+		t.Fatal("a run whose stream could not be opened reported success")
+	}
+
+	if got := terminalsSeen(consumer); got != 1 {
+		t.Errorf("terminals = %d, want exactly 1: an observer told nothing waits "+
+			"for an end that is not coming", got)
+	}
+}
+
+type setupFailingModel struct{}
+
+func (setupFailingModel) Generate(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, errors.New("this model streams and was asked for a whole answer")
+}
+
+func (setupFailingModel) Stream(context.Context, ai.Request) (<-chan ai.StreamEvent, error) {
+	return nil, errors.New("setup failed")
+}
+
+// errSummaryBroke is the sentinel a caller should be able to recognise.
+var errSummaryBroke = errors.New("summary broke")
+
+// TestAFailedShorteningReportsItself pins which failure surfaces.
+//
+// Reporting the refusal that recovery was attempted for sends a reader after the
+// context size when the shortening is what broke.
+func TestAFailedShorteningReportsItself(t *testing.T) {
+	agent, err := runtime.New(runtime.Config{
+		Model:     &overflowThenAnswer{},
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   session.New("You are pi-go."),
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+		Summarize: func(context.Context, []ai.Message) (string, []ai.Message, error) {
+			return "", nil, errSummaryBroke
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	runErr := agent.Run(ctx, "ask something long")
+
+	if runErr == nil {
+		t.Fatal("a run whose recovery failed reported success")
+	}
+	if !errors.Is(runErr, errSummaryBroke) {
+		t.Errorf("error = %v, want it to name the shortening failure: the caller is "+
+			"sent after the context size when the summariser is what broke", runErr)
+	}
+}
