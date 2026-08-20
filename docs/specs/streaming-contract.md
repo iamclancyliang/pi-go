@@ -103,3 +103,27 @@ in one chunk or twenty produces the same final message.
 A one-chunk implementation satisfies §1 and §5 and fails §2 (no per-block progression), §3 (no index
 to attribute), §4 (one `partial`, which is also the final message) and §6 (trivially, because there
 is nothing to strip). Any test that a single chunk can pass is not testing streaming.
+
+## 8. What the framework gives us, and what it does not
+
+eino's streamed chunk is a partial `schema.Message`
+(`schema/message.go:499-528`): text arrives in `Content`, thinking in
+`ReasoningContent`, and tool calls in `ToolCalls`, where `ToolCall.Index` is documented as
+identifying "the chunk of the tool call for merging".
+
+**There is no equivalent of `contentIndex`.** eino separates content by FIELD; Pi has one ordered list
+of heterogeneous blocks with a single index space. A tool-call index is not a block index: it counts
+tool calls, not content blocks, so text and thinking do not appear in it at all.
+
+Consequences, and they are the load-bearing ones for the implementation:
+
+- pi-go cannot pass framework chunks through and obtain Pi's protocol. It must maintain the block
+  list itself and assign `contentIndex` in its own space.
+- Block boundaries have to be derived. A chunk carrying `Content` after a chunk carrying
+  `ReasoningContent` is a new block; a chunk carrying more `Content` continues the current one.
+- The mapping is therefore part of the contract under test, not an implementation detail: if it is
+  wrong, `contentIndex` is wrong, and every consumer that attributes a delta to a block is wrong with
+  it.
+
+**Checkable:** a stream that interleaves text, thinking and tool-call chunks produces a block list
+whose indices are stable, contiguous from zero, and unchanged by how the provider chunked them.
