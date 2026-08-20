@@ -52,9 +52,15 @@ Chosen because Go delivers events across goroutines, where a shared mutable poin
 and because this repository has twice fixed bugs where a reader could rewrite the record it was
 handed.
 
-Everything mutable must be copied, not just the top level: the content slice, each block, tool-call
-arguments (arbitrarily nested), `usage`, `usage.cost` (mutated in place after the fact,
-`models.ts:892-896`), diagnostics and each diagnostic's details.
+Everything mutable must be copied, not just the top level. What pi-go carries, and therefore copies:
+the block slice, each block, and the tool call's arguments.
+
+**Declared gap, not silent omission.** Pi's message also carries `usage.cost` (mutated in place after
+the fact, `models.ts:892-896`) and diagnostics with their details. pi-go does not carry those fields
+at all, so there is nothing to copy and nothing to test. The deep-copy rule extends to them the moment
+they are added, and the rule is written that way rather than enumerating today's fields — but the
+fields themselves are missing, and a reader comparing against Pi should know that rather than infer
+from a copy list that they are handled.
 
 **Checkable, both directions:** a producer mutation after delivery must not appear in an already
 delivered event; a consumer mutation of a delivered event must not appear in any later event or in
