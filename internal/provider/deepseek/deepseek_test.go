@@ -979,8 +979,15 @@ func TestCachedPromptTokensAreNotCountedTwice(t *testing.T) {
 // what arrived, and is told the reply was aborted rather than left guessing at
 // a closed channel.
 func TestACancelledStreamStillEnds(t *testing.T) {
-	body := "data: " + `{"choices":[{"delta":{"content":"first"},"finish_reason":null}]}` + "\n\n" +
-		"data: " + `{"choices":[{"delta":{"content":"second"},"finish_reason":null}]}` + "\n\n"
+	// Long enough that cancelling after the second event certainly happens while
+	// the stream still has more to give. With a short body the reader can reach
+	// the end first, and a stream that ran out without a stop reason ends as an
+	// error for that reason — a different outcome, not a flake.
+	var sb strings.Builder
+	for i := 0; i < 500; i++ {
+		sb.WriteString("data: " + `{"choices":[{"delta":{"content":"x"},"finish_reason":null}]}` + "\n\n")
+	}
+	body := sb.String()
 	tr := &countingTransport{respond: func(int) *http.Response {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}
 	}}

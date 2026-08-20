@@ -597,3 +597,43 @@ func TestAFailedCollectedCallLedgersToo(t *testing.T) {
 		t.Fatalf("a failed collected call ledgered %d input tokens, want 55", total.InputTokens)
 	}
 }
+
+// TestAttemptsSurviveACallThatNeverSucceeds: a call that exhausted its budget
+// spent on every attempt. Ledgering only successful calls means the runs that
+// cost money and produced nothing are the ones that vanish from the accounts.
+func TestAttemptsSurviveACallThatNeverSucceeds(t *testing.T) {
+	body := func(prompt int) *http.Response {
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(
+			fmt.Sprintf(`{"error":{"message":"busy"},"usage":{"prompt_tokens":%d,"completion_tokens":0}}`, prompt)))}
+	}
+	transport := &sequenceTransport{responses: []*http.Response{body(70), body(30)}}
+
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+		Retry:           deepseek.RetryPolicy{MaxRetries: 1, BaseDelay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err == nil {
+		t.Fatal("a call that never succeeded was reported as a successful run")
+	}
+
+	if transport.requests != 2 {
+		t.Fatalf("made %d requests, want 2", transport.requests)
+	}
+	if total := sess.Usage(); total.InputTokens != 100 {
+		t.Fatalf("a call that failed on both attempts ledgered %d input tokens, want 100",
+			total.InputTokens)
+	}
+}

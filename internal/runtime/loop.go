@@ -734,12 +734,7 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		// call. Otherwise the same failure would count when streamed and be
 		// free when collected — an accounting difference created by nothing
 		// but how the reply was read.
-		var reporter ai.UsageReporter
-		if errors.As(err, &reporter) {
-			for _, u := range reporter.Consumed() {
-				o.session.RecordUsage(u)
-			}
-		}
+		o.recordConsumed(err)
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()
@@ -864,6 +859,10 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()
 		})
+		// A failure that knows what it consumed is ledgered even though no reply
+		// ever arrived: the attempts behind it read the request.
+		o.recordConsumed(err)
+
 		// A reply that failed before it began is still a reply that ended. An
 		// observer told nothing waits for an end that is not coming, and cannot
 		// tell this from a stream still being set up.
@@ -1295,4 +1294,19 @@ func (o *observingPort) recoveryFailure() error {
 	cause := o.failed
 	o.failed = nil
 	return cause
+}
+
+// recordConsumed ledgers what a failed call used, when the failure knows.
+//
+// A failure is sometimes all a caller receives — no response, and on a stream
+// that never started, no events either. Without this the same failure would
+// count when it arrived one way and be free when it arrived another.
+func (o *observingPort) recordConsumed(err error) {
+	var reporter ai.UsageReporter
+	if !errors.As(err, &reporter) {
+		return
+	}
+	for _, u := range reporter.Consumed() {
+		o.session.RecordUsage(u)
+	}
 }

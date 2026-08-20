@@ -131,6 +131,8 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 	)
 
 	cancelled := false
+	// A CONTENT event may be abandoned when the caller stops listening: it is
+	// one of many and the reply is being cut short anyway.
 	send := func(events ...ai.StreamEvent) bool {
 		for _, ev := range events {
 			select {
@@ -142,6 +144,12 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		}
 		return true
 	}
+	// A TERMINAL event may not. It is the only one the stream will ever
+	// produce, and abandoning it on a cancelled context loses exactly the event
+	// that tells the consumer the reply was aborted. Consumers of this port
+	// drain until the channel closes, so this returns as soon as the event is
+	// taken.
+	sendTerminal := func(ev ai.StreamEvent) { out <- ev }
 
 	// A cancelled stream still ends with a terminal event carrying what had
 	// already arrived. A consumer that watched a reply appear should not have
@@ -156,11 +164,13 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			ev.Final.Usage = usage
 			ev.Final.EarlierAttempts = earlierUsage
 		}
-		select {
-		case out <- ev:
-		default:
-			// The consumer is gone; the event has nowhere useful to go.
-		}
+		// Sent by blocking, not offered. A non-blocking send drops the event
+		// whenever the consumer is not waiting at that instant, which loses the
+		// only terminal the stream will ever produce — and loses it randomly,
+		// so it looks like a rare flake rather than a missing guarantee. A
+		// consumer of this port drains until the channel closes, so this
+		// returns as soon as it takes the event.
+		out <- ev
 	}
 	defer func() {
 		if cancelled {
@@ -182,7 +192,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				ev.Final.Model = served
 			}
 		}
-		send(ev)
+		sendTerminal(ev)
 	}
 
 	// closeBlocks closes the named blocks in order and reports whether the
@@ -372,7 +382,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 					ev.Final.Model = served
 				}
 			}
-			send(ev)
+			sendTerminal(ev)
 			return
 		}
 		done, err := acc.Done(reason, usage)
@@ -386,7 +396,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				done.Final.Model = served
 			}
 		}
-		send(done)
+		sendTerminal(done)
 		return
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {

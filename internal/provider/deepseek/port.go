@@ -255,6 +255,11 @@ func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, erro
 // scrubbed of anything credential-shaped even so.
 func failureFrom(resp *http.Response, key string) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	return failureFromBytes(resp.StatusCode, raw, key)
+}
+
+// failureFromBytes classifies a failure from bytes already read.
+func failureFromBytes(status int, raw []byte, key string) error {
 	var body struct {
 		Error struct {
 			Message string `json:"message"`
@@ -273,8 +278,8 @@ func failureFrom(resp *http.Response, key string) error {
 		detail = fmt.Sprintf("unparsed body, %d bytes", len(raw))
 	}
 	return &Error{
-		Failure: classifyStatus(resp.StatusCode),
-		Status:  resp.StatusCode,
+		Failure: classifyStatus(status),
+		Status:  status,
 		Detail:  scrub(detail, key),
 	}
 }
@@ -348,7 +353,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 				return nil, attempts, capErr
 			}
 			if !decision.retry {
-				return nil, attempts, err
+				return nil, attempts, withAttempts(err, attempts)
 			}
 			attempts = append(attempts, Attempt{})
 			if waitErr := wait(ctx, decision.after); waitErr != nil {
@@ -368,12 +373,22 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		}
 		if !decision.retry {
 			defer resp.Body.Close()
-			return nil, attempts, failureFrom(resp, p.credentialForScrubbing(ctx))
+			// The attempt that failed last read the request too, so it joins
+			// the earlier ones. The body is read once: usage first, then the
+			// message, from the bytes already in hand.
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+			final := append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBytes(raw)})
+			// The attempts behind this failure travel with it. Returning them
+			// alongside an error nobody reads them from is how a call that
+			// failed after several billed attempts ledgers nothing at all.
+			return nil, final, withAttempts(
+				failureFromBytes(resp.StatusCode, raw, p.credentialForScrubbing(ctx)), final)
 		}
 		// What a failed attempt reported using, if it said. A rate-limit body
 		// rarely carries usage, but an attempt that did read the request and
 		// then failed must not be recorded as free.
-		attempts = append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBody(resp)})
+		retriedRaw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		attempts = append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBytes(retriedRaw)})
 		resp.Body.Close()
 		if waitErr := wait(ctx, decision.after); waitErr != nil {
 			return nil, attempts, waitErr
@@ -381,12 +396,8 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 	}
 }
 
-// usageFromBody reads usage from a non-streaming error body, when one is there.
-func usageFromBody(resp *http.Response) ai.Usage {
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-	if err != nil {
-		return ai.Usage{}
-	}
+// usageFromBytes reads usage from an error body, when one is there.
+func usageFromBytes(raw []byte) ai.Usage {
 	var body struct {
 		Usage *wireUsage `json:"usage"`
 	}
@@ -394,4 +405,25 @@ func usageFromBody(resp *http.Response) ai.Usage {
 		return ai.Usage{}
 	}
 	return body.Usage.toUsage()
+}
+
+// withAttempts attaches what earlier attempts used to a classified failure, so
+// the counts survive on the only thing the caller receives.
+func withAttempts(err error, attempts []Attempt) error {
+	var classified *Error
+	if !errors.As(err, &classified) || len(attempts) == 0 {
+		return err
+	}
+	used := make([]ai.Usage, 0, len(attempts))
+	for _, a := range attempts {
+		if a.Usage.Reported {
+			used = append(used, a.Usage)
+		}
+	}
+	if len(used) == 0 {
+		return err
+	}
+	withUsage := *classified
+	withUsage.Usage = append(append([]ai.Usage(nil), used...), classified.Usage...)
+	return &withUsage
 }
