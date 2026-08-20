@@ -98,11 +98,18 @@ type overflowingModel struct {
 	requests [][]ai.Message
 }
 
+// refusedCost is what one refused request still costs. A provider that rejects a
+// request for being too large has already read it, and bills for it.
+var refusedCost = ai.Usage{InputTokens: 1200, OutputTokens: 0}
+
 func (m *overflowingModel) Generate(_ context.Context, req ai.Request) (ai.Response, error) {
 	m.mu.Lock()
 	m.requests = append(m.requests, req.Messages)
 	m.mu.Unlock()
-	return ai.Response{}, fmt.Errorf("provider refused: %w", ai.ErrContextOverflow)
+	// The cost rides on the response even though the call failed: dropping it
+	// here would under-report what the user actually paid.
+	return ai.Response{Usage: refusedCost},
+		fmt.Errorf("provider refused: %w", ai.ErrContextOverflow)
 }
 
 func (m *overflowingModel) calls() int {
@@ -288,5 +295,68 @@ func TestA10TerminalOverflowIsDurable(t *testing.T) {
 	}
 	if got := reopened.OverflowAttempts(); got != 0 {
 		t.Errorf("attempts after a new question = %d, want 0", got)
+	}
+}
+
+// TestA10WithNoWayToShortenTheFirstOverflowIsTerminal pins that the recovery
+// budget is not the same thing as the ability to recover.
+//
+// One attempt is granted per input, but spending it requires something that can
+// shorten the context. With nothing configured to do that, asking again would
+// resend precisely what was just refused — so the FIRST refusal is already the
+// end, and the reason recorded says the context could not be shortened rather
+// than that the allowance was used up. A caller reading "recovery already spent"
+// here would go looking for the attempt that spent it.
+func TestA10WithNoWayToShortenTheFirstOverflowIsTerminal(t *testing.T) {
+	model := &overflowingModel{}
+	store := &session.MemoryStore{}
+	sess := session.WithStore("You are pi-go.", store)
+
+	agent, err := runtime.New(runtime.Config{
+		Model:     model,
+		ModelName: "fake-1",
+		Tools:     tools.NewRegistry(),
+		Session:   sess,
+		Policy:    runtime.DenyWrites,
+		Observers: []events.Observer{runtime.NewRecorder()},
+		Now:       fixedClock(),
+		// No Summarize: nothing here can make the request smaller.
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	runErr := agent.Run(ctx, "a very long question")
+	if runErr == nil {
+		t.Fatal("a run that never answered reported success")
+	}
+	if !errors.Is(runErr, ai.ErrContextOverflow) {
+		t.Errorf("error = %v, want it to name the overflow", runErr)
+	}
+
+	if got := model.calls(); got != 1 {
+		t.Errorf("model calls = %d, want 1: with no way to shorten the context, "+
+			"asking again would resend exactly what was refused", got)
+	}
+	failure := sess.Failure()
+	if failure == nil {
+		t.Fatal("the operation did not end terminally, so a reopen would try the " +
+			"same losing attempt again")
+	}
+	if failure.Code != runtime.CodeContextOverflow {
+		t.Errorf("failure code = %q, want %q", failure.Code, runtime.CodeContextOverflow)
+	}
+	if !strings.Contains(failure.Detail, "shorten") {
+		t.Errorf("failure detail = %q, want it to say the context could not be "+
+			"shortened: %q sends a reader looking for an attempt that never happened",
+			failure.Detail, "recovery already spent")
+	}
+	// The refused request was billed, and the ledger has to carry exactly what the
+	// provider reported. A locally guessed number would be a different claim about
+	// the user's money.
+	if got, want := sess.OverflowUsage().Total(), refusedCost.Total(); got != want {
+		t.Errorf("recorded cost = %d, want %d: what the provider reported is what "+
+			"the ledger owes", got, want)
 	}
 }
