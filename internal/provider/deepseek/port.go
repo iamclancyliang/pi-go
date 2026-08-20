@@ -40,9 +40,18 @@ type Config struct {
 	// BaseURL defaults to DefaultBaseURL.
 	BaseURL string
 
-	// StoredKey, when set, wins over the environment. It is unexported once
-	// held, and never reaches a formatted value: see Port's String method.
-	StoredKey string
+	// Store holds credentials. Optional: without one, a credential can only
+	// come from the environment.
+	//
+	// No raw key appears on this struct. A configuration object is printed
+	// eventually — by a log line, a test failure, %+v in someone's debugging —
+	// and a secret that lives here would go with it. The store holds the value
+	// unexported instead, so keeping it out of a report is a property of the
+	// type rather than a rule everyone has to remember.
+	Store Store
+
+	// ProviderID keys this provider's credential in the store.
+	ProviderID string
 
 	// MaxOutputTokens caps the reply. It reaches the wire as max_tokens, which
 	// is the field this provider reads.
@@ -104,6 +113,9 @@ func New(cfg Config) (*Port, error) {
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
+	}
+	if cfg.ProviderID == "" {
+		cfg.ProviderID = "deepseek"
 	}
 	return &Port{cfg: cfg}, nil
 }
@@ -204,7 +216,7 @@ func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, erro
 	if err != nil {
 		return nil, fmt.Errorf("deepseek: building request: %w", err)
 	}
-	cred, err := Resolve(ctx, p.cfg.Environment, p.cfg.StoredKey)
+	cred, err := p.resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -272,9 +284,26 @@ var credentialShape = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|bearer\s+\S+
 // message. It returns empty rather than failing: scrubbing must never be the
 // thing that breaks reporting a failure.
 func (p *Port) credentialForScrubbing(ctx context.Context) string {
-	cred, err := Resolve(ctx, p.cfg.Environment, p.cfg.StoredKey)
+	cred, err := p.resolve(ctx)
 	if err != nil {
 		return ""
 	}
 	return cred.Key()
+}
+
+// resolve produces the credential a request authenticates with.
+//
+// Distinct from Store.Read, which is for display: resolution is what a request
+// uses, and keeping the two apart is what stops a caller authenticating with a
+// value that was only ever meant to be shown.
+func (p *Port) resolve(ctx context.Context) (Credential, error) {
+	stored := ""
+	if p.cfg.Store != nil {
+		if held, err := p.cfg.Store.Read(ctx, p.cfg.ProviderID); err == nil {
+			stored = held.Key()
+		} else if !errors.Is(err, ErrNoStoredCredential) {
+			return Credential{}, err
+		}
+	}
+	return Resolve(ctx, p.cfg.Environment, stored)
 }

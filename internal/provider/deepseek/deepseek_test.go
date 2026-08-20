@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
@@ -424,9 +426,17 @@ func TestTheKeyIsNotInAnyErrorOrFormattedPort(t *testing.T) {
 	tr := &countingTransport{respond: func(int) *http.Response {
 		return status(400, `{"error":{"message":"bad request: Bearer `+secret+`","code":"invalid"}}`)
 	}}
-	p, err := deepseek.New(deepseek.Config{
-		Model: "m", Transport: tr, Environment: env{}, StoredKey: secret, MaxOutputTokens: 8,
-	})
+	store := deepseek.NewMemoryStore()
+	if _, err := store.Modify(context.Background(), "deepseek",
+		func(deepseek.Stored, bool) (deepseek.Stored, bool, error) {
+			return deepseek.NewAPIKey(secret), true, nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := deepseek.Config{
+		Model: "m", Transport: tr, Environment: env{}, Store: store, MaxOutputTokens: 8,
+	}
+	p, err := deepseek.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,6 +450,9 @@ func TestTheKeyIsNotInAnyErrorOrFormattedPort(t *testing.T) {
 		"port %v":    fmt.Sprintf("%v", p),
 		"port %+v":   fmt.Sprintf("%+v", p),
 		"port %#v":   fmt.Sprintf("%#v", p),
+		"config %v":  fmt.Sprintf("%v", cfg),
+		"config %+v": fmt.Sprintf("%+v", cfg),
+		"config %#v": fmt.Sprintf("%#v", cfg),
 	} {
 		if strings.Contains(rendered, secret) {
 			t.Fatalf("the key reached %s: %s", name, rendered)
@@ -539,5 +552,137 @@ func TestCancellationStaysCancellation(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation arrived as %v, which a caller cannot recognise", err)
+	}
+}
+
+// TestTheStoreSerializesWritesAgainstDeletes: an unserialized pair lets a write
+// land after the delete that was meant to remove it, leaving a credential the
+// user believes they removed.
+func TestTheStoreSerializesWritesAgainstDeletes(t *testing.T) {
+	store := deepseek.NewMemoryStore()
+	ctx := context.Background()
+
+	set := func(v string) {
+		if _, err := store.Modify(ctx, "deepseek",
+			func(deepseek.Stored, bool) (deepseek.Stored, bool, error) {
+				return deepseek.NewAPIKey(v), true, nil
+			}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("first")
+
+	// A slow write racing a delete. The write starts first and holds the
+	// provider's lock while it works.
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = store.Modify(ctx, "deepseek",
+			func(cur deepseek.Stored, _ bool) (deepseek.Stored, bool, error) {
+				close(started)
+				time.Sleep(30 * time.Millisecond)
+				return deepseek.NewAPIKey("second"), true, nil
+			})
+	}()
+	<-started
+	if err := store.Delete(ctx, "deepseek"); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	// The delete waited for the write, so the delete is the last word.
+	if _, err := store.Read(ctx, "deepseek"); !errors.Is(err, deepseek.ErrNoStoredCredential) {
+		t.Fatal("a credential survived the delete that followed the write it raced")
+	}
+}
+
+// TestConcurrentModifiesEachSeeTheLastValue: every mutation is a serialized
+// read-modify-write, so no update is silently lost.
+func TestConcurrentModifiesEachSeeTheLastValue(t *testing.T) {
+	store := deepseek.NewMemoryStore()
+	ctx := context.Background()
+	const writers = 20
+
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = store.Modify(ctx, "deepseek",
+				func(cur deepseek.Stored, exists bool) (deepseek.Stored, bool, error) {
+					n := 0
+					if exists {
+						n = len(cur.Key())
+					}
+					return deepseek.NewAPIKey(strings.Repeat("x", n+1)), true, nil
+				})
+		}()
+	}
+	wg.Wait()
+
+	got, err := store.Read(ctx, "deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Key()) != writers {
+		t.Fatalf("%d serialized writes produced a key of length %d; updates were lost",
+			writers, len(got.Key()))
+	}
+}
+
+// TestListIsNonSecretAndSideEffectFree.
+func TestListIsNonSecretAndSideEffectFree(t *testing.T) {
+	store := deepseek.NewMemoryStore()
+	ctx := context.Background()
+	if _, err := store.Modify(ctx, "deepseek",
+		func(deepseek.Stored, bool) (deepseek.Stored, bool, error) {
+			return deepseek.NewAPIKey("sk-listing-secret"), true, nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := store.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ProviderID != "deepseek" || infos[0].Type != deepseek.TypeAPIKey {
+		t.Fatalf("listed %+v", infos)
+	}
+	rendered := fmt.Sprintf("%v %+v %#v", infos, infos, infos)
+	if strings.Contains(rendered, "sk-listing-secret") {
+		t.Fatalf("listing disclosed the key: %s", rendered)
+	}
+
+	// A stored credential formats without its secret too.
+	held, _ := store.Read(ctx, "deepseek")
+	for _, r := range []string{fmt.Sprintf("%v", held), fmt.Sprintf("%+v", held), fmt.Sprintf("%#v", held)} {
+		if strings.Contains(r, "sk-listing-secret") {
+			t.Fatalf("a stored credential formatted its secret: %s", r)
+		}
+	}
+}
+
+// TestOneCredentialPerProvider: storing again replaces rather than accumulates.
+func TestOneCredentialPerProvider(t *testing.T) {
+	store := deepseek.NewMemoryStore()
+	ctx := context.Background()
+	for _, v := range []string{"one", "two"} {
+		if _, err := store.Modify(ctx, "deepseek",
+			func(deepseek.Stored, bool) (deepseek.Stored, bool, error) {
+				return deepseek.NewAPIKey(v), true, nil
+			}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.Read(ctx, "deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Key() != "two" {
+		t.Fatalf("provider holds %q", got.Key())
+	}
+	if infos, _ := store.List(ctx); len(infos) != 1 {
+		t.Fatalf("provider accumulated %d credentials", len(infos))
 	}
 }
