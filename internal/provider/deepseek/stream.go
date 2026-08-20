@@ -72,14 +72,11 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// the configuration happened to hold.
 		return nil, &Error{Failure: FailureRefused, Detail: "no model named for this request"}
 	}
-	resp, err := p.post(ctx, body)
+	resp, attempts, err := p.send(ctx, body)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		defer resp.Body.Close()
-		return nil, failureFrom(resp, p.credentialForScrubbing(ctx))
-	}
+	_ = attempts
 
 	out := make(chan ai.StreamEvent)
 	go func() {

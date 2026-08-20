@@ -686,3 +686,221 @@ func TestOneCredentialPerProvider(t *testing.T) {
 		t.Fatalf("provider accumulated %d credentials", len(infos))
 	}
 }
+
+// retryTransport answers from a scripted sequence and records what it was asked.
+type retryTransport struct {
+	requests  int
+	responses []*http.Response
+}
+
+func (r *retryTransport) Do(*http.Request) (*http.Response, error) {
+	r.requests++
+	if r.requests > len(r.responses) {
+		return nil, errors.New("more requests than scripted")
+	}
+	return r.responses[r.requests-1], nil
+}
+
+func withHeader(resp *http.Response, k, v string) *http.Response {
+	if resp.Header == nil {
+		resp.Header = http.Header{}
+	}
+	resp.Header.Set(k, v)
+	return resp
+}
+
+func retryingPort(t *testing.T, tr deepseek.Transport, policy deepseek.RetryPolicy) *deepseek.Port {
+	t.Helper()
+	p, err := deepseek.New(deepseek.Config{
+		Model: "m", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"},
+		MaxOutputTokens: 8, Retry: policy,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p
+}
+
+// TestTheShippedBudgetSendsOneRequest: the default is no retry, so an ordinary
+// call is one billable request whatever the failure.
+func TestTheShippedBudgetSendsOneRequest(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{status(503, `{"error":{"message":"busy"}}`)}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+	if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+		t.Fatal("expected a failure")
+	}
+	if tr.requests != 1 {
+		t.Fatalf("the shipped budget sent %d requests", tr.requests)
+	}
+}
+
+// TestARetryableFailureIsRetriedUnderAPositiveBudget: observed by counting, not
+// by reading the policy.
+func TestARetryableFailureIsRetriedUnderAPositiveBudget(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{
+		status(503, `{"error":{"message":"busy"}}`),
+		sse(`{"choices":[{"delta":{"content":"recovered"},"finish_reason":"stop"}]}`),
+	}}
+	p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 2, BaseDelay: time.Millisecond})
+
+	resp, err := p.Generate(context.Background(), ai.Request{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if tr.requests != 2 {
+		t.Fatalf("made %d requests, want 2", tr.requests)
+	}
+	if resp.Content != "recovered" {
+		t.Fatalf("content %q", resp.Content)
+	}
+}
+
+// TestAnExhaustedBalanceIsTerminalBeforeAnyRetry: the ordering that costs money
+// when it is the other way round.
+func TestAnExhaustedBalanceIsTerminalBeforeAnyRetry(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{
+		status(402, `{"error":{"message":"Insufficient Balance"}}`),
+		sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
+	}}
+	p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 5, BaseDelay: time.Millisecond})
+
+	_, err := p.Generate(context.Background(), ai.Request{})
+	var classified *deepseek.Error
+	if !errors.As(err, &classified) || classified.Failure != deepseek.FailureQuota {
+		t.Fatalf("classified %v", err)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("an exhausted balance was retried %d times; each attempt spends balance it cannot have",
+			tr.requests-1)
+	}
+}
+
+// TestTheProvidersOwnInstructionOutranksTheStatus, in both directions.
+func TestTheProvidersOwnInstructionOutranksTheStatus(t *testing.T) {
+	t.Run("false stops a status that would be retried", func(t *testing.T) {
+		tr := &retryTransport{responses: []*http.Response{
+			withHeader(status(503, `{"error":{"message":"no"}}`), "x-should-retry", "false"),
+			sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
+		}}
+		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
+		if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+			t.Fatal("expected a failure")
+		}
+		if tr.requests != 1 {
+			t.Fatalf("made %d requests despite x-should-retry: false", tr.requests)
+		}
+	})
+
+	t.Run("true retries a status that would not be", func(t *testing.T) {
+		tr := &retryTransport{responses: []*http.Response{
+			withHeader(status(400, `{"error":{"message":"odd"}}`), "x-should-retry", "true"),
+			sse(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`),
+		}}
+		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
+		if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if tr.requests != 2 {
+			t.Fatalf("made %d requests despite x-should-retry: true", tr.requests)
+		}
+	})
+
+	t.Run("it never overrides an exhausted balance", func(t *testing.T) {
+		tr := &retryTransport{responses: []*http.Response{
+			withHeader(status(402, `{"error":{"message":"Insufficient Balance"}}`), "x-should-retry", "true"),
+			sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
+		}}
+		p := retryingPort(t, tr, deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond})
+		if _, err := p.Generate(context.Background(), ai.Request{}); err == nil {
+			t.Fatal("expected a failure")
+		}
+		if tr.requests != 1 {
+			t.Fatalf("a header talked this into retrying an exhausted balance %d times", tr.requests-1)
+		}
+	})
+}
+
+// TestAServerRequestedWaitBeyondTheCapIsRefused rather than slept: a process
+// that appears to hang is worse than a failure that explains itself.
+func TestAServerRequestedWaitBeyondTheCapIsRefused(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{
+		withHeader(status(429, `{"error":{"message":"slow down"}}`), "retry-after", "600"),
+	}}
+	p := retryingPort(t, tr, deepseek.RetryPolicy{
+		MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: time.Second,
+	})
+
+	start := time.Now()
+	_, err := p.Generate(context.Background(), ai.Request{})
+	if err == nil {
+		t.Fatal("expected a failure")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("slept %v for a wait beyond the cap", elapsed)
+	}
+	if !strings.Contains(err.Error(), "cap") {
+		t.Fatalf("the refusal did not explain itself: %v", err)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("made %d requests", tr.requests)
+	}
+}
+
+// TestTheServerRequestedWaitIsHonoured, in milliseconds when offered.
+func TestTheServerRequestedWaitIsHonoured(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{
+		withHeader(status(429, `{"error":{"message":"slow"}}`), "retry-after-ms", "120"),
+		sse(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`),
+	}}
+	p := retryingPort(t, tr, deepseek.RetryPolicy{
+		MaxRetries: 2, BaseDelay: time.Hour, MaxDelay: time.Minute,
+	})
+
+	start := time.Now()
+	if _, err := p.Generate(context.Background(), ai.Request{}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("retried after %v, ignoring the requested wait", elapsed)
+	}
+	if elapsed > 30*time.Second {
+		t.Fatalf("used the backoff instead of the requested wait: %v", elapsed)
+	}
+}
+
+// TestCancellingABackoffStaysCancellation.
+func TestCancellingABackoffStaysCancellation(t *testing.T) {
+	tr := &retryTransport{responses: []*http.Response{
+		status(503, `{"error":{"message":"busy"}}`),
+		sse(`{"choices":[{"delta":{"content":"never"},"finish_reason":"stop"}]}`),
+	}}
+	// The credential comes from the store, so resolution does not consult the
+	// context: the backoff is then the only thing that can notice cancellation,
+	// which is what this test is for.
+	store := deepseek.NewMemoryStore()
+	if _, err := store.Modify(context.Background(), "deepseek",
+		func(deepseek.Stored, bool) (deepseek.Stored, bool, error) {
+			return deepseek.NewAPIKey("k"), true, nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := deepseek.New(deepseek.Config{
+		Model: "m", Transport: tr, Environment: env{}, Store: store, MaxOutputTokens: 8,
+		Retry: deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Hour},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+
+	_, genErr := p.Generate(ctx, ai.Request{})
+	if !errors.Is(genErr, context.Canceled) {
+		t.Fatalf("a cancelled backoff produced %v, which invites retrying what the caller stopped", genErr)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("made %d requests after cancellation", tr.requests)
+	}
+}

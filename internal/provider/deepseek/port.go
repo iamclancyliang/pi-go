@@ -57,6 +57,10 @@ type Config struct {
 	// is the field this provider reads.
 	MaxOutputTokens int
 
+	// Retry bounds retries of one request. The zero value is one request and no
+	// retry, which is what ships.
+	Retry RetryPolicy
+
 	// ContextWindow enables the count-based overflow checks when it is a value
 	// someone measured or was given authoritatively. Zero leaves them off.
 	//
@@ -306,4 +310,63 @@ func (p *Port) resolve(ctx context.Context) (Credential, error) {
 		}
 	}
 	return Resolve(ctx, p.cfg.Environment, stored)
+}
+
+// Attempt is what one request to the provider consumed.
+//
+// Kept per attempt rather than summed in place: a retried call spends on every
+// attempt, and a ledger holding only the last one undercounts exactly the spend
+// the retry created. A total is derived from these, never accumulated into.
+type Attempt struct {
+	Status int
+	Usage  ai.Usage
+}
+
+// send performs the request, retrying within the configured budget.
+//
+// It returns the successful response and every attempt made to get it. The
+// number of attempts is a fact about what was sent, which is why it travels
+// with the response rather than being inferred from configuration.
+func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []Attempt, error) {
+	var attempts []Attempt
+	for attempt := 0; ; attempt++ {
+		resp, err := p.post(ctx, body)
+		if err != nil {
+			if isCallerCancellation(err) {
+				return nil, attempts, err
+			}
+			// A transport failure produced no response to read a header from.
+			decision, capErr := decideRetry(nil, FailureTransient, attempt, p.cfg.Retry)
+			if capErr != nil {
+				return nil, attempts, capErr
+			}
+			if !decision.retry {
+				return nil, attempts, err
+			}
+			attempts = append(attempts, Attempt{})
+			if waitErr := wait(ctx, decision.after); waitErr != nil {
+				return nil, attempts, waitErr
+			}
+			continue
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return resp, attempts, nil
+		}
+
+		failure := classifyStatus(resp.StatusCode)
+		decision, capErr := decideRetry(resp, failure, attempt, p.cfg.Retry)
+		if capErr != nil {
+			resp.Body.Close()
+			return nil, attempts, capErr
+		}
+		if !decision.retry {
+			defer resp.Body.Close()
+			return nil, attempts, failureFrom(resp, p.credentialForScrubbing(ctx))
+		}
+		attempts = append(attempts, Attempt{Status: resp.StatusCode})
+		resp.Body.Close()
+		if waitErr := wait(ctx, decision.after); waitErr != nil {
+			return nil, attempts, waitErr
+		}
+	}
 }
