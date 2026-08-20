@@ -3,6 +3,8 @@ package deepseek
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // Failure is why a call did not produce a usable reply.
@@ -66,6 +68,10 @@ func (f Failure) Retryable() bool {
 // Error carries a classified failure.
 type Error struct {
 	Failure Failure
+
+	// Usage is what the attempts behind this failure reported using. A request
+	// the provider read is a request the provider read, answered or not.
+	Usage []ai.Usage
 
 	// Status is the HTTP status, or 0 when the failure has no response.
 	Status int
@@ -133,3 +139,6 @@ func stopReason(raw string) (ok bool, truncated bool, failure Failure) {
 		return false, false, FailureUnknown
 	}
 }
+
+// Consumed reports what the failed call used, so a ledger can hold it.
+func (e *Error) Consumed() []ai.Usage { return e.Usage }

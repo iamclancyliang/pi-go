@@ -562,3 +562,38 @@ func TestAProviderToolCallIsRefusedByPolicyAndRecordedFirst(t *testing.T) {
 			"cannot tell a refusal from a call that vanished")
 	}
 }
+
+// TestAFailedCollectedCallLedgersToo: the same failure must count the same
+// whether the reply was streamed or collected. Anything else makes the ledger
+// depend on how the caller chose to read.
+func TestAFailedCollectedCallLedgersToo(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			`{"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"insufficient_system_resource"}],"usage":{"prompt_tokens":55,"completion_tokens":2}}`,
+		),
+	}}
+	streaming, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model:     generateOnly{inner: streaming},
+		ModelName: "deepseek-v4-flash", Tools: registry, Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err == nil {
+		t.Fatal("an interrupted reply was reported as a successful run")
+	}
+
+	if total := sess.Usage(); total.InputTokens != 55 {
+		t.Fatalf("a failed collected call ledgered %d input tokens, want 55", total.InputTokens)
+	}
+}

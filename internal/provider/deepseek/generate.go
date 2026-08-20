@@ -2,6 +2,7 @@ package deepseek
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -34,6 +35,18 @@ func (p *Port) Generate(ctx context.Context, req ai.Request) (ai.Response, error
 		}
 	}
 	if final.Cause != nil {
+		// The counts travel with the failure: on this path there is no response
+		// to carry them, and a failed call that read the request is not free.
+		consumed := append([]ai.Usage(nil), final.EarlierAttempts...)
+		if final.Usage.Reported {
+			consumed = append(consumed, final.Usage)
+		}
+		var classified *Error
+		if errors.As(final.Cause, &classified) && len(consumed) > 0 {
+			withUsage := *classified
+			withUsage.Usage = consumed
+			return ai.Response{}, &withUsage
+		}
 		return ai.Response{}, final.Cause
 	}
 

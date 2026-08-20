@@ -123,6 +123,11 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		// so fragments of the same call keep landing in the same block.
 		callBlocks = map[int]int{}
 		sawCall    bool
+
+		// open is every block index not yet closed. More than one can be open
+		// at a time, because a provider may interleave the fragments of several
+		// tool calls, and a reply cannot end while any of them is unfinished.
+		open = map[int]bool{}
 	)
 
 	cancelled := false
@@ -180,6 +185,34 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		send(ev)
 	}
 
+	// closeBlocks closes the named blocks in order and reports whether the
+	// stream may continue.
+	closeBlocks := func(indices ...int) bool {
+		sort.Ints(indices)
+		for _, at := range indices {
+			if !open[at] {
+				continue
+			}
+			closed, err := acc.Close(at)
+			if err != nil {
+				fail(FailureUnknown, err.Error())
+				return false
+			}
+			delete(open, at)
+			if !send(closed) {
+				return false
+			}
+		}
+		return true
+	}
+	closeAllBlocks := func() bool {
+		all := make([]int, 0, len(open))
+		for at := range open {
+			all = append(all, at)
+		}
+		return closeBlocks(all...)
+	}
+
 	startEv, err := acc.Begin()
 	if err != nil {
 		return
@@ -232,17 +265,15 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				continue
 			}
 			if started && kind != piece.k {
-				closed, err := acc.Close(index)
-				if err != nil {
-					fail(FailureUnknown, err.Error())
-					return
-				}
-				if !send(closed) {
+				// Every open block closes, not just the last one: several
+				// tool-call blocks can be open when text follows them.
+				if !closeAllBlocks() {
 					return
 				}
 				index++
 			}
 			started, kind = true, piece.k
+			open[index] = true
 			events, err := acc.Push(ai.Chunk{Index: index, Kind: piece.k, Delta: piece.text})
 			if err != nil {
 				fail(FailureUnknown, err.Error())
@@ -265,13 +296,11 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				// fragments of several calls (0, 1, 0, 1), and closing the
 				// earlier one would leave its remaining arguments with nowhere
 				// to land.
+				// Close a text or thinking block before the first call, but
+				// never another tool-call block: its remaining fragments would
+				// have nowhere to land.
 				if started && kind != ai.BlockToolCall {
-					closed, err := acc.Close(index)
-					if err != nil {
-						fail(FailureUnknown, err.Error())
-						return
-					}
-					if !send(closed) {
+					if !closeBlocks(index) {
 						return
 					}
 					index++
@@ -280,6 +309,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				}
 				blockIndex = index
 				callBlocks[call.Index] = blockIndex
+				open[blockIndex] = true
 				started, kind = true, ai.BlockToolCall
 			}
 			events, err := acc.Push(ai.Chunk{
@@ -310,29 +340,8 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			fail(failure, "stop reason "+*choice.FinishReason)
 			return
 		}
-		if started {
-			// Every block still open closes here. With interleaved calls there
-			// is more than one, and a reply cannot end while a block it
-			// contains is unfinished.
-			open := []int{}
-			if kind == ai.BlockToolCall {
-				for _, at := range callBlocks {
-					open = append(open, at)
-				}
-				sort.Ints(open)
-			} else {
-				open = append(open, index)
-			}
-			for _, at := range open {
-				closed, err := acc.Close(at)
-				if err != nil {
-					fail(FailureUnknown, err.Error())
-					return
-				}
-				if !send(closed) {
-					return
-				}
-			}
+		if started && !closeAllBlocks() {
+			return
 		}
 		reason := ai.StopEnd
 		switch {

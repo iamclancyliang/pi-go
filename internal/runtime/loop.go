@@ -730,6 +730,16 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		return o.recoverFromOverflow(ctx, req, resp.Usage, err)
 	}
 	if err != nil {
+		// A failure that knows what it consumed is ledgered like any other
+		// call. Otherwise the same failure would count when streamed and be
+		// free when collected — an accounting difference created by nothing
+		// but how the reply was read.
+		var reporter ai.UsageReporter
+		if errors.As(err, &reporter) {
+			for _, u := range reporter.Consumed() {
+				o.session.RecordUsage(u)
+			}
+		}
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()

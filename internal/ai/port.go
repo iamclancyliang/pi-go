@@ -174,6 +174,16 @@ type Usage struct {
 // Total is every token the call reported using.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
 
+// UsageReporter is an error that knows what the call it describes consumed.
+//
+// A failed call still read its request, and on the collected path the failure is
+// all the caller gets — there is no response to carry the counts. Without this
+// the same failure would be ledgered when streamed and free when not, which is
+// a difference in accounting created purely by how the reply was read.
+type UsageReporter interface {
+	Consumed() []Usage
+}
+
 // ErrContextOverflow reports that a request was refused for exceeding the
 // model's context, rather than for any transient reason.
 //

@@ -1011,3 +1011,69 @@ func TestACancelledStreamStillEnds(t *testing.T) {
 		t.Fatalf("terminal reason %v, want %v", terminal.StopReason, ai.StopAborted)
 	}
 }
+
+// TestTextAfterInterleavedCallsClosesEveryBlock: several tool-call blocks can be
+// open at once, and text arriving afterwards must close all of them. Closing
+// only the most recent leaves the reply unable to end.
+func TestTextAfterInterleavedCallsClosesEveryBlock(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","type":"function","function":{"name":"g","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"content":"and then some text"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	resp, err := p.Generate(context.Background(), ai.Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("text following two interleaved calls: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("kept %d calls, want 2", len(resp.ToolCalls))
+	}
+	if resp.Content != "and then some text" {
+		t.Fatalf("content %q", resp.Content)
+	}
+}
+
+// TestABlockEndsBeforeTheNextBegins: a consumer rendering incrementally is told
+// a block is finished before it is told another exists. Leaving earlier blocks
+// open until the reply ends still produces a valid message, but the events
+// arrive in an order that says a block was still growing when it was not.
+func TestABlockEndsBeforeTheNextBegins(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","type":"function","function":{"name":"g","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"content":"text"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	events, err := p.Stream(context.Background(), ai.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAt := map[int]bool{}
+	for ev := range events {
+		switch ev.Kind {
+		case ai.StreamTextStart, ai.StreamThinkingStart, ai.StreamToolCallStart:
+			// Every tool-call block may be open at once, but a text block must
+			// not begin while any of them still is.
+			if ev.Kind == ai.StreamTextStart {
+				for at, still := range openAt {
+					if still {
+						t.Fatalf("text block %d began while block %d was still open",
+							ev.ContentIndex, at)
+					}
+				}
+			}
+			openAt[ev.ContentIndex] = true
+		case ai.StreamTextEnd, ai.StreamThinkingEnd, ai.StreamToolCallEnd:
+			openAt[ev.ContentIndex] = false
+		}
+	}
+}
