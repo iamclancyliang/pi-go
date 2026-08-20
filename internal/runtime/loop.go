@@ -911,25 +911,30 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 				return
 			}
 
-			o.publishReply(ctx, event)
 			if event.Terminal() {
-				// Recorded BEFORE the ending crosses: the framework acts on the
-				// calls the ending carries, and it must not act before the round
-				// that governs them has been opened.
+				// Recorded BEFORE the ending goes anywhere: the framework acts on
+				// the calls the ending carries, and it must not act before the
+				// round that governs them has been opened.
 				//
-				// If the record failed, the ending crosses as a FAILURE. Passing
-				// it on as a success would have the framework run calls from a
-				// reply history does not contain, leaving results for a request
-				// nothing asked.
+				// If the record failed, the ending becomes a FAILURE. Passing it
+				// on as a success would have the framework run calls from a reply
+				// history does not contain, leaving results for a request nothing
+				// asked.
 				if err := o.observeTerminal(ctx, event, requested); err != nil {
 					if o.batch != nil {
 						o.batch.recordStreamFailure(err)
 					}
 					event = unrecordable(event, err)
 				}
+				// Published only once the outcome is settled, so an observer and
+				// the framework are told the same thing. Told separately, a
+				// renderer would show a reply completing while the run reported
+				// failure, and neither view would reveal the disagreement.
+				o.publishReply(ctx, event)
 				forward(ctx, out, event)
 				return
 			}
+			o.publishReply(ctx, event)
 			if !forward(ctx, out, event) {
 				// Nobody is reading any more. The reply still has an ending, and
 				// an observer that never receives one waits for an end that is

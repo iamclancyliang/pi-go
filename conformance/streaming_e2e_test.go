@@ -1075,3 +1075,46 @@ func TestAFailedShorteningReportsItself(t *testing.T) {
 			"sent after the context size when the summariser is what broke", runErr)
 	}
 }
+
+// TestTheObserverAndTheFrameworkSeeTheSameEnding pins that one reply has one
+// outcome.
+//
+// When a reply cannot be recorded, the framework is told it failed so it does not
+// act on it. If the observer were told separately, a renderer would show the
+// answer completing while the run reported failure — and nothing in either view
+// would reveal the disagreement.
+func TestTheObserverAndTheFrameworkSeeTheSameEnding(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.MustRegister(&countingWriteTool{})
+	consumer := &recordingConsumer{}
+
+	agent, err := runtime.New(runtime.Config{
+		Model:          &streamOnlyWriteModel{},
+		ModelName:      "fake-1",
+		Tools:          registry,
+		Session:        session.WithStore("You are pi-go.", &refusesAssistantWrites{}),
+		Policy:         runtime.AllowAll,
+		Observers:      []events.Observer{runtime.NewRecorder()},
+		ReplyObservers: []runtime.ReplyObserver{consumer},
+		Now:            fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := agent.Run(ctx, "delete it"); err == nil {
+		t.Fatal("a run whose reply could not be recorded reported success")
+	}
+
+	var ending ai.StreamEvent
+	for _, event := range consumer.events() {
+		if event.Terminal() {
+			ending = event
+		}
+	}
+	if ending.Kind != ai.StreamError {
+		t.Errorf("the observer was told the reply %q while the run failed: a "+
+			"renderer would show it completing", ending.Kind)
+	}
+}
