@@ -1,6 +1,6 @@
 # Streaming contract
 
-**Status:** alignment table, corrected after independent source audits. No implementation yet.
+**Status:** alignment table, corrected after independent source audits, and implemented against.
 
 **Pi baseline:** [`086c32e74530564922d011ade23ff582c9d63116`](https://github.com/earendil-works/pi/commit/086c32e74530564922d011ade23ff582c9d63116)
 **Framework baseline:** eino `v0.9.14`

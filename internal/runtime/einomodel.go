@@ -92,12 +92,10 @@ func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 
 		// Tool calls are HELD until the reply ends.
 		//
-		// Today the framework concatenates a whole stream before acting, so
-		// sending them earlier changes nothing observable and no test here fails
-		// if this is removed. It is kept because the guarantee the runtime needs
-		// — that the round is opened before anything runs — would then rest on
-		// that framework behaviour rather than on anything stated, and this
-		// package exists to avoid depending on eino in ways it has not promised.
+		// The runtime opens the round — policy, ordering, durable record — when
+		// the reply completes, and nothing may run before that. Holding the calls
+		// makes that ordering a property of this code rather than of when the
+		// framework happens to dispatch what it is sent.
 		var calls []schema.ToolCall
 
 		for event := range events {

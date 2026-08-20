@@ -1000,8 +1000,9 @@ func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested st
 //
 // ONE transition for both ways of asking. The budget, the terminal failure, the
 // shortening and the projection to retry from are the same decision whichever
-// shape the answer arrives in; two copies would let them drift, and the one that
-// drifted would be the one nobody tested.
+// shape the answer arrives in. Two copies would drift into two different
+// recovery semantics, so how a reply is delivered would decide how much
+// allowance it gets and what a second refusal means.
 //
 // It returns the request to retry with. A nil request means recovery is over: the
 // terminal failure has already been recorded, so the caller reports the original
