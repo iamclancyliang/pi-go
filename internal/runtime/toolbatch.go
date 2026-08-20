@@ -35,6 +35,16 @@ type toolBatch struct {
 	// the round begins. It reports the refusal text when it may not.
 	prepare func(ctx context.Context, name, callID, args string) (string, bool)
 
+	// afterHandoff runs immediately after a waiting call is released and before
+	// the round decides whether it may still run. It is nil in a real run.
+	//
+	// It exists because the case it guards cannot be reached from outside: the
+	// cut has to land in the window between the wait returning and the decision,
+	// and a caller has no way to aim at that window. Without this the check below
+	// could only be believed, not shown — and a guard nothing can exercise is how
+	// a defect of exactly this kind survived in the first place.
+	afterHandoff func()
+
 	// declare reports what a tool currently says about repeating a call. Read
 	// when the attempt is recorded, so the record carries the terms the tool
 	// offered at the time rather than whatever it offers when the record is
@@ -293,8 +303,26 @@ func (b *toolBatch) begin(ctx context.Context, callID string) beginResult {
 		b.drop(callID)
 		return beginResult{Dropped: true}
 	}
+	if b.afterHandoff != nil {
+		b.afterHandoff()
+	}
 
-	// The round may have been cut while this call waited its turn.
+	// THE CUT IS CHECKED AGAIN HERE, and the select above is not enough.
+	//
+	// When the hand-off and the cut land together both cases are ready, and a
+	// select chooses between ready cases at random. Taking the gate branch is
+	// therefore normal rather than exceptional, and nothing on that branch has
+	// marked this call: the round drops a call only when it observes the cut
+	// itself. Without this the call goes on to be announced, prepared and RUN
+	// after the round was cut — which a tool that ignores cancellation carries
+	// out in full.
+	if ctx.Err() != nil {
+		b.drop(callID)
+		return beginResult{Dropped: true}
+	}
+
+	// The round may also have been cut while this call waited its turn, in which
+	// case it was already marked.
 	b.mu.Lock()
 	dropped := call.dropped
 	b.mu.Unlock()

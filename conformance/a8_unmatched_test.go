@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -337,9 +338,9 @@ func (s *stubbornTool) ran() int {
 // TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall pins the EARLIEST cut point.
 //
 // A parallel round announces and prepares its calls in one serial pass before any
-// of them runs. A cut can land part-way through that pass, so a call may be cut
-// before it was ever announced — earlier than the point A8's other cases cover,
-// which is after the call was already dispatched.
+// of them runs. A cut can land part-way through that pass, so a call can be cut
+// before it was ever announced — earlier than a cut that lands once the call has
+// already been dispatched, which leaves a different observable trace.
 //
 // Such a call gets no start, no end and no result. Announcing it would describe an
 // attempt that was never made, and a client rendering the stream would show a call
@@ -383,13 +384,26 @@ func TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
 	}
-	// A cut round ends as an abort. The error is asserted rather than discarded:
-	// swallowing it would let a panic inside the code under test pass unnoticed,
-	// which is exactly what happened to an earlier version of this test.
+	// The run must end as an ABORT specifically, not merely with some error.
+	// Discarding the error would let a panic inside the code under test pass as a
+	// success, and accepting any error would let an unrelated model or runtime
+	// failure stand in for the cancellation this test is about.
 	runErr := agent.Run(ctx, "run the tools")
 	cancel()
-	if runErr == nil {
-		t.Fatal("a cut round reported success")
+	if !errors.Is(runErr, context.Canceled) {
+		t.Fatalf("run error = %v, want the cancellation: any other error means the "+
+			"round ended for a reason this test did not create", runErr)
+	}
+	var ended *events.Event
+	for _, e := range rec.Events() {
+		if e.Kind == events.KindAgentEnd {
+			copied := e
+			ended = &copied
+		}
+	}
+	if ended == nil || ended.Detail.Reason != "aborted" {
+		t.Errorf("agent_end reason = %v, want \"aborted\": the observable stream has "+
+			"to say the run was cut, not merely that it stopped", ended)
 	}
 
 	announced := map[string]bool{}
@@ -399,6 +413,10 @@ func TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall(t *testing.T) {
 	settled := map[string]bool{}
 	for _, id := range idsOf(rec, events.KindToolResult) {
 		settled[id] = true
+	}
+	finished := map[string]bool{}
+	for _, id := range idsOf(rec, events.KindToolEnd) {
+		finished[id] = true
 	}
 
 	// The first call was announced — the cut had not landed yet when its turn
@@ -415,16 +433,32 @@ func TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall(t *testing.T) {
 			t.Errorf("%s was announced although the round was already cut, so the "+
 				"stream shows a call beginning that nothing ever ran", id)
 		}
+		if finished[id] {
+			t.Errorf("%s reported finishing although it was cut before it was even "+
+				"announced", id)
+		}
 		if settled[id] {
 			t.Errorf("%s produced a result although it was cut before it was even "+
 				"announced", id)
 		}
 	}
-	// Their ids stay in the assistant message with nothing matching them, which
-	// is the state anything reading the transcript afterwards has to tolerate.
-	unmatched := sess.UnmatchedToolCalls()
-	if len(unmatched) == 0 {
-		t.Error("calls were cut yet nothing is unmatched, so the transcript claims " +
-			"every call was answered")
+	// THOSE EXACT IDS stay in the assistant message with nothing matching them.
+	// Counting is not enough: one unmatched id, or the wrong id, or only the call
+	// that actually ran, would all satisfy a count while describing a different
+	// transcript from the one the cut produced.
+	unmatched := map[string]bool{}
+	for _, id := range sess.UnmatchedToolCalls() {
+		unmatched[id] = true
+	}
+	// All three, and for two different reasons — which is the point. call-1 was
+	// announced and then cut during its own preparation, so it was attempted and
+	// produced nothing; call-2 and call-3 were cut before they were announced at
+	// all. Both leave an id with no result, and the transcript cannot pretend
+	// otherwise.
+	for _, id := range []string{"call-1", "call-2", "call-3"} {
+		if !unmatched[id] {
+			t.Errorf("%s is not unmatched, so the transcript claims it was answered "+
+				"when nothing reported an outcome for it", id)
+		}
 	}
 }
