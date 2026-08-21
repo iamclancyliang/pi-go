@@ -1,0 +1,82 @@
+# What any provider adapter must do
+
+**Status:** derived from the controls in force on `main`. Every line names the test that fails if it
+stops being true, so this cannot drift from the code without a red suite.
+
+**Why this exists:** a framework adapter can look like a drop-in replacement and quietly not carry
+some of these. Each one below was a real defect at some point in building the first provider, so the
+list is a record of what actually goes wrong rather than a wish list.
+
+**How to use it:** for a candidate adapter, mark each obligation *carried*, *partly carried*, or
+*not carried*. Anything not carried has to stay in this repository's own layer, or be added on top
+of the adapter. That answer, not the adapter's feature list, decides whether the provider port can
+be replaced.
+
+## Credentials
+
+| Obligation | Enforced by |
+| --- | --- |
+| The key is reached only through injected configuration; a missing seam fails rather than falling back | `TestAPortWithoutASuppliedTransportIsRefused` |
+| Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence` |
+| Absence is a typed failure, not an empty value | `TestCredentialPrecedence` |
+| The key appears in no formatted value — config, port, or the container holding it — and in no error | `TestCredentialPrecedence`, `TestListIsNonSecretAndSideEffectFree` |
+| One credential per provider; storing again replaces | `TestOneCredentialPerProvider` |
+| Removal is serialized against writing, so a logout racing a refresh is not undone by it | `TestTheStoreSerializesWritesAgainstDeletes` |
+| Enumeration returns metadata only and performs no work | `TestListIsNonSecretAndSideEffectFree` |
+
+## Failure classification
+
+| Obligation | Enforced by |
+| --- | --- |
+| Failures are values, not text: nothing branches on an error's wording | `TestQuotaAndThrottleReachOppositeOutcomes` |
+| The set is closed, including the two failures that arrive inside a 200 | `TestA200ThatReportsFailureIsNotASuccess` |
+| An unrecognised stop reason is a failure, never a success | `TestA200ThatReportsFailureIsNotASuccess` |
+| A reply that asked for tools says so rather than reporting a plain ending | `TestAReplyAskingForToolsSaysSo` |
+| Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation` |
+
+## Retry and cost
+
+| Obligation | Enforced by |
+| --- | --- |
+| An exhausted balance is terminal **before** the retry question is asked | `TestAnExhaustedBalanceIsTerminalBeforeAnyRetry` |
+| That holds even when exhaustion arrives inside a rate-limit status | `TestExhaustionInsideARateLimitIsStillTerminal` |
+| The provider's own retry instruction outranks the status, but never that judgement | `TestTheProvidersOwnInstructionOutranksTheStatus` |
+| A requested wait beyond the cap is refused rather than slept | `TestAServerRequestedWaitBeyondTheCapIsRefused` |
+| The shipped budget sends one request per model call, proven by counting | `TestOneCallSendsOneRequest`, `TestTheShippedBudgetSendsOneRequest` |
+| A request always carries an output cap; one cannot be built without | `TestAnUncappedRequestCannotBeBuilt` |
+| The cap uses the field the provider actually reads | `TestTheRequestCarriesTheFieldsThisProviderReads` |
+| A request naming no model sends nothing | `TestNoModelIsRefusedBeforeAnythingIsSent` |
+
+## Usage
+
+| Obligation | Enforced by |
+| --- | --- |
+| Every attempt is ledgered, including a call that never succeeded | `TestAttemptsSurviveACallThatNeverSucceeds`, `TestRetriedAttemptsEachReachTheLedger` |
+| A failed call ledgers what it read, on both the streamed and collected paths | `TestAFailedCallStillLedgersWhatItUsed`, `TestAFailedCollectedCallLedgersToo` |
+| An overflow that gets recovered still reports what the refused attempt used | `TestCollectedOverflowStillReportsWhatItUsed` |
+| Unreported stays distinct from reported zero, in a call and in the total | `TestUsageKeepsUnreportedApartFromZero`, `TestAnUnreportedFieldStaysUnreportedInTheTotal` |
+| Cached prompt tokens are counted once, and counted in the total | `TestCachedPromptTokensAreNotCountedTwice`, `TestTotalCountsEveryReportedToken` |
+| The ledger owns its entries: neither the writer nor a reader can edit them afterwards | `TestTheLedgerOwnsWhatItRecords`, `TestASnapshotDoesNotChangeAfterItIsTaken` |
+| The model that served a reply is read from the reply | `TestTheServedModelIsReported` |
+
+## Streaming
+
+| Obligation | Enforced by |
+| --- | --- |
+| Fragments of one tool call reassemble into one call with its identity intact | `TestAToolCallSplitAcrossChunksStaysOneCall` |
+| Interleaved calls stay apart | `TestInterleavedToolCallFragmentsStayApart` |
+| Text after several open calls closes all of them | `TestTextAfterInterleavedCallsClosesEveryBlock` |
+| A block ends before the next begins | `TestABlockEndsBeforeTheNextBegins` |
+| A cancelled stream still delivers exactly one terminal, carrying what had arrived | `TestACancelledStreamStillEnds` |
+| Overflow is inferred from counts, only against a measured window, and never invented without one | `TestCountBasedOverflowDetection`, `TestConfigurationRefusesAWindowItWouldMisuse` |
+
+## Conversation
+
+| Obligation | Enforced by |
+| --- | --- |
+| A reply becomes history, and reasoning does not leak into the answer | `TestAProviderReplyReachesTheRuntime` |
+| Reasoning returns on the next request, on both paths | `TestReasoningReturnsToTheProviderOnTheNextRound`, `TestReasoningReturnsOnTheCollectedPathToo` |
+| Reasoning survives persisting and reopening | `TestReasoningSurvivesReopeningTheSession` |
+| A tool call from a provider is refused by policy and recorded before it runs | `TestAProviderToolCallIsRefusedByPolicyAndRecordedFirst` |
+| Several calls keep the order the model asked for | `TestSeveralProviderToolCallsKeepTheOrderTheModelAsked` |
+| A failure inside a 200 stops the run instead of arriving as an answer | `TestAProviderFailureStopsTheRun` |
