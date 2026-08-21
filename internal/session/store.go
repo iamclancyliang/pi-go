@@ -78,8 +78,10 @@ type OverflowAttempt struct {
 	SpendOnly bool
 
 	// Detail explains this record for someone auditing it afterwards, rather
-	// than for the model to read. For a refusal it is what the provider
-	// reported; for a transport attempt it says that is what the record is.
+	// than for the model to read. For a refusal it is the audit detail the
+	// caller supplied — which is not always the provider's own words, since an
+	// overflow inferred from reported counts is described by this repository —
+	// and for a transport attempt it identifies that attempt.
 	Detail string
 
 	// Usage is what THIS record's attempt or call used. A request is billed
