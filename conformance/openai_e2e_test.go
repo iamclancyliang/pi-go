@@ -41,7 +41,7 @@ func (o *openaiTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return o.responses[o.requests-1], nil
 }
 
-var fixedKey = openai.CredentialFunc(func(context.Context) (string, error) { return "test-key", nil })
+var fixedKey = ai.StoredCredential("test-key", "a test")
 
 func openaiRecorded(events ...string) *http.Response {
 	var b strings.Builder
@@ -87,7 +87,7 @@ func itoa(n int) string {
 func TestAnOpenAIReplyReachesTheRuntime(t *testing.T) {
 	transport := &openaiTransport{responses: []*http.Response{textReply("the answer", 11, 2)}}
 	port, err := openai.New(openai.Config{
-		Model: "gpt-test", Transport: transport, Credentials: fixedKey, MaxOutputTokens: 64,
+		Model: "gpt-test", Transport: transport, Credential: fixedKey, MaxOutputTokens: 64,
 	})
 	if err != nil {
 		t.Fatalf("openai.New: %v", err)
@@ -146,7 +146,7 @@ func TestAnOpenAIToolCallIsRefusedByPolicyAndRecordedFirst(t *testing.T) {
 		textReply("understood", 3, 1),
 	}}
 	port, err := openai.New(openai.Config{
-		Model: "gpt-test", Transport: transport, Credentials: fixedKey, MaxOutputTokens: 64,
+		Model: "gpt-test", Transport: transport, Credential: fixedKey, MaxOutputTokens: 64,
 	})
 	if err != nil {
 		t.Fatalf("openai.New: %v", err)
@@ -224,7 +224,7 @@ func TestARefusedOpenAICallLedgersWhatItRead(t *testing.T) {
 				`"usage":{"input_tokens":37,"output_tokens":0}}`)),
 	}}}
 	port, err := openai.New(openai.Config{
-		Model: "gpt-test", Transport: transport, Credentials: fixedKey, MaxOutputTokens: 64,
+		Model: "gpt-test", Transport: transport, Credential: fixedKey, MaxOutputTokens: 64,
 	})
 	if err != nil {
 		t.Fatalf("openai.New: %v", err)

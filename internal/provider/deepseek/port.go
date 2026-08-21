@@ -394,8 +394,15 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			// The attempts behind this failure travel with it. Returning them
 			// alongside an error nobody reads them from is how a call that
 			// failed after several billed attempts ledgers nothing at all.
-			return nil, final, withAttempts(
-				failureWith(failure, resp.StatusCode, raw, p.credentialForScrubbing(ctx)), final)
+			// The provider's own instruction travels with the failure, so a
+			// caller deciding whether to try again reads the same evidence
+			// this loop just did rather than re-deriving it from a status.
+			refused := failureWith(failure, resp.StatusCode, raw, p.credentialForScrubbing(ctx))
+			var classified *ai.ProviderError
+			if errors.As(refused, &classified) {
+				classified.Advice = retryAdvice(resp.Header)
+			}
+			return nil, final, withAttempts(refused, final)
 		}
 		// What a failed attempt reported using, if it said. A rate-limit body
 		// rarely carries usage, but an attempt that did read the request and

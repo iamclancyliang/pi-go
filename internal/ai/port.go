@@ -271,7 +271,7 @@ func WithUsage(cause error, used ...Usage) error {
 	if cause == nil || len(used) == 0 {
 		return cause
 	}
-	return &usageError{cause: cause, used: used}
+	return &usageError{cause: cause, used: CloneUsages(used)}
 }
 
 type usageError struct {
@@ -281,7 +281,7 @@ type usageError struct {
 
 func (e *usageError) Error() string     { return e.cause.Error() }
 func (e *usageError) Unwrap() error     { return e.cause }
-func (e *usageError) Consumed() []Usage { return e.used }
+func (e *usageError) Consumed() []Usage { return CloneUsages(e.used) }
 
 // ErrContextOverflow reports that a request was refused for exceeding the
 // model's context, rather than for any transient reason.

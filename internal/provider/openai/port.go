@@ -4,27 +4,21 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// Credentials supplies the key for a call.
+// EnvVars is the ordered list of variables a credential may come from.
+var EnvVars = []string{"OPENAI_API_KEY"}
+
+// Resolve finds the credential this provider authenticates with.
 //
-// The port asks; it does not decide. Which source wins — a stored value over an
-// environment variable, a blank value counting as unset — is owned by whatever
-// is injected here, so that ordering lives in one place instead of being
-// re-implemented per provider with its own subtly different rules.
-type Credentials interface {
-	Resolve(ctx context.Context) (string, error)
+// Which source wins, and how a blank value is treated, is the shared rule
+// rather than this package's: a user configuring two providers expects one
+// answer to "why did my key not take effect", not one per provider.
+func Resolve(ctx context.Context, env ai.Environment, stored string) (ai.Credential, error) {
+	return ai.ResolveCredential(ctx, providerName, env, stored, EnvVars)
 }
-
-// CredentialFunc adapts a function to Credentials.
-type CredentialFunc func(ctx context.Context) (string, error)
-
-// Resolve implements Credentials.
-func (f CredentialFunc) Resolve(ctx context.Context) (string, error) { return f(ctx) }
 
 // DefaultBaseURL is the provider's documented endpoint.
 const DefaultBaseURL = "https://api.openai.com/v1"
@@ -47,9 +41,17 @@ type Config struct {
 	// cannot reach the network by omission.
 	Transport http.RoundTripper
 
-	// Credentials supplies the key. Required, and there is no default: a test
-	// cannot reach a real credential by omission.
-	Credentials Credentials
+	// Credential is the key this port authenticates with, already resolved.
+	// Required, and there is no default: a test cannot reach a real credential
+	// by omission.
+	//
+	// A resolved value rather than a resolver on purpose. Resolution answers
+	// "which configured source wins", which is one question for the process
+	// and not one per request: a port that resolved on the request path would
+	// let two calls a second apart authenticate as different identities with
+	// nothing recording that they had. It also keeps a caller's resolver — and
+	// whatever it holds — off the request path entirely.
+	Credential ai.Credential
 
 	// MaxOutputTokens caps the reply. Required and positive: a cap that can be
 	// omitted is not a cap.
@@ -77,9 +79,9 @@ type Port struct {
 
 // String and GoString keep a Config out of anything that formats it.
 //
-// A resolver is supplied by a caller and may hold a secret in a field of its
-// own; formatting the Config would then print it. Describing the Config instead
-// of ranging over it keeps that impossible here whatever the caller injected.
+// A Config holds a resolved credential, and formatting one would print every
+// field it can reach. Describing the Config instead of ranging over it keeps
+// that impossible whatever a caller put in it.
 func (c Config) String() string {
 	return "openai.Config{Model:" + c.Model + ", BaseURL:" + c.BaseURL + "}"
 }
@@ -100,8 +102,11 @@ func New(cfg Config) (*Port, error) {
 		return nil, fmt.Errorf("openai: a model is required")
 	case cfg.Transport == nil:
 		return nil, fmt.Errorf("openai: a transport is required; there is no default")
-	case cfg.Credentials == nil:
-		return nil, fmt.Errorf("openai: a credential source is required; there is no default")
+	case cfg.Credential.Key() == "":
+		// Typed rather than prose, and refused here rather than at the first
+		// request: a caller can tell "nothing configured" from "the provider
+		// rejected what we sent", and learns it before anything is billed.
+		return nil, fail(FailureAuth, 0, "no credential was supplied for this provider")
 	case cfg.MaxOutputTokens <= 0:
 		return nil, fmt.Errorf("openai: MaxOutputTokens must be positive, got %d", cfg.MaxOutputTokens)
 	case cfg.ContextWindow < 0:
@@ -113,33 +118,8 @@ func New(cfg Config) (*Port, error) {
 	return &Port{cfg: cfg}, nil
 }
 
-// resolve asks for the credential this request authenticates with.
-func (p *Port) resolve(ctx context.Context) (string, error) {
-	key, err := p.cfg.Credentials.Resolve(ctx)
-	if err != nil {
-		// Not passed through as it arrived: a resolver that put the key into
-		// its own error would hand it to whatever logs this.
-		return "", fail(FailureAuth, 0, scrub(err.Error(), ""))
-	}
-	if key == "" {
-		// Absence is a typed failure, not prose, so a caller can tell "nothing
-		// configured" from "the provider rejected what we sent".
-		return "", fail(FailureAuth, 0, "no credential was supplied for this provider")
-	}
-	return key, nil
-}
-
 // scrub removes a credential from text about to become an error.
-func scrub(text, key string) string {
-	if key != "" {
-		text = strings.ReplaceAll(text, key, "<redacted>")
-	}
-	return credentialShape.ReplaceAllString(text, "<redacted>")
-}
-
-// credentialShape matches key formats and bearer headers, so a value that is
-// not the configured key still does not survive into a report.
-var credentialShape = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|bearer\s+\S+)`)
+func scrub(text, key string) string { return ai.ScrubSecret(text, key) }
 
 // usageFrom turns a captured terminal into this repository's usage.
 //
@@ -181,6 +161,15 @@ func usageFrom(t terminal) ai.Usage {
 // The set is the same one every provider in this repository answers with, so a
 // caller branches on the outcome rather than on which provider produced it.
 func failureFromStatus(status, incomplete, errorCode string) (ai.StopReason, error) {
+	// An overflow reported inside a 200 is the same condition as one reported
+	// by a status, and it leaves as the same sentinel. Classifying it by the
+	// ending instead would call it an interruption, and an interruption is not
+	// retried — so the one failure this repository can actually recover from,
+	// by shortening, would be the one it gives up on.
+	if errorCode == contextOverflowCode {
+		return ai.StopError, fmt.Errorf("%w: the provider refused the request as too large",
+			ai.ErrContextOverflow)
+	}
 	// A failure reported inside a 200 can name its own reason. Classifying by
 	// the ending alone would call an exhausted balance an interruption, which
 	// reads as "try again later" for something that cannot succeed.

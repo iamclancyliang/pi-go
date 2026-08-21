@@ -8,48 +8,26 @@ package deepseek
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// Environment is where a credential is read from.
-//
-// Injected rather than read directly so that a test cannot reach the real
-// environment by forgetting to. There is no fallback to os.Getenv: omitting this
-// fails, which is the point.
-type Environment interface {
-	Lookup(ctx context.Context, name string) (string, error)
-}
+// The credential rule is shared, not this package's own: which source wins, how
+// a blank variable is treated and how a resolved key is kept out of reports are
+// answers a user expects to be the same whichever provider they configure.
+// What stays here is the list below, because only this package knows what this
+// provider's key is called.
+type (
+	Environment = ai.Environment
+	Credential  = ai.Credential
+)
 
 // ErrNoCredential reports that no credential was found.
-//
-// Pi returns undefined here; this returns a typed failure so the reason survives
-// to whatever reports it. A caller that cannot tell "no key configured" from
-// "the provider rejected the key" will tell its user the wrong thing to fix.
-var ErrNoCredential = errors.New("deepseek: no credential")
+var ErrNoCredential = ai.ErrNoCredential
 
 // EnvVars is the ordered list of variables a credential may come from. Pi
 // declares exactly one for this provider, and so does this.
 var EnvVars = []string{"DEEPSEEK_API_KEY"}
-
-// Credential is a resolved key and where it came from.
-type Credential struct {
-	key string
-
-	// Source names the variable that supplied the key. It is the part that may
-	// be logged: it identifies the origin without disclosing the secret.
-	Source string
-}
-
-// String and GoString keep the key out of anything that formats this value,
-// including the %v and %+v that a log line or a test failure reaches for.
-func (c Credential) String() string   { return "deepseek.Credential{Source:" + c.Source + "}" }
-func (c Credential) GoString() string { return c.String() }
-
-// Key is the resolved secret. Named as a method rather than an exported field so
-// that reaching the secret is always a deliberate act at a call site.
-func (c Credential) Key() string { return c.key }
 
 // Resolve finds the credential.
 //
@@ -58,21 +36,5 @@ func (c Credential) Key() string { return c.key }
 // continues, because an empty key sent to a provider fails as an authentication
 // error and reads as a bad credential rather than a missing one.
 func Resolve(ctx context.Context, env Environment, stored string) (Credential, error) {
-	if strings.TrimSpace(stored) != "" {
-		return Credential{key: stored, Source: "stored credential"}, nil
-	}
-	for _, name := range EnvVars {
-		if err := ctx.Err(); err != nil {
-			return Credential{}, err
-		}
-		value, err := env.Lookup(ctx, name)
-		if err != nil {
-			return Credential{}, fmt.Errorf("deepseek: reading %s: %w", name, err)
-		}
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		return Credential{key: value, Source: name}, nil
-	}
-	return Credential{}, fmt.Errorf("%w: none of %s is set", ErrNoCredential, strings.Join(EnvVars, ", "))
+	return ai.ResolveCredential(ctx, providerName, env, stored, EnvVars)
 }

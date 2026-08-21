@@ -73,6 +73,29 @@ type ProviderError struct {
 
 	// Used is what the attempts behind this failure reported consuming.
 	Used []Usage
+
+	// Advice is the provider's own instruction about retrying, when it gave
+	// one. It outranks the classification, which is only an inference drawn
+	// from a status code: a provider that says not to retry a 503 knows
+	// something about its own state that the status does not carry, and one
+	// asking for a retry of a status that usually means stop knows the same.
+	//
+	// An exhausted balance is the exception and stays terminal either way.
+	// Every attempt against it spends more of what is already gone, and who
+	// asked for the attempt does not change that.
+	Advice *bool
+}
+
+// Retryable reports whether another identical attempt is worth its cost,
+// preferring the provider's own instruction over the classification's default.
+func (e *ProviderError) Retryable() bool {
+	if e.Failure == FailureQuota {
+		return false
+	}
+	if e.Advice != nil {
+		return *e.Advice
+	}
+	return e.Failure.Retryable()
 }
 
 func (e *ProviderError) Error() string {
@@ -98,7 +121,25 @@ func (e *ProviderError) Is(target error) bool {
 }
 
 // Consumed reports what the failed call used, so a ledger can hold it.
-func (e *ProviderError) Consumed() []Usage { return e.Used }
+//
+// A copy, because the failure is the record of what was spent. Handing out the
+// slice — and the optional counts it points at — would let a reader that
+// adjusts what it got change what every later reader sees, and a spend that can
+// be rewritten after the fact is not a record of anything.
+func (e *ProviderError) Consumed() []Usage { return CloneUsages(e.Used) }
+
+// Retryable reports whether an error is worth another identical attempt.
+//
+// The way a caller above the boundary asks, without unwrapping to anything
+// provider-specific. An error carrying no classification is not retried: this
+// repository does not guess at an unrecognised failure's cost.
+func Retryable(err error) bool {
+	var classified *ProviderError
+	if errors.As(err, &classified) {
+		return classified.Retryable()
+	}
+	return false
+}
 
 // FailureOf reports the classification of an error, if it carries one.
 //

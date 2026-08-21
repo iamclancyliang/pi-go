@@ -34,10 +34,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	if err != nil {
 		return nil, err
 	}
-	key, err := p.resolve(ctx)
-	if err != nil {
-		return nil, err
-	}
+	key := p.cfg.Credential.Key()
 
 	// This call's own record, held by the client it is about to use.
 	held := &capture{}
@@ -76,7 +73,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		if refused := held.refusal(); refused != nil {
 			return nil, refused
 		}
-		return nil, fmt.Errorf("openai: starting the stream: %w", err)
+		return nil, wireFailure("starting the stream", err)
 	}
 
 	out := make(chan ai.StreamEvent)
@@ -97,9 +94,12 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 
 // pump turns the adapter's chunks into this repository's event protocol.
 //
-// Block identity comes from the provider's own index, carried through by the
-// adapter. Renumbering it here to make a stream look contiguous would hide a
-// malformed stream rather than report one.
+// Blocks are grouped by the index the adapter reports, which it has already
+// renumbered contiguously from zero whatever the provider sent. That index is
+// therefore usable for grouping and worthless as evidence, so what the provider
+// actually announced is checked against the wire separately — see
+// checkAnnounced. Renumbering here to make a stream look contiguous would hide
+// a malformed stream rather than report one.
 func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.AgenticMessage],
 	held *capture, out chan<- ai.StreamEvent) {
 
@@ -126,7 +126,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		return true
 	}
 	sendTerminal := func(ev ai.StreamEvent) { out <- ev }
-	fail := func(err error) {
+	abort := func(err error) {
 		ev, accErr := acc.Fail(ai.StopError, err)
 		if accErr != nil {
 			return
@@ -163,7 +163,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		return
 	}
 	if !send(startEv) {
-		fail(context.Canceled)
+		abort(context.Canceled)
 		return
 	}
 
@@ -181,10 +181,10 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 				return
 			}
 			if refused := held.refusal(); refused != nil {
-				fail(refused)
+				abort(refused)
 				return
 			}
-			fail(fmt.Errorf("openai: reading the stream: %w", err))
+			abort(wireFailure("reading the stream", err))
 			return
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -197,14 +197,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 				// A block this package does not handle. Reporting it is the
 				// point: silently dropping content would leave a caller with a
 				// reply that is missing something nobody mentioned.
-				fail(fmt.Errorf("openai: unsupported content block %q", block.Type))
+				abort(fail(FailureUnknown, 0, fmt.Sprintf(
+					"unsupported content block %q", block.Type)))
 				return
 			}
 			// Checked HERE, as the block arrives. Validating at the end would
 			// let renumbered content reach the consumer first, and a consumer
 			// cannot unsee what it has already been given.
 			if err := checkAnnounced(held); err != nil {
-				fail(err)
+				abort(err)
 				return
 			}
 			at, seen := blocks[providerIndex(block)]
@@ -223,7 +224,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 					}
 					closed, err := acc.Close(open)
 					if err != nil {
-						fail(err)
+						abort(err)
 						return
 					}
 					delete(kinds, open)
@@ -238,7 +239,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 			}
 			events, err := acc.Push(ai.Chunk{Index: at, Kind: kind, Delta: text, Call: call})
 			if err != nil {
-				fail(err)
+				abort(err)
 				return
 			}
 			if !send(events...) {
@@ -256,7 +257,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	for _, at := range open {
 		closed, err := acc.Close(at)
 		if err != nil {
-			fail(err)
+			abort(err)
 			return
 		}
 		if !send(closed) {
@@ -269,7 +270,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	final := held.last()
 	reason, statusErr := failureFromStatus(final.Status, final.IncompleteReason, final.ErrorCode)
 	if statusErr != nil {
-		fail(statusErr)
+		abort(statusErr)
 		return
 	}
 	// Checked before the reply is completed: the accumulator has one ending, and
@@ -290,7 +291,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	}
 	done, err := acc.Done(reason, usageFrom(final))
 	if err != nil {
-		fail(err)
+		abort(err)
 		return
 	}
 	if done.Final != nil {
@@ -354,19 +355,27 @@ func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 // the provider sent, so a gap is invisible after conversion, and accepting one
 // would report an order the provider never sent.
 func checkAnnounced(held *capture) error {
+	// An announcement with no index at all comes first. A missing identity
+	// leaves nothing to compare, so a check that only walks what was recorded
+	// would pass it — and inferring the position from arrival order is exactly
+	// the renumbering the rest of this refuses to do.
+	for _, what := range held.anonymousBlocks() {
+		return fail(FailureUnknown, 0, fmt.Sprintf(
+			"the provider announced %s; refusing to infer a position it did not send", what))
+	}
 	for at, announced := range held.announcedIndices() {
 		if announced != at {
-			return fmt.Errorf(
-				"openai: the provider announced item index %d where %d was expected; "+
-					"refusing to renumber a stream that skips", announced, at)
+			return fail(FailureUnknown, 0, fmt.Sprintf(
+				"the provider announced item index %d where %d was expected; "+
+					"refusing to renumber a stream that skips", announced, at))
 		}
 	}
 	for item, announced := range held.announcedContent() {
 		for at, index := range announced {
 			if index != at {
-				return fmt.Errorf(
-					"openai: item %d announced content index %d where %d was expected; "+
-						"refusing to renumber a stream that skips", item, index, at)
+				return fail(FailureUnknown, 0, fmt.Sprintf(
+					"item %d announced content index %d where %d was expected; "+
+						"refusing to renumber a stream that skips", item, index, at))
 			}
 		}
 	}

@@ -93,13 +93,108 @@ func modelFor(port ai.Port) string {
 	return "deepseek-v4-flash"
 }
 
+// TestAProvidersOwnRetryInstructionReachesOneCaller.
+//
+// Both providers are told the same thing by their transport — repeat this, or
+// do not — and a caller that does not know which answered has to be able to act
+// on it. A provider saying not to retry a 503 knows something about its own
+// state that the status does not carry; an instruction that stops at the
+// adapter is one that caller never learns of.
+func TestAProvidersOwnRetryInstructionReachesOneCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		port ai.Port
+		want bool
+	}{
+		{
+			name: "a transient status the first provider says not to repeat",
+			port: openaiPortRefusing(t, 503, `{"error":{"message":"down"}}`, "false"),
+			want: false,
+		},
+		{
+			name: "a transient status the second provider says not to repeat",
+			port: deepseekPortRefusing(t, 503, `{"error":{"message":"down"}}`, "false"),
+			want: false,
+		},
+		{
+			name: "the same status from the first provider with no instruction",
+			port: openaiPortRefusing(t, 503, `{"error":{"message":"down"}}`, ""),
+			want: true,
+		},
+		{
+			name: "the same status from the second provider with no instruction",
+			port: deepseekPortRefusing(t, 503, `{"error":{"message":"down"}}`, ""),
+			want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.port.Generate(context.Background(), ai.Request{
+				Model:    modelFor(tc.port),
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if got := ai.Retryable(err); got != tc.want {
+				t.Fatalf("Retryable %v, want %v, for %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
+func openaiPortRefusing(t *testing.T, status int, body, advice string) ai.Port {
+	t.Helper()
+	return openaiPortResponding(t, refusal(status, body, advice))
+}
+
+func deepseekPortRefusing(t *testing.T, status int, body, advice string) ai.Port {
+	t.Helper()
+	p, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", MaxOutputTokens: 16, Environment: staticEnv{},
+		Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+			return refusal(status, body, advice), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	return p
+}
+
+// refusal is one recorded rejection, optionally carrying the provider's own
+// instruction about trying again.
+func refusal(status int, body, advice string) *http.Response {
+	header := http.Header{"Content-Type": []string{"application/json"}}
+	if advice != "" {
+		header.Set("x-should-retry", advice)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func openaiPortResponding(t *testing.T, resp *http.Response) ai.Port {
+	t.Helper()
+	p, err := openai.New(openai.Config{
+		Model: "gpt-test", MaxOutputTokens: 16,
+		Credential: ai.StoredCredential("test-key", "a test"),
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return resp, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("openai.New: %v", err)
+	}
+	return p
+}
+
 func openaiPortReturning(t *testing.T, status int, body string) ai.Port {
 	t.Helper()
 	p, err := openai.New(openai.Config{
 		Model: "gpt-test", MaxOutputTokens: 16,
-		Credentials: openai.CredentialFunc(func(context.Context) (string, error) {
-			return "test-key", nil
-		}),
+		Credential: ai.StoredCredential("test-key", "a test"),
 		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: status,

@@ -17,9 +17,13 @@ be replaced.
 | Obligation | Enforced by |
 | --- | --- |
 | The key is reached only through injected configuration; a missing seam fails rather than falling back | `TestAPortWithoutASuppliedTransportIsRefused` |
-| Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence` |
-| Absence is a typed failure, not an empty value | `TestCredentialPrecedence` |
-| The key appears in no formatted value — config, port, or the container holding it — and in no error | `TestCredentialPrecedence`, `TestListIsNonSecretAndSideEffectFree` |
+| Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence`, `TestAStoredCredentialWinsAndABlankVariableIsSkipped` |
+| Resolution happens once, off the request path: the port is given a resolved value, not a resolver | `TestAMissingCredentialIsATypedAbsence` |
+| A lookup that fails with the value in its own error does not carry it out | `TestALookupErrorDoesNotCarryTheValueOut` |
+| Scrubbing removes both the exact value and anything key-shaped | `TestScrubbingRemovesBothWhatIsKnownAndWhatIsShaped` |
+| Resolution stops when the caller does, between lookups and not only before them | `TestResolutionStopsWhenTheCallerDoes` |
+| Absence is a typed failure, not an empty value, and is refused before anything is billed | `TestCredentialPrecedence`, `TestAnAbsentCredentialIsTyped`, `TestAMissingCredentialIsATypedAbsence` |
+| The key appears in no formatted value — config, port, or the container holding it — and in no error | `TestCredentialPrecedence`, `TestACredentialDoesNotPrintItsKey`, `TestAConfigDoesNotPrintACallersSecret`, `TestListIsNonSecretAndSideEffectFree` |
 | One credential per provider; storing again replaces | `TestOneCredentialPerProvider` |
 | Removal is serialized against writing, so a logout racing a refresh is not undone by it | `TestTheStoreSerializesWritesAgainstDeletes` |
 | Enumeration returns metadata only and performs no work | `TestListIsNonSecretAndSideEffectFree` |
@@ -31,6 +35,10 @@ be replaced.
 | Failures are values, not text: nothing branches on an error's wording | `TestQuotaAndThrottleReachOppositeOutcomes` |
 | The set is closed, including the two failures that arrive inside a 200 | `TestA200ThatReportsFailureIsNotASuccess` |
 | An unrecognised stop reason is a failure, never a success | `TestA200ThatReportsFailureIsNotASuccess` |
+| A failure from the wire leaves classified, and only what a repeat could survive is called transient | `TestATransportFailureLeavesTyped` |
+| An overflow reported inside a 200 is the same recoverable condition as one reported by a status | `TestAnOverflowInsideA200IsRecoverable` |
+| The provider's own retry instruction outranks the status, and reaches the caller that decides | `TestTheProvidersOwnRetryInstructionSurvives`, `TestAProvidersOwnRetryInstructionReachesOneCaller`, `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
+| An exhausted balance stays terminal however the provider or the status reads | `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
 | A reply that asked for tools says so rather than reporting a plain ending | `TestAReplyAskingForToolsSaysSo` |
 | Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation` |
 
@@ -57,6 +65,7 @@ be replaced.
 | Unreported stays distinct from reported zero, in a call and in the total | `TestUsageKeepsUnreportedApartFromZero`, `TestAnUnreportedFieldStaysUnreportedInTheTotal` |
 | Cached prompt tokens are counted once, and counted in the total | `TestCachedPromptTokensAreNotCountedTwice`, `TestTotalCountsEveryReportedToken` |
 | The ledger owns its entries: neither the writer nor a reader can edit them afterwards | `TestTheLedgerOwnsWhatItRecords`, `TestASnapshotDoesNotChangeAfterItIsTaken` |
+| A failed call's spend is owned the same way, before it ever reaches a ledger | `TestAFailuresSpendCannotBeRewritten` |
 | The model that served a reply is read from the reply | `TestTheServedModelIsReported` |
 
 ## Streaming
@@ -67,6 +76,7 @@ be replaced.
 | Interleaved calls stay apart | `TestInterleavedToolCallFragmentsStayApart` |
 | Text after several open calls closes all of them | `TestTextAfterInterleavedCallsClosesEveryBlock` |
 | A block ends before the next begins | `TestABlockEndsBeforeTheNextBegins` |
+| A block the provider announced without a position fails before its content reaches a consumer | `TestAnAnnouncementWithNoIdentityFailsBeforeItsContent`, `TestAWellFormedStreamStillPasses` |
 | A cancelled stream still delivers exactly one terminal, carrying what had arrived | `TestACancelledStreamStillEnds` |
 | Overflow is inferred from counts, only against a measured window, and never invented without one | `TestCountBasedOverflowDetection`, `TestConfigurationRefusesAWindowItWouldMisuse` |
 

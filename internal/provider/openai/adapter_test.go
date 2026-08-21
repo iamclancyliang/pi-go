@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func (r *recordedTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return r.responses[r.requests-1], nil
 }
 
-var fixedKey = openai.CredentialFunc(func(context.Context) (string, error) { return "test-key", nil })
+var fixedKey = ai.StoredCredential("test-key", "a test")
 
 func recorded(events ...string) *http.Response {
 	var b strings.Builder
@@ -50,7 +51,7 @@ func recorded(events ...string) *http.Response {
 func newPort(t *testing.T, tr http.RoundTripper) *openai.Port {
 	t.Helper()
 	p, err := openai.New(openai.Config{
-		Model: "gpt-test", Transport: tr, Credentials: fixedKey, MaxOutputTokens: 64,
+		Model: "gpt-test", Transport: tr, Credential: fixedKey, MaxOutputTokens: 64,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -110,7 +111,7 @@ func TestAReplyArrivesThroughTheAdapter(t *testing.T) {
 // cannot be built without an output cap.
 func TestThisPortRefusesAConfigurationItCannotHonour(t *testing.T) {
 	base := openai.Config{
-		Model: "m", Transport: &recordedTransport{}, Credentials: fixedKey, MaxOutputTokens: 8,
+		Model: "m", Transport: &recordedTransport{}, Credential: fixedKey, MaxOutputTokens: 8,
 	}
 	for _, tc := range []struct {
 		name   string
@@ -118,7 +119,7 @@ func TestThisPortRefusesAConfigurationItCannotHonour(t *testing.T) {
 	}{
 		{"no model", func(c *openai.Config) { c.Model = "" }},
 		{"no transport", func(c *openai.Config) { c.Transport = nil }},
-		{"no credential source", func(c *openai.Config) { c.Credentials = nil }},
+		{"no credential", func(c *openai.Config) { c.Credential = ai.Credential{} }},
 		{"no output cap", func(c *openai.Config) { c.MaxOutputTokens = 0 }},
 		{"negative output cap", func(c *openai.Config) { c.MaxOutputTokens = -1 }},
 	} {
@@ -813,20 +814,13 @@ func TestAContentIndexThatSkipsIsRefused(t *testing.T) {
 	}
 }
 
-// leakyResolver holds a secret in a field of its own, as a caller's resolver
-// might.
-type leakyResolver struct{ Secret string }
-
-func (l leakyResolver) Resolve(context.Context) (string, error) { return l.Secret, nil }
-
-// TestAConfigDoesNotPrintACallersSecret: a resolver is supplied from outside and
-// may carry a key. Formatting the config would then print it, whatever care the
-// port itself takes.
+// TestAConfigDoesNotPrintACallersSecret: a config holds a resolved key, and
+// anything that formats a struct reaches every field it has.
 func TestAConfigDoesNotPrintACallersSecret(t *testing.T) {
 	const secret = "sk-a-callers-secret-value"
 	cfg := openai.Config{
 		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
-		Credentials: leakyResolver{Secret: secret},
+		Credential: ai.StoredCredential(secret, "a test"),
 	}
 	for name, rendered := range map[string]string{
 		"%v":  fmt.Sprintf("%v", cfg),
@@ -840,50 +834,22 @@ func TestAConfigDoesNotPrintACallersSecret(t *testing.T) {
 }
 
 // TestAMissingCredentialIsATypedAbsence: a caller must be able to tell "nothing
-// configured" from "the provider rejected what we sent".
+// configured" from "the provider rejected what we sent", and must learn it
+// before a request is billed rather than from the reply to one.
 func TestAMissingCredentialIsATypedAbsence(t *testing.T) {
-	p, err := openai.New(openai.Config{
-		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
-		Credentials: openai.CredentialFunc(func(context.Context) (string, error) {
-			return "", nil
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, genErr := p.Generate(context.Background(), ai.Request{
-		Model: "m", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	tr := &recordedTransport{}
+	_, err := openai.New(openai.Config{
+		Model: "m", Transport: tr, MaxOutputTokens: 8,
 	})
 	var classified *openai.Error
-	if !errors.As(genErr, &classified) {
-		t.Fatalf("a missing credential produced %v, which a caller cannot branch on", genErr)
+	if !errors.As(err, &classified) {
+		t.Fatalf("a missing credential produced %v, which a caller cannot branch on", err)
 	}
 	if classified.Failure != openai.FailureAuth {
 		t.Fatalf("classified %s", classified.Failure)
 	}
-}
-
-// TestAResolverErrorDoesNotCarryItsKeyOut: a resolver that puts the key into its
-// own error would otherwise hand it to whatever logs the failure.
-func TestAResolverErrorDoesNotCarryItsKeyOut(t *testing.T) {
-	const secret = "sk-leaked-through-an-error"
-	p, err := openai.New(openai.Config{
-		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
-		Credentials: openai.CredentialFunc(func(context.Context) (string, error) {
-			return "", fmt.Errorf("vault refused for key %s", secret)
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, genErr := p.Generate(context.Background(), ai.Request{
-		Model: "m", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
-	})
-	if genErr == nil {
-		t.Fatal("expected a failure")
-	}
-	if strings.Contains(genErr.Error(), secret) {
-		t.Fatalf("the key reached the error: %v", genErr)
+	if tr.requests != 0 {
+		t.Fatalf("made %d requests without a credential", tr.requests)
 	}
 }
 
@@ -969,7 +935,7 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 	windowed := func(t *testing.T, tr http.RoundTripper, window int) *openai.Port {
 		t.Helper()
 		p, err := openai.New(openai.Config{
-			Model: "gpt-test", Transport: tr, Credentials: fixedKey,
+			Model: "gpt-test", Transport: tr, Credential: fixedKey,
 			MaxOutputTokens: 16, ContextWindow: window,
 		})
 		if err != nil {
@@ -1026,4 +992,226 @@ func TestCountBasedOverflowDetection(t *testing.T) {
 			t.Fatalf("a port with no measured window invented an overflow: %v", err)
 		}
 	})
+}
+
+// stream returns a recorded reply whose events can be edited first.
+func streamOf(events ...string) *recordedTransport {
+	return &recordedTransport{responses: []*http.Response{recorded(events...)}}
+}
+
+// wellFormed is one text block announced exactly as the provider documents it.
+func wellFormed() []string {
+	return []string{
+		`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"visible"}`,
+		`{"type":"response.output_text.done","item_id":"m","output_index":0,"content_index":0,"text":"visible"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"visible"}]}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-test","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	}
+}
+
+// TestAnAnnouncementWithNoIdentityFailsBeforeItsContent: a block's position is
+// what the provider said it was. An announcement that omits it leaves nothing
+// to check, and a check that only walks recorded positions passes exactly then
+// — so absence has to be recorded as the thing it is.
+//
+// The consumer must not see the content first: a renderer cannot unshow what it
+// has already been given.
+func TestAnAnnouncementWithNoIdentityFailsBeforeItsContent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		edit    func([]string) []string
+		wantErr string
+	}{
+		{
+			name: "an item with no output_index",
+			edit: func(events []string) []string {
+				events[1] = `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`
+				return events
+			},
+			wantErr: "an output item with no output_index",
+		},
+		{
+			name: "a content part with no content_index",
+			edit: func(events []string) []string {
+				events[2] = `{"type":"response.content_part.added","item_id":"m","output_index":0,"part":{"type":"output_text","text":""}}`
+				return events
+			},
+			wantErr: "a content part with no content_index",
+		},
+		{
+			name: "a content part with no output_index",
+			edit: func(events []string) []string {
+				events[2] = `{"type":"response.content_part.added","item_id":"m","content_index":0,"part":{"type":"output_text","text":""}}`
+				return events
+			},
+			wantErr: "a content part with no output_index",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPort(t, streamOf(tc.edit(wellFormed())...))
+			events, err := p.Stream(context.Background(), ai.Request{
+				Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var failure error
+			for ev := range events {
+				switch ev.Kind {
+				case ai.StreamStart, ai.StreamError:
+				case ai.StreamDone:
+					t.Fatal("a stream with an unidentified block completed")
+				default:
+					t.Fatalf("content reached the consumer before the stream failed: %s", ev.Kind)
+				}
+				if ev.Kind == ai.StreamError && ev.Final != nil {
+					failure = ev.Final.Cause
+				}
+			}
+			if failure == nil {
+				t.Fatal("a block with no announced position was accepted")
+			}
+			if !strings.Contains(failure.Error(), tc.wantErr) {
+				t.Fatalf("the failure did not say what was missing: %v", failure)
+			}
+			if _, ok := ai.FailureOf(failure); !ok {
+				t.Fatalf("a caller cannot branch on %v", failure)
+			}
+		})
+	}
+}
+
+// TestAWellFormedStreamStillPasses guards the check above from being satisfied
+// by refusing everything.
+func TestAWellFormedStreamStillPasses(t *testing.T) {
+	resp, err := newPort(t, streamOf(wellFormed()...)).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Content != "visible" {
+		t.Fatalf("content %q", resp.Content)
+	}
+}
+
+// failingTransport fails the way a network does, without a response.
+type failingTransport struct {
+	err      error
+	requests int
+}
+
+func (f *failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	f.requests++
+	return nil, f.err
+}
+
+// TestATransportFailureLeavesTyped: the outcome set is what a caller branches
+// on. A failure that arrives as prose forces it to read text, and reading text
+// is what the typed set exists to remove.
+func TestATransportFailureLeavesTyped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want ai.Failure
+	}{
+		{"a truncated body", io.ErrUnexpectedEOF, ai.FailureTransient},
+		{"a refused connection", &net.OpError{Op: "dial", Err: errors.New("refused")}, ai.FailureTransient},
+		{"something unrecognised", errors.New("the adapter disagreed"), ai.FailureUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := newPort(t, &failingTransport{err: tc.err}).Generate(
+				context.Background(), ai.Request{
+					Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+				})
+			failure, ok := ai.FailureOf(err)
+			if !ok {
+				t.Fatalf("a caller cannot branch on %v", err)
+			}
+			if failure != tc.want {
+				t.Fatalf("classified %s, want %s", failure, tc.want)
+			}
+			// An unrecognised failure is not retried: this repository does not
+			// guess that a repeat would cost less than it did.
+			if got := ai.Retryable(err); got != (tc.want == ai.FailureTransient) {
+				t.Fatalf("Retryable %v for %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnOverflowInsideA200IsRecoverable: a reply can fail inside a 200 for a
+// reason the status cannot express. Read by the ending alone this is an
+// interruption, which is never retried — so the one failure that recovers by
+// shortening would be the one given up on.
+func TestAnOverflowInsideA200IsRecoverable(t *testing.T) {
+	tr := streamOf(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}`,
+		`{"type":"response.failed","response":{"id":"r","model":"gpt-test","status":"failed","error":{"code":"context_length_exceeded","message":"too long"},"usage":{"input_tokens":900,"output_tokens":0}}}`,
+	)
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("an overflow inside a 200 arrived as %v, which is not recovered from", err)
+	}
+}
+
+// TestTheProvidersOwnRetryInstructionSurvives: nothing inside this package
+// retries, so an instruction that is not carried out of it is one the caller
+// who does decide never learns of.
+func TestTheProvidersOwnRetryInstructionSurvives(t *testing.T) {
+	refusal := func(status int, header, body string) *http.Response {
+		h := http.Header{"Content-Type": []string{"application/json"}}
+		if header != "" {
+			h.Set("x-should-retry", header)
+		}
+		return &http.Response{StatusCode: status, Header: h,
+			Body: io.NopCloser(strings.NewReader(body))}
+	}
+	for _, tc := range []struct {
+		name string
+		resp *http.Response
+		want bool
+	}{
+		{
+			name: "a transient status the provider says not to repeat",
+			resp: refusal(503, "false", `{"error":{"message":"down"}}`),
+			want: false,
+		},
+		{
+			name: "a terminal status the provider asks to repeat",
+			resp: refusal(400, "true", `{"error":{"message":"odd"}}`),
+			want: true,
+		},
+		{
+			name: "an exhausted balance the provider asks to repeat",
+			resp: refusal(402, "true", `{"error":{"code":"insufficient_quota","message":"gone"}}`),
+			want: false,
+		},
+		{
+			name: "a transient status with no instruction",
+			resp: refusal(503, "", `{"error":{"message":"down"}}`),
+			want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &recordedTransport{responses: []*http.Response{tc.resp}}
+			_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+				Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if got := ai.Retryable(err); got != tc.want {
+				t.Fatalf("Retryable %v, want %v, for %v", got, tc.want, err)
+			}
+			if tr.requests != 1 {
+				t.Fatalf("made %d requests; this port does not retry", tr.requests)
+			}
+		})
+	}
 }

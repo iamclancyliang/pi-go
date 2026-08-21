@@ -68,6 +68,11 @@ type capture struct {
 	// contentIndices is every content index the provider announced, per item.
 	contentIndices map[int][]int
 
+	// anonymous describes every block the provider announced without the index
+	// that identifies it. Held separately from the indices because there is no
+	// index to hold it under, which is exactly the condition being recorded.
+	anonymous []string
+
 	// itemIndices is every output index the provider announced, in order.
 	//
 	// Recorded here because the adapter renumbers: by the time blocks reach
@@ -83,9 +88,6 @@ func (c *capture) startAttempt() {
 	c.attempts = append(c.attempts, terminal{})
 }
 
-// observe records what an attempt reported. The attempt is identified by
-// position in this call's own list, not by matching content.
-// observeItem records an index the provider announced.
 // observeFailure records why a request was refused.
 func (c *capture) observeFailure(err error) {
 	c.mu.Lock()
@@ -100,6 +102,21 @@ func (c *capture) refusal() error {
 	return c.failure
 }
 
+// observeAnonymous records a block announced with no identity.
+func (c *capture) observeAnonymous(what string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.anonymous = append(c.anonymous, what)
+}
+
+// anonymousBlocks is what the provider announced without saying where it goes.
+func (c *capture) anonymousBlocks() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.anonymous...)
+}
+
+// observeItem records an index the provider announced.
 func (c *capture) observeItem(index int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -134,6 +151,8 @@ func (c *capture) announcedIndices() []int {
 	return append([]int(nil), c.itemIndices...)
 }
 
+// observe records what an attempt reported. The attempt is identified by
+// position in this call's own list, not by matching content.
 func (c *capture) observe(t terminal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -194,10 +213,11 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// a stream into a wait.
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
 		resp.Body = &teeBody{
-			inner:      resp.Body,
-			onTerminal: t.capture.observe,
-			onItem:     t.capture.observeItem,
-			onContent:  t.capture.observeContent,
+			inner:       resp.Body,
+			onTerminal:  t.capture.observe,
+			onItem:      t.capture.observeItem,
+			onContent:   t.capture.observeContent,
+			onAnonymous: t.capture.observeAnonymous,
 		}
 		return resp, nil
 	}
@@ -213,12 +233,19 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// Classified here, where the status and the provider's own error code
 		// both exist. After this the adapter turns it into prose, and a
 		// classification rebuilt from prose is one a change of wording breaks.
+		refused := failureFrom(resp.StatusCode, raw, t.key)
+		var classified *ai.ProviderError
+		if errors.As(refused, &classified) {
+			// The provider's own instruction about retrying travels with the
+			// failure. Nothing inside this package retries — the adapter's own
+			// retries are off — so an instruction that is not carried out is
+			// one the caller who does decide never learns of.
+			classified.Advice = retryAdvice(resp.Header)
+		}
 		// A refused request may still report what it read. Recording it here
 		// keeps a failed call from being accounted for as free.
-		refused := failureFrom(resp.StatusCode, raw, t.key)
 		if used, ok := usageFromBody(raw); ok {
-			var classified *ai.ProviderError
-			if errors.As(refused, &classified) {
+			if classified != nil {
 				classified.Used = append(classified.Used, used)
 			} else {
 				refused = ai.WithUsage(refused, used)
@@ -235,13 +262,21 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // teeBody watches an event stream go past without changing or delaying it.
 type teeBody struct {
-	inner      io.ReadCloser
-	onTerminal func(terminal)
-	onItem     func(int)
-	onContent  func(item, content int)
-	pending    []byte
-	event      []byte
-	done       bool
+	inner       io.ReadCloser
+	onTerminal  func(terminal)
+	onItem      func(int)
+	onContent   func(item, content int)
+	onAnonymous func(string)
+	pending     []byte
+	event       []byte
+	done        bool
+}
+
+// report records a block the provider announced without saying where it goes.
+func (t *teeBody) report(what string) {
+	if t.onAnonymous != nil {
+		t.onAnonymous(what)
+	}
 }
 
 func (t *teeBody) Read(p []byte) (int, error) {
@@ -320,11 +355,23 @@ func (t *teeBody) scan() {
 // handle parses one complete event, reporting whether the terminal was found.
 func (t *teeBody) handle(payload []byte) bool {
 	{
-		if index, ok := itemIndexFromEvent(payload); ok && t.onItem != nil {
-			t.onItem(index)
+		if index, ok := itemIndexFromEvent(payload); ok {
+			switch {
+			case index == nil:
+				t.report("an output item with no output_index")
+			case t.onItem != nil:
+				t.onItem(*index)
+			}
 		}
-		if item, content, ok := contentIndexFromEvent(payload); ok && t.onContent != nil {
-			t.onContent(item, content)
+		if item, content, ok := contentIndexFromEvent(payload); ok {
+			switch {
+			case item == nil:
+				t.report("a content part with no output_index")
+			case content == nil:
+				t.report("a content part with no content_index")
+			case t.onContent != nil:
+				t.onContent(*item, *content)
+			}
 		}
 		if found, ok := terminalFromEvent(payload); ok {
 			t.done = true
@@ -411,36 +458,43 @@ func terminalFromResponse(raw []byte) (terminal, bool) {
 
 // itemIndexFromEvent reads the output index the provider announced for a new
 // item, which is where its own ordering is visible.
-func itemIndexFromEvent(payload []byte) (int, bool) {
+//
+// The index is returned as a pointer, and nil means the provider announced an
+// item without one. That distinction is the whole point: treating a missing
+// index the same as an unrelated event would record nothing, and a check that
+// only looks at what was recorded passes when the identity is absent — the one
+// case it exists to catch.
+func itemIndexFromEvent(payload []byte) (*int, bool) {
 	var event struct {
 		Type        string `json:"type"`
 		OutputIndex *int   `json:"output_index"`
 	}
-	if err := json.Unmarshal(payload, &event); err != nil || event.OutputIndex == nil {
-		return 0, false
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, false
 	}
 	if event.Type != "response.output_item.added" {
-		return 0, false
+		return nil, false
 	}
-	return *event.OutputIndex, true
+	return event.OutputIndex, true
 }
 
 // contentIndexFromEvent reads the content index the provider announced inside an
 // item, which is the other place its own ordering is visible.
-func contentIndexFromEvent(payload []byte) (item, content int, ok bool) {
+// Either index may be nil, meaning the provider announced content it did not
+// say the position of.
+func contentIndexFromEvent(payload []byte) (item, content *int, ok bool) {
 	var event struct {
 		Type         string `json:"type"`
 		OutputIndex  *int   `json:"output_index"`
 		ContentIndex *int   `json:"content_index"`
 	}
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return 0, 0, false
+		return nil, nil, false
 	}
-	if event.Type != "response.content_part.added" ||
-		event.OutputIndex == nil || event.ContentIndex == nil {
-		return 0, 0, false
+	if event.Type != "response.content_part.added" {
+		return nil, nil, false
 	}
-	return *event.OutputIndex, *event.ContentIndex, true
+	return event.OutputIndex, event.ContentIndex, true
 }
 
 // usageFromBody reads usage a refused request reported, when it reported any.

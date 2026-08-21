@@ -432,9 +432,23 @@ credential resolution testable without touching the real environment, and this r
 `"stored credential"` or the name of the env var that supplied it. That is the value that may appear
 in a log or a diagnostic; the key itself has no such path.
 
-**Checkable:** resolution order holds; an empty env var is skipped; nothing in this repository reads
-the process environment for a credential except through the injected context; what is reportable is
-the source, and the key has no route to a log, an event, or the session.
+**Resolution is not on the request path.** A port is given a resolved value, not something to ask.
+The order above answers "which configured source wins", which is one question for the process rather
+than one per request: a port that resolved per call could authenticate two calls a second apart as
+different identities with nothing recording that it had. It also keeps a caller's own resolver, and
+whatever that holds, out of the path a request takes.
+
+**A failed lookup does not carry what it found.** A source can return a value and an error together,
+and one that names what it was holding hands the key to whatever logs the failure. Removal is by
+exact value first — the only removal that is certain — and by shape second, for a key that arrived
+from somewhere the call could not see. Neither half alone is enough: a key that does not look like
+one survives the shape pass, and the exact pass has nothing to match when the value was never
+returned.
+
+**Checkable:** resolution order holds; an empty env var is skipped; resolution stops when the caller
+does, between lookups and not only before them; nothing in this repository reads the process
+environment for a credential except through the injected context; what is reportable is the source,
+and the key has no route to a log, an event, or the session.
 
 ## 8. Usage: what is carried, and what "absent" is allowed to mean
 

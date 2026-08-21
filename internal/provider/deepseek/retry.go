@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // RetryPolicy bounds retries of one request.
@@ -39,32 +41,21 @@ type retryDecision struct {
 // decideRetry classifies a response and, if it is worth another attempt, says
 // when.
 //
-// Order matters and is the point: an exhausted balance is terminal BEFORE any
-// retry question is asked. Pi consults quota only at an outer layer, after its
-// transport has already retried a rate-limit status, so a request whose balance
-// is gone gets retried before being judged. Here the judgement comes first.
+// Whether to try again is the shared judgement, not this package's: an
+// exhausted balance is terminal before any retry question is asked, and an
+// explicit instruction from the provider outranks an inference drawn from a
+// status code. Deciding it here would let two providers disagree about the same
+// evidence. Reading the header stays here, because the header is this
+// provider's.
 func decideRetry(resp *http.Response, failure Failure, attempt int, policy RetryPolicy) (retryDecision, error) {
-	if failure == FailureQuota {
+	classified := &ai.ProviderError{Failure: failure}
+	if resp != nil {
+		classified.Advice = retryAdvice(resp.Header)
+	}
+	if !classified.Retryable() {
 		return retryDecision{}, nil
 	}
 	if attempt >= policy.MaxRetries {
-		return retryDecision{}, nil
-	}
-
-	// An explicit instruction from the provider outranks an inference drawn
-	// from its status code — but only for status-derived outcomes. A failure
-	// reported inside a 200 is not governed by a transport header, which has
-	// already called that exchange successful.
-	shouldRetry := failure.Retryable()
-	if resp != nil {
-		switch strings.ToLower(strings.TrimSpace(resp.Header.Get("x-should-retry"))) {
-		case "true":
-			shouldRetry = true
-		case "false":
-			shouldRetry = false
-		}
-	}
-	if !shouldRetry {
 		return retryDecision{}, nil
 	}
 
@@ -83,6 +74,23 @@ func decideRetry(resp *http.Response, failure Failure, attempt int, policy Retry
 		}
 	}
 	return retryDecision{retry: true, after: delay}, nil
+}
+
+// retryAdvice reads this provider's own instruction about trying again.
+//
+// Applies only to a status-derived outcome: a failure reported inside a 200 is
+// not governed by a transport header that has already called that exchange
+// successful.
+func retryAdvice(h http.Header) *bool {
+	switch strings.ToLower(strings.TrimSpace(h.Get("x-should-retry"))) {
+	case "true":
+		yes := true
+		return &yes
+	case "false":
+		no := false
+		return &no
+	}
+	return nil
 }
 
 // serverRequestedDelay reads the provider's own instruction about when to

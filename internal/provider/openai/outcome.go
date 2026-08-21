@@ -2,8 +2,13 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
@@ -34,6 +39,43 @@ const providerName = "openai"
 // fail builds a classified failure from this provider.
 func fail(f Failure, status int, detail string) *Error {
 	return &Error{Provider: providerName, Failure: f, Status: status, Detail: detail}
+}
+
+// wireFailure types an error that came from the wire rather than from a
+// response this package could classify.
+//
+// It leaves typed because the outcome set is closed: a caller branches on a
+// classification, and an error that carries none can only be read as prose.
+// What is not recognised becomes FailureUnknown rather than something
+// retryable, since guessing that an unrecognised failure would survive a repeat
+// buys another billed request on no evidence.
+func wireFailure(stage string, err error) error {
+	failure := FailureUnknown
+	if transient(err) {
+		failure = FailureTransient
+	}
+	return fail(failure, 0, stage+": "+scrub(err.Error(), ""))
+}
+
+// transient reports an error that a later attempt might survive.
+//
+// A truncated body and a refused connection are the same kind of thing here:
+// the exchange did not complete, and nothing was learned about whether the
+// request itself is acceptable.
+func transient(err error) bool {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
+	}
+	// *url.Error is what an HTTP client wraps every failure in, and it reports
+	// itself as a net.Error whatever it holds. Matching it would classify a
+	// request that will fail identically on every attempt as one worth
+	// repeating, so the wrapper is stepped over and its cause judged instead.
+	var wrapper *url.Error
+	if errors.As(err, &wrapper) {
+		return transient(wrapper.Err)
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // classifyStatus maps an HTTP status onto a failure.
@@ -80,7 +122,7 @@ func classifyBody(status int, raw []byte) (Failure, bool) {
 		return FailureQuota, true
 	case "invalid_api_key", "invalid_organization":
 		return FailureAuth, true
-	case "context_length_exceeded":
+	case contextOverflowCode:
 		// Not a Failure: the runtime recovers from this by shortening, so it
 		// leaves this package as the shared sentinel rather than as a refusal.
 		return "", false
@@ -91,16 +133,35 @@ func classifyBody(status int, raw []byte) (Failure, bool) {
 	return "", false
 }
 
+// contextOverflowCode is the provider's own name for a request that did not
+// fit. Recognised from the code rather than its prose, so a change of wording
+// cannot silently disable the recovery it drives.
+const contextOverflowCode = "context_length_exceeded"
+
 // isContextOverflow reports a refusal for a request that was too large.
-//
-// Recognised from the provider's own error code rather than its prose, so a
-// change of wording cannot silently disable the recovery this drives.
 func isContextOverflow(raw []byte) bool {
 	var body wireError
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return false
 	}
-	return body.Error.Code == "context_length_exceeded"
+	return body.Error.Code == contextOverflowCode
+}
+
+// retryAdvice reads the provider's own instruction about trying again.
+//
+// Header-derived, so it applies only to a status-derived outcome. A failure
+// reported inside a 200 is not governed by a transport header that has already
+// called the exchange successful.
+func retryAdvice(h http.Header) *bool {
+	switch strings.ToLower(strings.TrimSpace(h.Get("x-should-retry"))) {
+	case "true":
+		yes := true
+		return &yes
+	case "false":
+		no := false
+		return &no
+	}
+	return nil
 }
 
 // failureFrom builds a classified error from a non-2xx response body.
