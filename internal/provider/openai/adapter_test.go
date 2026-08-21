@@ -1340,11 +1340,18 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 		"a deadline":     context.DeadlineExceeded,
 	} {
 		t.Run(name, func(t *testing.T) {
+			var delivered strings.Builder
+			for _, event := range []string{
+				`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}`,
+				`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+				`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+				`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"already said"}`,
+			} {
+				delivered.WriteString("event: x\ndata: " + event + "\n\n")
+			}
 			body := &haltingBody{
-				prefix: strings.NewReader("event: x\ndata: " +
-					`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}` +
-					"\n\n"),
-				err: fmt.Errorf("transport stopped: %w", cause),
+				prefix: strings.NewReader(delivered.String()),
+				err:    fmt.Errorf("transport stopped: %w", cause),
 			}
 			tr := &recordedTransport{responses: []*http.Response{{
 				StatusCode: 200,
@@ -1359,13 +1366,18 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 				t.Fatalf("Stream: %v", err)
 			}
 			var final *ai.AssistantMessage
+			terminals := 0
 			for ev := range events {
-				if ev.Final != nil {
+				if ev.Terminal() {
+					terminals++
 					final = ev.Final
 				}
 			}
+			if terminals != 1 {
+				t.Fatalf("the stream delivered %d terminal events, want exactly 1", terminals)
+			}
 			if final == nil {
-				t.Fatal("the stream ended without a terminal event")
+				t.Fatal("the terminal carried no reply")
 			}
 			if final.StopReason != ai.StopAborted {
 				t.Fatalf("a stopped call ended as %q, not aborted", final.StopReason)
@@ -1376,6 +1388,57 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 			if _, classified := ai.FailureOf(final.Cause); classified {
 				t.Fatalf("a stopped call was reported as a provider failure: %v", final.Cause)
 			}
+			if ai.Retryable(final.Cause) {
+				t.Fatalf("a stopped call was judged worth repeating: %v", final.Cause)
+			}
+			// What had already arrived is still there. A consumer that watched
+			// a reply appear should not have it vanish because the call ended.
+			var shown strings.Builder
+			for _, b := range final.Blocks {
+				shown.WriteString(b.Text)
+			}
+			if shown.String() != "already said" {
+				t.Fatalf("content delivered before the stop was lost: %q", shown.String())
+			}
 		})
+	}
+}
+
+// TestAnOrdinaryReadFailureStillEndsAsAFailure guards the abort path above from
+// swallowing the case it does not cover: a stream that broke for a reason
+// nobody asked for is a provider failure, and reporting it as an abort would
+// tell a caller it stopped something it did not.
+func TestAnOrdinaryReadFailureStillEndsAsAFailure(t *testing.T) {
+	body := &haltingBody{
+		prefix: strings.NewReader("event: x\ndata: " +
+			`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}` +
+			"\n\n"),
+		err: io.ErrUnexpectedEOF,
+	}
+	tr := &recordedTransport{responses: []*http.Response{{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       body,
+	}}}
+	events, err := newPort(t, tr).Stream(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var final *ai.AssistantMessage
+	for ev := range events {
+		if ev.Terminal() {
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		t.Fatal("the stream ended without a terminal event")
+	}
+	if final.StopReason != ai.StopError {
+		t.Fatalf("a broken stream ended as %q, not an error", final.StopReason)
+	}
+	if _, classified := ai.FailureOf(final.Cause); !classified {
+		t.Fatalf("a caller cannot branch on %v", final.Cause)
 	}
 }

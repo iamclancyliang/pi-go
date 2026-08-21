@@ -1284,13 +1284,18 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 				t.Fatalf("Stream: %v", err)
 			}
 			var final *ai.AssistantMessage
+			terminals := 0
 			for ev := range events {
-				if ev.Final != nil {
+				if ev.Terminal() {
+					terminals++
 					final = ev.Final
 				}
 			}
+			if terminals != 1 {
+				t.Fatalf("the stream delivered %d terminal events, want exactly 1", terminals)
+			}
 			if final == nil {
-				t.Fatal("the stream ended without a terminal event")
+				t.Fatal("the terminal carried no reply")
 			}
 			if final.StopReason != ai.StopAborted {
 				t.Fatalf("a stopped call ended as %q, not aborted", final.StopReason)
@@ -1300,6 +1305,18 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 			}
 			if _, classified := ai.FailureOf(final.Cause); classified {
 				t.Fatalf("a stopped call was reported as a provider failure: %v", final.Cause)
+			}
+			if ai.Retryable(final.Cause) {
+				t.Fatalf("a stopped call was judged worth repeating: %v", final.Cause)
+			}
+			// What had already arrived is still there. A consumer that watched
+			// a reply appear should not have it vanish because the call ended.
+			var shown strings.Builder
+			for _, b := range final.Blocks {
+				shown.WriteString(b.Text)
+			}
+			if shown.String() != "partial" {
+				t.Fatalf("content delivered before the stop was lost: %q", shown.String())
 			}
 		})
 	}
