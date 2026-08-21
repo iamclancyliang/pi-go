@@ -85,7 +85,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// the configuration happened to hold.
 		return nil, fail(FailureRefused, 0, "no model named for this request")
 	}
-	resp, attempts, err := p.send(ctx, body)
+	resp, cred, attempts, err := p.send(ctx, body)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	go func() {
 		defer close(out)
 		defer resp.Body.Close()
-		p.pump(ctx, resp.Body, out, attempts)
+		p.pump(ctx, resp.Body, cred, out, attempts)
 	}()
 	return out, nil
 }
@@ -106,7 +106,9 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 // is a change of field. Tool calls do carry a wire index, which is what keeps
 // the fragments of one call together; that index is the provider's numbering of
 // calls, not a block position, so it is mapped rather than used directly.
-func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEvent, earlier []Attempt) {
+func (p *Port) pump(ctx context.Context, body io.Reader, cred Credential,
+	out chan<- ai.StreamEvent, earlier []Attempt) {
+
 	acc := ai.NewAccumulator(p.cfg.Model)
 	earlierUsage := make([]ai.Usage, 0, len(earlier))
 	for _, a := range earlier {
@@ -414,7 +416,10 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 			cancelled, stoppedBy = true, err
 			return
 		}
-		fail(FailureTransient, scrub(err.Error(), ""))
+		// Scrubbed with the key this call was made with, not just by shape: a
+		// body read that fails can name the request it was reading, and a key
+		// that does not look like one would otherwise survive into the report.
+		fail(FailureTransient, scrub(err.Error(), cred.Key()))
 		return
 	}
 	// The stream ended without a stop reason, so the reply is not known to be

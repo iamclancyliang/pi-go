@@ -20,7 +20,7 @@ be replaced.
 | Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence`, `TestAStoredCredentialWinsAndABlankVariableIsSkipped` |
 | A provider with no other source is handed a resolved value rather than a resolver, so nothing varies per request | `TestAMissingCredentialIsATypedAbsence` |
 | One logical call resolves at most once and uses that value for every attempt and for scrubbing | `TestOneCallResolvesItsCredentialOnce`, `TestARetriedCallKeepsTheCredentialItStartedWith` |
-| A transport error is scrubbed of the configured key by identity, not left to its shape | `TestATransportErrorDoesNotCarryTheConfiguredKey` |
+| Every error a call reports is scrubbed of that call's own key by identity, not left to its shape | `TestATransportErrorDoesNotCarryTheConfiguredKey`, `TestABodyReadFailureDoesNotCarryTheCallsKey` |
 | A lookup that fails with the value in its own error does not carry it out | `TestALookupErrorDoesNotCarryTheValueOut` |
 | Scrubbing removes both the exact value and anything key-shaped | `TestScrubbingRemovesBothWhatIsKnownAndWhatIsShaped` |
 | Resolution stops when the caller does, between lookups and not only before them | `TestResolutionStopsWhenTheCallerDoes` |

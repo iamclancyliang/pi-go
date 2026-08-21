@@ -329,10 +329,13 @@ type Attempt struct {
 
 // send performs the request, retrying within the configured budget.
 //
-// It returns the successful response and every attempt made to get it. The
-// number of attempts is a fact about what was sent, which is why it travels
-// with the response rather than being inferred from configuration.
-func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []Attempt, error) {
+// It returns the successful response, the credential the call was made with and
+// every attempt made to get it. The number of attempts is a fact about what was
+// sent, which is why it travels with the response rather than being inferred
+// from configuration; the credential travels because whatever reports a failure
+// later has to remove the key this call actually used, and re-resolving to find
+// it can return a different one.
+func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, Credential, []Attempt, error) {
 	// Resolved once, and once only, for everything this call does with it.
 	// Resolving again to scrub a failure would remove the key that is
 	// configured NOW from a message about a request sent with the key that was
@@ -340,7 +343,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 	// the report of the request that used it.
 	cred, err := p.resolve(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, Credential{}, nil, err
 	}
 
 	var attempts []Attempt
@@ -348,24 +351,24 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		resp, err := p.post(ctx, cred, body)
 		if err != nil {
 			if isCallerCancellation(err) {
-				return nil, attempts, err
+				return nil, cred, attempts, err
 			}
 			// A transport failure produced no response to read a header from.
 			decision, capErr := decideRetry(nil, FailureTransient, attempt, p.cfg.Retry)
 			if capErr != nil {
-				return nil, attempts, capErr
+				return nil, cred, attempts, capErr
 			}
 			if !decision.retry {
-				return nil, attempts, withAttempts(err, attempts)
+				return nil, cred, attempts, withAttempts(err, attempts)
 			}
 			attempts = append(attempts, Attempt{})
 			if waitErr := wait(ctx, decision.after); waitErr != nil {
-				return nil, attempts, waitErr
+				return nil, cred, attempts, waitErr
 			}
 			continue
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-			return resp, attempts, nil
+			return resp, cred, attempts, nil
 		}
 
 		// The body is read once, here, and used for both the classification and
@@ -379,7 +382,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		decision, capErr := decideRetry(resp, failure, attempt, p.cfg.Retry)
 		if capErr != nil {
 			resp.Body.Close()
-			return nil, attempts, capErr
+			return nil, cred, attempts, capErr
 		}
 		if !decision.retry {
 			defer resp.Body.Close()
@@ -397,7 +400,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			if errors.As(refused, &classified) {
 				classified.Advise(retryAdvice(resp.Header))
 			}
-			return nil, final, withAttempts(refused, final)
+			return nil, cred, final, withAttempts(refused, final)
 		}
 		// What a failed attempt reported using, if it said. A rate-limit body
 		// rarely carries usage, but an attempt that did read the request and
@@ -405,7 +408,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		attempts = append(attempts, Attempt{Usage: usageFromBytes(raw)})
 		resp.Body.Close()
 		if waitErr := wait(ctx, decision.after); waitErr != nil {
-			return nil, attempts, waitErr
+			return nil, cred, attempts, waitErr
 		}
 	}
 }

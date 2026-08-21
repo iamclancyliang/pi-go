@@ -1321,3 +1321,40 @@ func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
 		})
 	}
 }
+
+// TestABodyReadFailureDoesNotCarryTheCallsKey: a read that fails partway can
+// name the request it was reading. Left to the shape pass alone, a key that
+// does not look like one survives into the report — and the key to remove is
+// the one this call was made with, which re-resolving may no longer return.
+func TestABodyReadFailureDoesNotCarryTheCallsKey(t *testing.T) {
+	const secret = "7c1e-not-shaped-like-a-key"
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return &http.Response{StatusCode: 200, Body: &haltingBody{
+			prefix: strings.NewReader("data: " +
+				`{"choices":[{"delta":{"content":"partial"}}]}` + "\n\n"),
+			err: fmt.Errorf("proxy dropped the connection for Authorization=%s", secret),
+		}}
+	}}
+	events, err := newPort(t, tr, env{"DEEPSEEK_API_KEY": secret}).Stream(
+		context.Background(), ai.Request{
+			Model: "deepseek-v4-flash", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var final *ai.AssistantMessage
+	for ev := range events {
+		if ev.Terminal() {
+			final = ev.Final
+		}
+	}
+	if final == nil || final.Cause == nil {
+		t.Fatal("the stream ended without a failure")
+	}
+	if final.StopReason != ai.StopError {
+		t.Fatalf("a broken stream ended as %q, not an error", final.StopReason)
+	}
+	if strings.Contains(final.Cause.Error(), secret) || strings.Contains(final.ErrorMessage, secret) {
+		t.Fatalf("the key this call used reached the failure: %v", final.Cause)
+	}
+}
