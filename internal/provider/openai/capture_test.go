@@ -194,3 +194,65 @@ func TestTheCountIsTheCountOfRequests(t *testing.T) {
 		t.Fatalf("a failed request invented a terminal: %+v", got)
 	}
 }
+
+// TestUsageKeepsWhatTheProviderSaid: the adapter's own conversion flattens
+// these into integers, so absent becomes zero and the uncached remainder is
+// lost. This is what the capture exists to preserve.
+func TestUsageKeepsWhatTheProviderSaid(t *testing.T) {
+	n := func(v int) *int { return &v }
+
+	t.Run("cached tokens are separated from the uncached remainder", func(t *testing.T) {
+		used := usageFrom(terminal{InputTokens: n(1000), OutputTokens: n(5), CachedTokens: n(600)})
+		if used.InputTokens != 400 {
+			t.Fatalf("uncached input %d, want 400", used.InputTokens)
+		}
+		if used.CacheReadTokens == nil || *used.CacheReadTokens != 600 {
+			t.Fatalf("cache read %v", used.CacheReadTokens)
+		}
+		if used.Total() != 1005 {
+			t.Fatalf("total %d, want 1005", used.Total())
+		}
+	})
+
+	t.Run("a field the provider never sent stays absent", func(t *testing.T) {
+		used := usageFrom(terminal{InputTokens: n(10), OutputTokens: n(1)})
+		if used.ReasoningTokens != nil {
+			t.Fatalf("silence became %d", *used.ReasoningTokens)
+		}
+		if !used.Reported {
+			t.Fatal("a reply that reported counts claims it reported nothing")
+		}
+	})
+
+	t.Run("no usage at all is not a free call", func(t *testing.T) {
+		if used := usageFrom(terminal{}); used.Reported {
+			t.Fatal("a reply with no usage claims to have reported some")
+		}
+	})
+}
+
+// TestAnUnrecognisedStatusIsAFailure: a terminal state this code does not know
+// cannot be assumed complete, or a truncated reply is handed back as the
+// model's final answer.
+func TestAnUnrecognisedStatusIsAFailure(t *testing.T) {
+	for _, tc := range []struct {
+		status, incomplete string
+		wantErr            bool
+	}{
+		{status: "completed"},
+		{status: "incomplete", incomplete: "max_output_tokens"},
+		{status: "incomplete", incomplete: "content_filter", wantErr: true},
+		{status: "failed", wantErr: true},
+		{status: "a_status_from_the_future", wantErr: true},
+		{status: "", wantErr: true},
+	} {
+		name := tc.status + "/" + tc.incomplete
+		t.Run(name, func(t *testing.T) {
+			_, err := failureFromStatus(tc.status, tc.incomplete)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("status %q incomplete %q produced err=%v, wantErr=%v",
+					tc.status, tc.incomplete, err, tc.wantErr)
+			}
+		})
+	}
+}
