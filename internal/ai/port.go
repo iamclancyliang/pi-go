@@ -172,7 +172,21 @@ type Usage struct {
 }
 
 // Total is every token the call reported using.
-func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
+//
+// Cache reads are included. InputTokens is the UNCACHED remainder of the
+// prompt, so a total that adds only input and output leaves out everything the
+// cache served — and a cache hit is the ordinary case, not the exception, which
+// makes the shortfall largest on exactly the calls that happen most.
+//
+// ReasoningTokens is deliberately NOT added: the provider counts it inside
+// OutputTokens, so adding it again would count those tokens twice.
+func (u Usage) Total() int {
+	total := u.InputTokens + u.OutputTokens
+	if u.CacheReadTokens != nil {
+		total += *u.CacheReadTokens
+	}
+	return total
+}
 
 // UsageReporter is an error that knows what the call it describes consumed.
 //
