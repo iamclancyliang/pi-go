@@ -501,23 +501,36 @@ func TestSeveralQwenToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
 		t.Fatalf("results returned in order %v, want %v", results, want)
 	}
 
-	// The renderer's own order, read from the events rather than from the
-	// kinds: a reader watching two calls appear has to see them in the order
-	// the model asked, and each half has to name the call it belongs to.
-	var started, ended []string
+	// What a renderer sees, read from the events rather than from the kinds.
+	//
+	// Beginnings are in the order the model asked: they are announced in one
+	// serial pass before anything runs. Endings are in the order the calls
+	// finished, which is a different order on purpose — so this asserts that
+	// each call ended exactly once, and says nothing about which ended first.
+	// Requiring source order here would demand a guarantee the design
+	// deliberately does not make, and would go red on a correct system whenever
+	// the second call happened to finish first.
+	var started []string
+	ended := map[string]int{}
 	for _, ev := range rec.Events() {
 		switch ev.Kind {
 		case events.KindToolStart:
 			started = append(started, ev.ToolCallID)
 		case events.KindToolEnd:
-			ended = append(ended, ev.ToolCallID)
+			ended[ev.ToolCallID]++
 		}
 	}
 	if len(started) != 2 || started[0] != want[0] || started[1] != want[1] {
 		t.Fatalf("a renderer saw calls begin in order %v, want %v", started, want)
 	}
-	if len(ended) != 2 || ended[0] != want[0] || ended[1] != want[1] {
-		t.Fatalf("a renderer saw calls finish in order %v, want %v", ended, want)
+	for _, id := range want {
+		if ended[id] != 1 {
+			t.Fatalf("a renderer saw %s finish %d times, want exactly once: %v",
+				id, ended[id], ended)
+		}
+	}
+	if len(ended) != 2 {
+		t.Fatalf("a renderer saw endings for %v, want exactly the two calls", ended)
 	}
 }
 
