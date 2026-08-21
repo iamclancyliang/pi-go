@@ -1040,8 +1040,18 @@ func TestTextAfterInterleavedCallsClosesEveryBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("text following two interleaved calls: %v", err)
 	}
+	// Compared call by call: a reply that kept the count and lost the identities
+	// answers the count and cannot be dispatched.
 	if len(resp.ToolCalls) != 2 {
 		t.Fatalf("kept %d calls, want 2", len(resp.ToolCalls))
+	}
+	for at, want := range []ai.ToolCall{
+		{ID: "a", Name: "f", Args: "{}"},
+		{ID: "b", Name: "g", Args: "{}"},
+	} {
+		if resp.ToolCalls[at] != want {
+			t.Errorf("call %d is %+v, want %+v", at, resp.ToolCalls[at], want)
+		}
 	}
 	if resp.Content != "and then some text" {
 		t.Fatalf("content %q", resp.Content)

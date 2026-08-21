@@ -224,8 +224,19 @@ func TestAWellFormedStreamStillPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	// Identities too, not just the count: a check that only counts would be
+	// satisfied by two calls nobody can dispatch, which is not what "still
+	// passes" should mean.
 	if len(resp.ToolCalls) != 2 {
 		t.Fatalf("got %d calls", len(resp.ToolCalls))
+	}
+	for at, want := range []ai.ToolCall{
+		{ID: "call_a", Name: "alpha", Args: "{}"},
+		{ID: "call_b", Name: "beta", Args: "{}"},
+	} {
+		if resp.ToolCalls[at] != want {
+			t.Errorf("call %d is %+v, want %+v", at, resp.ToolCalls[at], want)
+		}
 	}
 }
 
