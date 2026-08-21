@@ -250,7 +250,7 @@ func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, erro
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
-		return nil, &Error{Failure: FailureTransient, Detail: scrub(err.Error(), cred.Key())}
+		return nil, fail(FailureTransient, 0, scrub(err.Error(), cred.Key()))
 	}
 	return resp, nil
 }
@@ -290,11 +290,7 @@ func failureWith(failure Failure, status int, raw []byte, key string) error {
 		// Nothing recognisable. Report the shape, never the content.
 		detail = fmt.Sprintf("unparsed body, %d bytes", len(raw))
 	}
-	return &Error{
-		Failure: failure,
-		Status:  status,
-		Detail:  scrub(detail, key),
-	}
+	return fail(failure, status, scrub(detail, key))
 }
 
 // scrub removes the credential from text that is about to become an error.
@@ -440,6 +436,6 @@ func withAttempts(err error, attempts []Attempt) error {
 		return err
 	}
 	withUsage := *classified
-	withUsage.Usage = append(append([]ai.Usage(nil), used...), classified.Usage...)
+	withUsage.Used = append(append([]ai.Usage(nil), used...), classified.Used...)
 	return &withUsage
 }

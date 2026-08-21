@@ -21,11 +21,8 @@ import (
 // request-building paths drift, and only one of them ends up exercised.
 func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
 	if req.Model != "" && req.Model != p.cfg.Model {
-		return nil, &Error{
-			Failure: FailureRefused,
-			Detail: fmt.Sprintf("this port serves %q; the request named %q",
-				p.cfg.Model, req.Model),
-		}
+		return nil, fail(FailureRefused, 0,
+			fmt.Sprintf("this port serves %q; the request named %q", p.cfg.Model, req.Model))
 	}
 	if req.Model == "" {
 		// No catalog to consult and no default invented: a request that names

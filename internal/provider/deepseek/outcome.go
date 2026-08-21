@@ -2,97 +2,37 @@ package deepseek
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// Failure is why a call did not produce a usable reply.
-//
-// Classification happens here, at the boundary, where the status code and the
-// stop reason still exist. It is carried as a value from this point on: no
-// decision downstream reads the text of an error, because a provider that
-// rewords a message would silently change what this repository does with it —
-// and for a billing failure, that means paying to retry something that cannot
-// succeed.
-type Failure string
+// The failure vocabulary is shared, not this package's own: a caller of the
+// model boundary does not know which provider answered, so it must be able to
+// tell an exhausted balance from a throttle without learning either provider.
+// What stays here is the mapping — statuses, the provider's own codes, and its
+// wording — because only this package knows how DeepSeek says things.
+type Failure = ai.Failure
 
 const (
-	// FailureQuota is an exhausted balance. Never retried: the request cannot
-	// succeed and each attempt consumes balance.
-	FailureQuota Failure = "quota_exhausted"
-
-	// FailureAuth is a rejected credential.
-	FailureAuth Failure = "authentication_rejected"
-
-	// FailureRefused is a request the provider will not serve as written,
-	// including a reply whose content its filters removed. Asking again
-	// unchanged is refused again.
-	FailureRefused Failure = "provider_refused"
-
-	// FailureThrottled is ordinary rate limiting, distinct from an exhausted
-	// balance despite both being about limits.
-	FailureThrottled Failure = "rate_limited"
-
-	// FailureTransient is a server-side or transport failure that a later
-	// attempt might survive.
-	FailureTransient Failure = "transient"
-
-	// FailureInterrupted is the provider abandoning a request mid-flight. It
-	// arrives inside a 200, so a mapping that reads only the status calls it a
-	// success and hands back a partial reply as the model's final word.
-	//
-	// Not retried: the documentation says the request was interrupted, not that
-	// a repeat would succeed, and "sounds transient" is not evidence.
-	FailureInterrupted Failure = "interrupted"
-
-	// FailureUnknown is a terminal state this repository does not recognise. It
-	// is a failure rather than a success, because an unrecognised ending cannot
-	// be assumed complete.
-	FailureUnknown Failure = "unknown"
+	FailureQuota       = ai.FailureQuota
+	FailureAuth        = ai.FailureAuth
+	FailureRefused     = ai.FailureRefused
+	FailureThrottled   = ai.FailureThrottled
+	FailureTransient   = ai.FailureTransient
+	FailureInterrupted = ai.FailureInterrupted
+	FailureUnknown     = ai.FailureUnknown
 )
 
-// Retryable reports whether another identical attempt is worth its cost.
-//
-// This is this repository's decision, not the provider's: the documentation
-// states what each condition means, never what a caller should do about it.
-func (f Failure) Retryable() bool {
-	switch f {
-	case FailureThrottled, FailureTransient:
-		return true
-	default:
-		return false
-	}
-}
+// Error is this provider's failure, carried in the shared type.
+type Error = ai.ProviderError
 
-// Error carries a classified failure.
-type Error struct {
-	Failure Failure
+// providerName labels a failure for diagnosis. Nothing branches on it.
+const providerName = "deepseek"
 
-	// Usage is what the attempts behind this failure reported using. A request
-	// the provider read is a request the provider read, answered or not.
-	Usage []ai.Usage
-
-	// Status is the HTTP status, or 0 when the failure has no response.
-	Status int
-
-	// Detail is for a human reading a report. Nothing branches on it.
-	Detail string
-}
-
-func (e *Error) Error() string {
-	if e.Status != 0 {
-		return fmt.Sprintf("deepseek: %s (status %d): %s", e.Failure, e.Status, e.Detail)
-	}
-	return fmt.Sprintf("deepseek: %s: %s", e.Failure, e.Detail)
-}
-
-// Is lets errors.Is match on the classification, so a caller can ask about the
-// kind of failure without unwrapping to a concrete type.
-func (e *Error) Is(target error) bool {
-	other, ok := target.(*Error)
-	return ok && other.Failure == e.Failure
+// fail builds a classified failure from this provider.
+func fail(f Failure, status int, detail string) *Error {
+	return &Error{Provider: providerName, Failure: f, Status: status, Detail: detail}
 }
 
 // classifyStatus maps an HTTP status onto a failure.
@@ -140,9 +80,6 @@ func stopReason(raw string) (ok bool, truncated bool, failure Failure) {
 		return false, false, FailureUnknown
 	}
 }
-
-// Consumed reports what the failed call used, so a ledger can hold it.
-func (e *Error) Consumed() []ai.Usage { return e.Usage }
 
 // ExhaustionDetector reports whether a response body confirms an exhausted
 // balance that its status code did not.

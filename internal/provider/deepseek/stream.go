@@ -83,7 +83,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// No catalog exists here to consult and no default is invented: a
 		// request that names no model would otherwise reach whichever model
 		// the configuration happened to hold.
-		return nil, &Error{Failure: FailureRefused, Detail: "no model named for this request"}
+		return nil, fail(FailureRefused, 0, "no model named for this request")
 	}
 	resp, attempts, err := p.send(ctx, body)
 	if err != nil {
@@ -178,7 +178,7 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		}
 	}()
 	fail := func(f Failure, detail string) {
-		ev, err := acc.Fail(ai.StopError, &Error{Failure: f, Detail: detail})
+		ev, err := acc.Fail(ai.StopError, fail(f, 0, detail))
 		if err != nil {
 			return
 		}

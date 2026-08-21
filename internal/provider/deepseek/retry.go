@@ -76,12 +76,8 @@ func decideRetry(resp *http.Response, failure Failure, attempt int, policy Retry
 				max = DefaultMaxDelay
 			}
 			if requested > max {
-				return retryDecision{}, &Error{
-					Failure: failure,
-					Status:  resp.StatusCode,
-					Detail: "server asked for a " + requested.String() +
-						" wait, longer than the " + max.String() + " cap",
-				}
+				return retryDecision{}, fail(failure, resp.StatusCode, "server asked for a "+requested.String()+
+					" wait, longer than the "+max.String()+" cap")
 			}
 			delay = requested
 		}

@@ -106,15 +106,12 @@ func (p *Port) resolve(ctx context.Context) (string, error) {
 	if err != nil {
 		// Not passed through as it arrived: a resolver that put the key into
 		// its own error would hand it to whatever logs this.
-		return "", &Error{Failure: FailureAuth, Detail: scrub(err.Error(), "")}
+		return "", fail(FailureAuth, 0, scrub(err.Error(), ""))
 	}
 	if key == "" {
 		// Absence is a typed failure, not prose, so a caller can tell "nothing
 		// configured" from "the provider rejected what we sent".
-		return "", &Error{
-			Failure: FailureAuth,
-			Detail:  "no credential was supplied for this provider",
-		}
+		return "", fail(FailureAuth, 0, "no credential was supplied for this provider")
 	}
 	return key, nil
 }
@@ -175,7 +172,7 @@ func failureFromStatus(status, incomplete, errorCode string) (ai.StopReason, err
 	// the ending alone would call an exhausted balance an interruption, which
 	// reads as "try again later" for something that cannot succeed.
 	if failure, ok := failureFromCode(errorCode); ok {
-		return ai.StopError, &Error{Failure: failure, Detail: errorCode}
+		return ai.StopError, fail(failure, 0, errorCode)
 	}
 	switch status {
 	case "completed":
@@ -187,20 +184,16 @@ func failureFromStatus(status, incomplete, errorCode string) (ai.StopReason, err
 			return ai.StopLength, nil
 		}
 		if incomplete == "content_filter" {
-			return ai.StopError, &Error{Failure: FailureRefused,
-				Detail: "the provider's filters removed the content"}
+			return ai.StopError, fail(FailureRefused, 0, "the provider's filters removed the content")
 		}
-		return ai.StopError, &Error{Failure: FailureInterrupted,
-			Detail: "reply incomplete: " + incomplete}
+		return ai.StopError, fail(FailureInterrupted, 0, "reply incomplete: "+incomplete)
 	case "failed", "cancelled", "expired":
-		return ai.StopError, &Error{Failure: FailureInterrupted, Detail: "reply " + status}
+		return ai.StopError, fail(FailureInterrupted, 0, "reply "+status)
 	case "":
-		return ai.StopError, &Error{Failure: FailureUnknown,
-			Detail: "the provider reported no status"}
+		return ai.StopError, fail(FailureUnknown, 0, "the provider reported no status")
 	default:
 		// An unrecognised terminal state cannot be assumed complete.
-		return ai.StopError, &Error{Failure: FailureUnknown,
-			Detail: fmt.Sprintf("unrecognised status %q", status)}
+		return ai.StopError, fail(FailureUnknown, 0, fmt.Sprintf("unrecognised status %q", status))
 	}
 }
 
