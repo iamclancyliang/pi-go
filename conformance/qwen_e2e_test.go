@@ -2,6 +2,9 @@ package conformance
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -20,9 +23,9 @@ import (
 //
 // A port can satisfy its interface, pass everything in its own tests, and never
 // be reached by the runtime — and the tests written against the port are the
-// thing that hides that. It has already happened twice in this repository: a
-// message shape its own conversion accepted and the provider refused, and a
-// tool result sent under a role no provider accepts.
+// thing that hides that. A message shape is the clearest case: conversion
+// accepts what it was told to build, and only sending it can show whether the
+// far side speaks that shape.
 
 // qwenTransport replays a recorded exchange and keeps what it was asked to
 // send, so a claim about the request can be checked against the request.
@@ -201,9 +204,9 @@ func TestAQwenToolCallIsRefusedByPolicyAndRecordedFirst(t *testing.T) {
 // accepted it — nothing offline can, and saying otherwise would describe
 // evidence this test does not have.
 //
-// It is still worth more than a conversion test. Twice here a shape passed
-// conversion and was refused when it was actually sent, and both times the
-// conversion test could not have known.
+// It is still worth more than a conversion test: a conversion test asserts
+// against the value it just built, which is the same value under a different
+// name, while this asserts against the bytes that left.
 func TestAQwenToolResultReachesTheWireInTheProtocolShape(t *testing.T) {
 	transport := &qwenTransport{responses: []*http.Response{
 		qwenToolCallReply("call_1", "list_files"),
@@ -262,6 +265,87 @@ func TestAQwenFailureInsideA200StopsTheRun(t *testing.T) {
 		t.Fatalf("classified %s, want an exhausted balance", failure)
 	}
 }
+
+// TestAQwenBodyReadFailureEndsAsAFailureAndKeepsTheKeyOut.
+//
+// Four things at once, because each can hold while another does not: the reply
+// ends as a failure rather than as a stop the caller never asked for, exactly
+// one terminal arrives, what had already been shown survives, and the key this
+// call was made with appears nowhere in the error or anything it wraps.
+func TestAQwenBodyReadFailureEndsAsAFailureAndKeepsTheKeyOut(t *testing.T) {
+	const secret = "7c1e-not-shaped-like-a-key"
+	port, err := qwen.New(qwen.Config{
+		Model: "qwen-test", MaxOutputTokens: 64,
+		Credential: ai.StoredCredential(secret, "a test"),
+		Transport: &qwenTransport{responses: []*http.Response{{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: &haltingReader{
+				prefix: strings.NewReader("data: " +
+					`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"role":"assistant","content":"already said"}}]}` +
+					"\n\n"),
+				err: fmt.Errorf("proxy dropped the connection for Authorization=%s", secret),
+			},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("qwen.New: %v", err)
+	}
+	events, err := port.Stream(context.Background(), ai.Request{
+		Model: "qwen-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var final *ai.AssistantMessage
+	terminals := 0
+	for ev := range events {
+		if ev.Terminal() {
+			terminals++
+			final = ev.Final
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("a broken read delivered %d terminal events, want exactly 1", terminals)
+	}
+	if final.StopReason != ai.StopError {
+		t.Fatalf("a read nobody stopped ended as %q, which tells a caller it "+
+			"cancelled something it did not", final.StopReason)
+	}
+	if _, classified := ai.FailureOf(final.Cause); !classified {
+		t.Fatalf("a caller cannot branch on %v", final.Cause)
+	}
+	var shown strings.Builder
+	for _, b := range final.Blocks {
+		shown.WriteString(b.Text)
+	}
+	if shown.String() != "already said" {
+		t.Fatalf("what had already arrived was lost: %q", shown.String())
+	}
+	// Every layer, not just the top: a wrapper can print a clean message while
+	// the cause underneath still carries the key.
+	for cause := final.Cause; cause != nil; cause = errors.Unwrap(cause) {
+		if strings.Contains(cause.Error(), secret) {
+			t.Fatalf("the key this call used reached %T: %v", cause, cause)
+		}
+	}
+}
+
+// haltingReader delivers what it was given and then fails, as a body does when
+// what is underneath it breaks mid-reply.
+type haltingReader struct {
+	prefix *strings.Reader
+	err    error
+}
+
+func (h *haltingReader) Read(p []byte) (int, error) {
+	if h.prefix.Len() > 0 {
+		return h.prefix.Read(p)
+	}
+	return 0, h.err
+}
+
+func (h *haltingReader) Close() error { return nil }
 
 // TestARefusedQwenCallLedgersWhatItRead: a request the provider read is a
 // request the provider charged for, answered or not.
@@ -416,6 +500,25 @@ func TestSeveralQwenToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
 	if len(results) != 2 || results[0] != want[0] || results[1] != want[1] {
 		t.Fatalf("results returned in order %v, want %v", results, want)
 	}
+
+	// The renderer's own order, read from the events rather than from the
+	// kinds: a reader watching two calls appear has to see them in the order
+	// the model asked, and each half has to name the call it belongs to.
+	var started, ended []string
+	for _, ev := range rec.Events() {
+		switch ev.Kind {
+		case events.KindToolStart:
+			started = append(started, ev.ToolCallID)
+		case events.KindToolEnd:
+			ended = append(ended, ev.ToolCallID)
+		}
+	}
+	if len(started) != 2 || started[0] != want[0] || started[1] != want[1] {
+		t.Fatalf("a renderer saw calls begin in order %v, want %v", started, want)
+	}
+	if len(ended) != 2 || ended[0] != want[0] || ended[1] != want[1] {
+		t.Fatalf("a renderer saw calls finish in order %v, want %v", ended, want)
+	}
 }
 
 // TestAQwenPolicyRefusalReachesTheModel.
@@ -445,9 +548,45 @@ func TestAQwenPolicyRefusalReachesTheModel(t *testing.T) {
 	if len(transport.sent) != 2 {
 		t.Fatalf("a refused call took %d requests, want 2", len(transport.sent))
 	}
-	if !strings.Contains(transport.sent[1], "refused by policy") {
-		t.Fatalf("the refusal never left the process: %s", transport.sent[1])
+	// Parsed, not searched. The three facts have to hold together on one
+	// message: it answers a call, it answers THIS call, and what it says is the
+	// refusal. Finding the words anywhere in the body would also pass on a
+	// plain user message that mentions them, which the model reads as a person
+	// talking rather than as the outcome of its own call.
+	answer, ok := toolResultIn(t, transport.sent[1], "call_1")
+	if !ok {
+		t.Fatalf("no result addressed to call_1 left the process: %s", transport.sent[1])
 	}
+	if !strings.Contains(answer, "refused by policy") {
+		t.Fatalf("the call was answered with %q, not the refusal", answer)
+	}
+}
+
+// toolResultIn finds the result addressed to one call in a serialized request.
+func toolResultIn(t *testing.T, body, callID string) (string, bool) {
+	t.Helper()
+	var parsed struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    any    `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("the request was not the shape this provider speaks: %v", err)
+	}
+	for _, m := range parsed.Messages {
+		if m.Role != "tool" || m.ToolCallID != callID {
+			continue
+		}
+		switch content := m.Content.(type) {
+		case string:
+			return content, true
+		default:
+			return fmt.Sprint(content), true
+		}
+	}
+	return "", false
 }
 
 // TestAQwenToolCallAnnouncesBothHalvesToARenderer.

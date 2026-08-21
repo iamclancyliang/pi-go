@@ -55,20 +55,27 @@ and for reporting. Stated correctly in `69f31dc`.
 ## `df327fd` — a message about the mistake instead of the change
 
 It described how a file came to be committed rather than what the change did. What it should have
-said: the file removed is `docs/research/provider-contract-source-audit.md`, a working note used
-while auditing this repository's provider contract against its sources. It is scratch: it records
-one reader's route through the code on one day, not anything this repository documents, and it has
-no reader once that reading is finished. Untracking it leaves it on disk and out of the history.
+said: the file removed from tracking is `docs/research/provider-contract-source-audit.md`, a working
+note made while reading this repository's provider contract against its sources. It records one
+reader's route through the code on one day; it is not something this repository documents, and it
+has no reader once that reading is finished.
+
+Untracking removes it from later commits only. It remains in the history at `651f0ab`, where it was
+added, and it remains on disk. Saying otherwise — as an earlier version of this entry did — would
+describe a reversal that git does not perform.
 
 ## Wording that does not stand on its own
 
-Three messages use terms that mean nothing to a reader who was not present when they were written:
-"this tranche" in `b2347d9` and `aa7e137`, and "obligations list" in `9acdd46`.
+Five messages use terms that mean nothing to a reader who was not present when they were written:
+"this tranche" in `b2347d9` and `aa7e137`, "obligations list" in `9acdd46`, "only temporary checks
+had covered" and "hung for ninety seconds" in `b8e5156`, and "temporary" again in `e0ca52c`.
 
 What they referred to: "this tranche" meant the set of content-block kinds the adapter handled at
 that point, which was text, reasoning and tool calls — anything else ended the reply with a failure
 naming it. "obligations list" meant `docs/specs/provider-port-obligations.md`, the table of
-behaviours every provider adapter has to carry.
+behaviours every provider adapter has to carry. The rest describe how the work was checked before it
+was committed, which is not a fact about the change: what `b8e5156` and `e0ca52c` did was add
+regression tests for behaviours that had none.
 
 A commit message is read years later by someone with only the diff for context. A word that requires
 knowing what else was happening at the time is a word that will not survive that reading.

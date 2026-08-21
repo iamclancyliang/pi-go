@@ -930,8 +930,20 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	if reasoning.String() != collected.Reasoning {
 		t.Fatalf("streamed reasoning %q, collected %q", reasoning.String(), collected.Reasoning)
 	}
+	// Compared call by call, not counted. A collected reply that kept the right
+	// number of calls and lost every id, name and argument would answer the
+	// count and be useless to dispatch.
 	if len(calls) != len(collected.ToolCalls) {
 		t.Fatalf("streamed %d calls, collected %d", len(calls), len(collected.ToolCalls))
+	}
+	for at, streamedCall := range calls {
+		got := collected.ToolCalls[at]
+		if got != streamedCall {
+			t.Fatalf("call %d streamed as %+v and collected as %+v", at, streamedCall, got)
+		}
+		if got.ID == "" || got.Name == "" {
+			t.Fatalf("call %d arrived with no identity to dispatch: %+v", at, got)
+		}
 	}
 	if final.Model != collected.Model {
 		t.Fatalf("streamed model %q, collected %q", final.Model, collected.Model)
@@ -942,6 +954,27 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	// A reported zero and an absent count must agree too, not just the total.
 	if final.Usage.Reported != collected.Usage.Reported {
 		t.Fatal("the two paths disagree about whether usage was reported at all")
+	}
+	// The optional counts as well, presence and value: a total can agree while
+	// one path invents a cached count and the other leaves it absent.
+	if !sameOptional(final.Usage.CacheReadTokens, collected.Usage.CacheReadTokens) {
+		t.Fatalf("streamed cache read %v, collected %v",
+			final.Usage.CacheReadTokens, collected.Usage.CacheReadTokens)
+	}
+	if !sameOptional(final.Usage.ReasoningTokens, collected.Usage.ReasoningTokens) {
+		t.Fatalf("streamed reasoning tokens %v, collected %v",
+			final.Usage.ReasoningTokens, collected.Usage.ReasoningTokens)
+	}
+	if final.Usage.CacheReadTokens == nil {
+		t.Fatal("this fixture reports a cached count; without one the comparison above proves nothing")
+	}
+	// The ending of this reply too, not only the truncated one below: a reply
+	// that asked for tools is a different outcome from one that finished.
+	if final.StopReason != ai.StopToolUse {
+		t.Fatalf("a reply that asked for tools ended as %q", final.StopReason)
+	}
+	if collected.Truncated {
+		t.Fatal("a reply that asked for tools was collected as cut short")
 	}
 
 	// And how the reply ended. The collected path carries the ending as the one
@@ -978,6 +1011,14 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	if short.Truncated != (shortFinal.StopReason == ai.StopLength) {
 		t.Fatal("the two paths disagree about whether the reply was cut short")
 	}
+}
+
+// sameOptional reports whether two optional counts agree in presence and value.
+func sameOptional(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // TestABodyReadFailureDoesNotCarryTheCallsKey: a read that fails partway can
