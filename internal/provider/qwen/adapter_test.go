@@ -895,7 +895,7 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"the "}}]}`,
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"alpha","arguments":"{}"}}]}}]}`,
-		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":0}}}`,
 	}
 
 	collected, err := ask(t, newPort(t, &recordedTransport{
@@ -991,8 +991,12 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	if final.Usage.CacheReadTokens == nil {
 		t.Fatal("this fixture reports a cached count; without one the comparison above proves nothing")
 	}
-	if final.Usage.ReasoningTokens == nil {
-		t.Fatal("this fixture reports reasoning tokens; without them the comparison above proves nothing")
+	// Reported as zero on purpose: a path that reads "nobody said" from a count
+	// of nothing produces the same absence as a count that was never sent, and
+	// only a reported zero tells the two apart.
+	if final.Usage.ReasoningTokens == nil || *final.Usage.ReasoningTokens != 0 {
+		t.Fatalf("this fixture reports zero reasoning tokens; %v cannot distinguish "+
+			"a reported zero from a count nobody sent", final.Usage.ReasoningTokens)
 	}
 	// The ending of this reply too, not only the truncated one below: a reply
 	// that asked for tools is a different outcome from one that finished.
