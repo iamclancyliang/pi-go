@@ -22,9 +22,10 @@ That commit renumbered. `stream.go` assigned each new block the next position in
 and nothing compared the result against what the provider had announced.
 
 The adapter underneath renumbers as well, so after conversion a stream that skipped an index is
-indistinguishable from one that did not. Validation against the provider's own bytes arrived in
-`b71b4fb` for items and `42b6902` for content within an item; an announcement carrying no index at
-all was accepted until `aa41438`, and one carrying no content until `94439a0`.
+indistinguishable from one that did not. Reading the provider's own content positions, and refusing
+a stream that skips them, arrived in `42b6902`; `b71b4fb` added the same refusal for item positions
+and took over both checks. An announcement carrying no position at all was accepted until `aa41438`,
+and one carrying no content until `affd2db`.
 
 ## `ff48704` — "A reply that never names the model that served it leaves that unknown"
 
