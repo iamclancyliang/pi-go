@@ -5,6 +5,10 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 type stubRoundTripper struct {
@@ -254,5 +258,52 @@ func TestAnUnrecognisedStatusIsAFailure(t *testing.T) {
 					tc.status, tc.incomplete, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestHistoryConvertsWithReasoningKept: this provider requires an assistant's
+// reasoning back on the next request, and its position before the answer is
+// part of what it means.
+func TestHistoryConvertsWithReasoningKept(t *testing.T) {
+	converted, err := toAgentic([]ai.Message{
+		{Role: ai.RoleSystem, Content: "be brief"},
+		{Role: ai.RoleUser, Content: "hello"},
+		{Role: ai.RoleAssistant, Reasoning: "weighing", Content: "hi",
+			ToolCalls: []ai.ToolCall{{ID: "tc1", Name: "list_files", Args: "{}"}}},
+		{Role: ai.RoleTool, ToolCallID: "tc1", Content: "a.go"},
+	})
+	if err != nil {
+		t.Fatalf("converting: %v", err)
+	}
+	if len(converted) != 4 {
+		t.Fatalf("converted %d messages", len(converted))
+	}
+
+	assistant := converted[2]
+	if len(assistant.ContentBlocks) != 3 {
+		t.Fatalf("assistant carries %d blocks, want reasoning, text and the call",
+			len(assistant.ContentBlocks))
+	}
+	if assistant.ContentBlocks[0].Type != schema.ContentBlockTypeReasoning {
+		t.Fatalf("reasoning is not first: %s", assistant.ContentBlocks[0].Type)
+	}
+	if got := assistant.ContentBlocks[0].Reasoning.Text; got != "weighing" {
+		t.Fatalf("reasoning converted as %q", got)
+	}
+	call := assistant.ContentBlocks[2].FunctionToolCall
+	if call == nil || call.CallID != "tc1" || call.Name != "list_files" {
+		t.Fatalf("tool call converted as %+v", call)
+	}
+	result := converted[3].ContentBlocks[0].FunctionToolResult
+	if result == nil || result.CallID != "tc1" {
+		t.Fatalf("tool result lost its pairing: %+v", result)
+	}
+}
+
+// TestAnUnsupportedRoleIsRefused: silently dropping a message would leave a
+// caller believing it was sent.
+func TestAnUnsupportedRoleIsRefused(t *testing.T) {
+	if _, err := toAgentic([]ai.Message{{Role: ai.Role("something_new")}}); err == nil {
+		t.Fatal("an unconvertible message was accepted")
 	}
 }
