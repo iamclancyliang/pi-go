@@ -59,16 +59,22 @@ type OperationFailure struct {
 	Detail string
 }
 
-// OverflowAttempt records that the provider refused a request because the context
-// was too large.
+// OverflowAttempt is one durable record behind a context refusal.
 //
-// It is durable and it is NOT part of the conversation. Both halves matter: the
-// attempt happened, was paid for, and has to be auditable — and feeding it back
-// would resend the very thing that was rejected, or invite a summariser to
-// describe a provider error as something the conversation said.
+// It holds two kinds of thing, told apart by SpendOnly:
+//
+//   - a refused MODEL CALL, which consumes a unit of the recovery budget; and
+//   - the cost of a transport attempt made while trying to complete that call,
+//     which consumes none.
+//
+// Both are durable and neither is ever projected into the conversation:
+// resending a refusal would resend what was rejected, and offering it to a
+// summariser would write a provider error into the conversation as something
+// that was said.
 type OverflowAttempt struct {
-	// SpendOnly marks a provider attempt recorded for its cost alone. It does
-	// not consume recovery budget, so restoring it must not either.
+	// SpendOnly distinguishes the two kinds. True means this record is the cost
+	// of a transport attempt, not a refused model call, so it consumes no
+	// recovery budget — and restoring it must not consume one either.
 	SpendOnly bool
 
 	// Detail is what the provider reported, kept for auditing rather than for

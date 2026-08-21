@@ -370,12 +370,6 @@ func (s *Session) Settlement(resultID string) (ToolSettlement, bool) {
 	return settled, ok
 }
 
-// RecordOverflowAttempt durably notes that the provider refused the request for
-// being too large, and counts it against this input's recovery budget.
-//
-// The attempt is recorded but never projected. Sending it back would resend the
-// thing that was rejected, and offering it to a summariser would let a provider
-// error be written into the conversation as something that was said.
 // RecordOverflowSpend ledgers what a provider attempt behind a refusal cost,
 // WITHOUT consuming any recovery budget.
 //
@@ -398,8 +392,16 @@ func (s *Session) RecordOverflowSpend(usage ai.Usage) error {
 	return nil
 }
 
-// RecordOverflowAttempt records one refused MODEL CALL: it consumes one unit of
-// the recovery budget and ledgers what the refusal cost.
+// RecordOverflowAttempt durably notes that the provider refused the request for
+// being too large. It consumes one unit of this input's recovery budget and
+// ledgers what the refusal cost.
+//
+// The attempt is recorded but never projected. Sending it back would resend the
+// thing that was rejected, and offering it to a summariser would let a provider
+// error be written into the conversation as something that was said.
+//
+// For the cost of a transport attempt behind the same refusal — which is not
+// itself a refused model call — use RecordOverflowSpend.
 func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
