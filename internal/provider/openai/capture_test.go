@@ -252,7 +252,7 @@ func TestAnUnrecognisedStatusIsAFailure(t *testing.T) {
 	} {
 		name := tc.status + "/" + tc.incomplete
 		t.Run(name, func(t *testing.T) {
-			_, err := failureFromStatus(tc.status, tc.incomplete)
+			_, err := failureFromStatus(tc.status, tc.incomplete, "")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("status %q incomplete %q produced err=%v, wantErr=%v",
 					tc.status, tc.incomplete, err, tc.wantErr)

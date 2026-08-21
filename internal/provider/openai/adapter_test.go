@@ -720,3 +720,72 @@ func TestCancellingWhileWaitingForDataIsAnAbort(t *testing.T) {
 			final.StopReason, ai.StopAborted)
 	}
 }
+
+// TestAFailureInsideA200NamesItsOwnReason.
+//
+// A reply can fail inside a successful HTTP response for a reason the status
+// cannot express. Calling every such ending an interruption loses the
+// difference between "try later" and "this cannot succeed", and the second one
+// costs money to retry.
+func TestAFailureInsideA200NamesItsOwnReason(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code string
+		want openai.Failure
+	}{
+		{"exhausted quota", "insufficient_quota", openai.FailureQuota},
+		{"rejected credential", "invalid_api_key", openai.FailureAuth},
+		{"filtered content", "content_filter", openai.FailureRefused},
+		{"no code at all", "", openai.FailureInterrupted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errPart := ""
+			if tc.code != "" {
+				errPart = `,"error":{"code":"` + tc.code + `","message":"reported inside a 200"}`
+			}
+			tr := &recordedTransport{responses: []*http.Response{recorded(
+				`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+				`{"type":"response.failed","response":{"id":"r","model":"gpt-served","status":"failed"`+errPart+
+					`,"usage":{"input_tokens":5,"output_tokens":0}}}`,
+			)}}
+
+			_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+				Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			var classified *openai.Error
+			if !errors.As(err, &classified) {
+				t.Fatalf("failure %v is not classified", err)
+			}
+			if classified.Failure != tc.want {
+				t.Fatalf("classified %s, want %s", classified.Failure, tc.want)
+			}
+			if classified.Failure.Retryable() {
+				t.Fatalf("%s was marked retryable", classified.Failure)
+			}
+		})
+	}
+}
+
+// TestAContentIndexThatSkipsIsRefused: the adapter renumbers content indices
+// inside an item just as it renumbers the items, so a gap is invisible after
+// conversion and accepting it reports an order the provider never sent.
+func TestAContentIndexThatSkipsIsRefused(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		// The first content part of this item is announced at index 3.
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":3,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":3,"delta":"x"}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)}}
+
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a content index of 3 with nothing before it was renumbered and accepted")
+	}
+	if !strings.Contains(err.Error(), "renumber") {
+		t.Fatalf("the failure did not explain itself: %v", err)
+	}
+}

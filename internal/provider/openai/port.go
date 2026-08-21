@@ -146,7 +146,13 @@ func usageFrom(t terminal) ai.Usage {
 //
 // The set is the same one every provider in this repository answers with, so a
 // caller branches on the outcome rather than on which provider produced it.
-func failureFromStatus(status string, incomplete string) (ai.StopReason, error) {
+func failureFromStatus(status, incomplete, errorCode string) (ai.StopReason, error) {
+	// A failure reported inside a 200 can name its own reason. Classifying by
+	// the ending alone would call an exhausted balance an interruption, which
+	// reads as "try again later" for something that cannot succeed.
+	if failure, ok := failureFromCode(errorCode); ok {
+		return ai.StopError, &Error{Failure: failure, Detail: errorCode}
+	}
 	switch status {
 	case "completed":
 		return ai.StopEnd, nil
@@ -172,4 +178,21 @@ func failureFromStatus(status string, incomplete string) (ai.StopReason, error) 
 		return ai.StopError, &Error{Failure: FailureUnknown,
 			Detail: fmt.Sprintf("unrecognised status %q", status)}
 	}
+}
+
+// failureFromCode maps the provider's own error code onto a classification.
+func failureFromCode(code string) (Failure, bool) {
+	switch code {
+	case "insufficient_quota", "billing_hard_limit_reached", "account_deactivated":
+		return FailureQuota, true
+	case "invalid_api_key", "invalid_organization":
+		return FailureAuth, true
+	case "rate_limit_exceeded":
+		return FailureThrottled, true
+	case "server_error":
+		return FailureTransient, true
+	case "content_filter":
+		return FailureRefused, true
+	}
+	return "", false
 }

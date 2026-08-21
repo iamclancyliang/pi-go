@@ -41,6 +41,12 @@ type terminal struct {
 	// Status and IncompleteReason describe how the provider ended the reply.
 	Status           string
 	IncompleteReason string
+
+	// ErrorCode is the provider's own code when the terminal carried one. A
+	// reply can fail inside a 200 for a reason the status cannot express — an
+	// exhausted balance among them — and calling every such ending the same
+	// thing loses the difference between "try later" and "this cannot succeed".
+	ErrorCode string
 }
 
 // capture holds what one logical call observed.
@@ -55,6 +61,9 @@ type capture struct {
 
 	// failure is the classified reason a request was refused, when one was.
 	failure error
+
+	// contentIndices is every content index the provider announced, per item.
+	contentIndices map[int][]int
 
 	// itemIndices is every output index the provider announced, in order.
 	//
@@ -92,6 +101,27 @@ func (c *capture) observeItem(index int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.itemIndices = append(c.itemIndices, index)
+}
+
+// observeContent records a content index the provider announced within an item.
+func (c *capture) observeContent(item, content int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.contentIndices == nil {
+		c.contentIndices = map[int][]int{}
+	}
+	c.contentIndices[item] = append(c.contentIndices[item], content)
+}
+
+// announcedContent is what the provider said within each item.
+func (c *capture) announcedContent() map[int][]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[int][]int, len(c.contentIndices))
+	for item, indices := range c.contentIndices {
+		out[item] = append([]int(nil), indices...)
+	}
+	return out
 }
 
 // announcedIndices is what the provider said, in the order it said it.
@@ -164,6 +194,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			inner:      resp.Body,
 			onTerminal: t.capture.observe,
 			onItem:     t.capture.observeItem,
+			onContent:  t.capture.observeContent,
 		}
 		return resp, nil
 	}
@@ -193,6 +224,7 @@ type teeBody struct {
 	inner      io.ReadCloser
 	onTerminal func(terminal)
 	onItem     func(int)
+	onContent  func(item, content int)
 	pending    []byte
 	event      []byte
 	done       bool
@@ -250,6 +282,9 @@ func (t *teeBody) handle(payload []byte) bool {
 		if index, ok := itemIndexFromEvent(payload); ok && t.onItem != nil {
 			t.onItem(index)
 		}
+		if item, content, ok := contentIndexFromEvent(payload); ok && t.onContent != nil {
+			t.onContent(item, content)
+		}
 		if found, ok := terminalFromEvent(payload); ok {
 			t.done = true
 			t.onTerminal(found)
@@ -262,8 +297,12 @@ func (t *teeBody) handle(payload []byte) bool {
 // wireResponse is only the parts this capture is responsible for. Everything
 // else about the reply comes from the adapter.
 type wireResponse struct {
-	Model            string `json:"model"`
-	Status           string `json:"status"`
+	Model  string `json:"model"`
+	Status string `json:"status"`
+	Error  *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
 	IncompleteDetail *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
@@ -281,6 +320,9 @@ type wireResponse struct {
 
 func (w wireResponse) toTerminal() terminal {
 	found := terminal{Model: w.Model, Status: w.Status}
+	if w.Error != nil {
+		found.ErrorCode = w.Error.Code
+	}
 	if w.IncompleteDetail != nil {
 		found.IncompleteReason = w.IncompleteDetail.Reason
 	}
@@ -340,4 +382,22 @@ func itemIndexFromEvent(payload []byte) (int, bool) {
 		return 0, false
 	}
 	return *event.OutputIndex, true
+}
+
+// contentIndexFromEvent reads the content index the provider announced inside an
+// item, which is the other place its own ordering is visible.
+func contentIndexFromEvent(payload []byte) (item, content int, ok bool) {
+	var event struct {
+		Type         string `json:"type"`
+		OutputIndex  *int   `json:"output_index"`
+		ContentIndex *int   `json:"content_index"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return 0, 0, false
+	}
+	if event.Type != "response.content_part.added" ||
+		event.OutputIndex == nil || event.ContentIndex == nil {
+		return 0, 0, false
+	}
+	return *event.OutputIndex, *event.ContentIndex, true
 }

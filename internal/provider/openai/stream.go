@@ -267,10 +267,23 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		}
 	}
 
+	// Content ordering is checked the same way, because the adapter renumbers
+	// content indices within an item just as it renumbers the items.
+	for item, announced := range held.announcedContent() {
+		for at, index := range announced {
+			if index != at {
+				fail(fmt.Errorf(
+					"openai: item %d announced content index %d where %d was expected; "+
+						"refusing to renumber a stream that skips", item, index, at))
+				return
+			}
+		}
+	}
+
 	// The ending comes from what the provider said, captured before the adapter
 	// reinterpreted it.
 	final := held.last()
-	reason, statusErr := failureFromStatus(final.Status, final.IncompleteReason)
+	reason, statusErr := failureFromStatus(final.Status, final.IncompleteReason, final.ErrorCode)
 	if statusErr != nil {
 		fail(statusErr)
 		return
