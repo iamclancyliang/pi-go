@@ -68,6 +68,7 @@ be replaced.
 | Cached prompt tokens are counted once, and counted in the total | `TestCachedPromptTokensAreNotCountedTwice`, `TestTotalCountsEveryReportedToken` |
 | The ledger owns its entries: neither the writer nor a reader can edit them afterwards | `TestTheLedgerOwnsWhatItRecords`, `TestASnapshotDoesNotChangeAfterItIsTaken` |
 | A failed call's spend is owned the same way — copied in and copied out — before it ever reaches a ledger | `TestAFailuresSpendCannotBeRewritten` |
+| A failure owns what the provider said about retrying, and a copy of one shares nothing with it | `TestAFailureOwnsWhatTheProviderSaidAboutRetrying`, `TestACopyAndItsOriginalDoNotRecordOverEachOther` |
 | The model that served a reply is read from the reply | `TestTheServedModelIsReported` |
 
 ## Streaming

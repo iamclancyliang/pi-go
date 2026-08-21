@@ -79,7 +79,7 @@ type ProviderError struct {
 	// Consumed, which copies again.
 	used []Usage
 
-	// Advice is the provider's own instruction about retrying, when it gave
+	// advice is the provider's own instruction about retrying, when it gave
 	// one. It outranks the classification, which is only an inference drawn
 	// from a status code: a provider that says not to retry a 503 knows
 	// something about its own state that the status does not carry, and one
@@ -88,7 +88,46 @@ type ProviderError struct {
 	// An exhausted balance is the exception and stays terminal either way.
 	// Every attempt against it spends more of what is already gone, and who
 	// asked for the attempt does not change that.
-	Advice *bool
+	//
+	// Unexported like the spend beside it, and for the same reason: a pointer a
+	// caller can assign is one two failures can end up sharing, and one of them
+	// could then change what the other reports the provider said.
+	advice *bool
+}
+
+// Advise records the provider's own instruction about retrying.
+//
+// Takes a pointer so that "the provider said nothing" stays distinct from "the
+// provider said no", which are opposite instructions about a status the
+// classification would otherwise decide on its own.
+func (e *ProviderError) Advise(retry *bool) {
+	if retry == nil {
+		e.advice = nil
+		return
+	}
+	copied := *retry
+	e.advice = &copied
+}
+
+// Clone copies a failure, including everything it owns.
+//
+// Whole-struct rather than field-by-field: a copy that lists fields silently
+// stops copying the next one added, and what would go missing is exactly the
+// evidence a later reader needs.
+func (e *ProviderError) Clone() *ProviderError {
+	if e == nil {
+		return nil
+	}
+	out := *e
+	// The spend is copied, not shared. Two failures sharing one slice can each
+	// record onto it, and when the shared array has room to spare the second
+	// writer lands on the entry the first just wrote.
+	//
+	// The instruction beside it needs no such copy: it is only ever set through
+	// Advise, which copies what it is given, so no pointer here is written
+	// through after it is stored.
+	out.used = CloneUsages(e.used)
+	return &out
 }
 
 // Retryable reports whether another identical attempt is worth its cost,
@@ -97,8 +136,8 @@ func (e *ProviderError) Retryable() bool {
 	if e.Failure == FailureQuota {
 		return false
 	}
-	if e.Advice != nil {
-		return *e.Advice
+	if e.advice != nil {
+		return *e.advice
 	}
 	return e.Failure.Retryable()
 }

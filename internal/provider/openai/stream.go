@@ -375,9 +375,9 @@ func checkAnnounced(held *capture) error {
 	// leaves nothing to compare, so a check that only walks what was recorded
 	// would pass it — and inferring the position from arrival order is exactly
 	// the renumbering the rest of this refuses to do.
-	for _, what := range held.anonymousBlocks() {
+	if anonymous := held.anonymousBlocks(); len(anonymous) > 0 {
 		return fail(FailureUnknown, 0, fmt.Sprintf(
-			"the provider announced %s; refusing to infer a position it did not send", what))
+			"the provider announced %s; refusing to infer a position it did not send", anonymous[0]))
 	}
 	for at, announced := range held.announcedIndices() {
 		if announced != at {

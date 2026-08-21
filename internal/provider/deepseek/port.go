@@ -395,7 +395,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			refused := failureWith(failure, resp.StatusCode, raw, cred.Key())
 			var classified *ai.ProviderError
 			if errors.As(refused, &classified) {
-				classified.Advice = retryAdvice(resp.Header)
+				classified.Advise(retryAdvice(resp.Header))
 			}
 			return nil, final, withAttempts(refused, final)
 		}
@@ -437,14 +437,10 @@ func withAttempts(err error, attempts []Attempt) error {
 	if len(used) == 0 {
 		return err
 	}
-	// A copy, so the failure the caller may already hold is not edited under
-	// it. The attempts go in front of anything already recorded: they happened
-	// first.
-	withUsage := &Error{
-		Provider: classified.Provider, Failure: classified.Failure,
-		Status: classified.Status, Detail: classified.Detail, Advice: classified.Advice,
-	}
+	// A copy, so the failure a caller may already hold is not edited under it.
+	// The attempts join whatever the failure had already recorded rather than
+	// replacing it, since both were really spent.
+	withUsage := classified.Clone()
 	withUsage.Record(used...)
-	withUsage.Record(classified.Consumed()...)
 	return withUsage
 }

@@ -50,7 +50,7 @@ type retryDecision struct {
 func decideRetry(resp *http.Response, failure Failure, attempt int, policy RetryPolicy) (retryDecision, error) {
 	classified := &ai.ProviderError{Failure: failure}
 	if resp != nil {
-		classified.Advice = retryAdvice(resp.Header)
+		classified.Advise(retryAdvice(resp.Header))
 	}
 	if !classified.Retryable() {
 		return retryDecision{}, nil

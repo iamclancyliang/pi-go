@@ -240,7 +240,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			// failure. Nothing inside this package retries — the adapter's own
 			// retries are off — so an instruction that is not carried out is
 			// one the caller who does decide never learns of.
-			classified.Advice = retryAdvice(resp.Header)
+			classified.Advise(retryAdvice(resp.Header))
 		}
 		// A refused request may still report what it read. Recording it here
 		// keeps a failed call from being accounted for as free.

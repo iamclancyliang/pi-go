@@ -214,7 +214,8 @@ func TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance(t *tes
 		{"an unrecognised failure", ai.FailureUnknown, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := &ai.ProviderError{Provider: "p", Failure: tc.failure, Advice: tc.advice}
+			err := &ai.ProviderError{Provider: "p", Failure: tc.failure}
+			err.Advise(tc.advice)
 			if got := ai.Retryable(err); got != tc.want {
 				t.Fatalf("Retryable %v, want %v", got, tc.want)
 			}
@@ -243,5 +244,66 @@ func TestALookupCancellationStaysCancellation(t *testing.T) {
 				t.Fatalf("the caller's own outcome arrived as %v", err)
 			}
 		})
+	}
+}
+
+// TestAFailureOwnsWhatTheProviderSaidAboutRetrying: two failures must not share
+// the instruction. One of them changing it would rewrite what the other reports
+// the provider said, and a caller reads that to decide whether to spend again.
+func TestAFailureOwnsWhatTheProviderSaidAboutRetrying(t *testing.T) {
+	no := false
+	original := &ai.ProviderError{Provider: "p", Failure: ai.FailureTransient}
+	original.Advise(&no)
+
+	// The caller still holds the value it advised with.
+	no = true
+	if ai.Retryable(original) {
+		t.Fatal("changing the caller's own value changed what the failure reports")
+	}
+
+	copied := original.Clone()
+	yes := true
+	copied.Advise(&yes)
+	if ai.Retryable(original) {
+		t.Fatal("advising a copy changed the original")
+	}
+	if !ai.Retryable(copied) {
+		t.Fatal("the copy did not take the new instruction")
+	}
+
+	// A copy carries the spend too, and owns that as well.
+	cached := 3
+	original.Record(ai.Usage{InputTokens: 7, CacheReadTokens: &cached, Reported: true})
+	carried := original.Clone().Consumed()
+	if len(carried) != 1 || carried[0].InputTokens != 7 {
+		t.Fatalf("a copy lost the recorded spend: %v", carried)
+	}
+	carried[0].InputTokens = 99
+	if original.Consumed()[0].InputTokens != 7 {
+		t.Fatal("editing a copy's spend changed the original")
+	}
+}
+
+// TestACopyAndItsOriginalDoNotRecordOverEachOther.
+//
+// Sharing one slice between two failures is invisible until the shared array
+// has room to spare: then the second writer lands on the entry the first just
+// wrote, and one call's spend silently becomes another's. Three entries before
+// the copy is what leaves that room.
+func TestACopyAndItsOriginalDoNotRecordOverEachOther(t *testing.T) {
+	original := &ai.ProviderError{Provider: "p", Failure: ai.FailureTransient}
+	for _, n := range []int{1, 2, 3} {
+		original.Record(ai.Usage{InputTokens: n, Reported: true})
+	}
+
+	copied := original.Clone()
+	copied.Record(ai.Usage{InputTokens: 100, Reported: true})
+	original.Record(ai.Usage{InputTokens: 200, Reported: true})
+
+	if got := copied.Consumed(); got[len(got)-1].InputTokens != 100 {
+		t.Fatalf("the original recorded over the copy: %d", got[len(got)-1].InputTokens)
+	}
+	if got := original.Consumed(); got[len(got)-1].InputTokens != 200 {
+		t.Fatalf("the copy recorded over the original: %d", got[len(got)-1].InputTokens)
 	}
 }
