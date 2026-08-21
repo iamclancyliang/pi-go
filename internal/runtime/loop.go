@@ -1032,15 +1032,21 @@ func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested st
 func (o *observingPort) shortenForRetry(ctx context.Context, req ai.Request,
 	cause error, spent []ai.Usage) (*ai.Request, error) {
 
-	// One record per attempt: a call that retried before overflowing was billed
-	// for each of them.
+	// The refusal consumes ONE unit of recovery budget, whatever it took to
+	// reach it. The earlier attempts are ledgered for their cost alone: they
+	// were requests at the transport, not further model calls, and charging the
+	// budget for them would exhaust recovery before the first refusal had its
+	// one shortened retry.
 	if len(spent) == 0 {
 		spent = []ai.Usage{{}}
 	}
-	for _, used := range spent {
-		if err := o.session.RecordOverflowAttempt(cause.Error(), used); err != nil {
+	for _, used := range spent[:len(spent)-1] {
+		if err := o.session.RecordOverflowSpend(used); err != nil {
 			return nil, err
 		}
+	}
+	if err := o.session.RecordOverflowAttempt(cause.Error(), spent[len(spent)-1]); err != nil {
+		return nil, err
 	}
 
 	if o.summarize == nil || o.session.OverflowAttempts() > 1 {

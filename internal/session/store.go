@@ -67,6 +67,10 @@ type OperationFailure struct {
 // would resend the very thing that was rejected, or invite a summariser to
 // describe a provider error as something the conversation said.
 type OverflowAttempt struct {
+	// SpendOnly marks a provider attempt recorded for its cost alone. It does
+	// not consume recovery budget, so restoring it must not either.
+	SpendOnly bool
+
 	// Detail is what the provider reported, kept for auditing rather than for
 	// the model to read.
 	Detail string
@@ -179,8 +183,13 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 		case e.Overflow != nil:
 			// Durable, and deliberately not part of the conversation: it is
 			// counted against the recovery budget and never projected.
-			s.overflowAttempts++
+			// A spend-only entry is the cost of a provider attempt behind a
+			// refusal. It is ledgered but consumes no recovery budget, so
+			// restoring it must not consume one either.
 			s.overflowUsage = s.overflowUsage.Add(e.Overflow.Usage)
+			if !e.Overflow.SpendOnly {
+				s.overflowAttempts++
+			}
 			continue
 		case e.Failure != nil:
 			s.failure = e.Failure

@@ -711,18 +711,21 @@ func TestSeveralProviderToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
 	}
 }
 
-// TestEveryRefusedAttemptIsRecorded: a call that retried and then overflowed was
-// billed for each attempt, and folding them into one entry loses the boundary
-// the ledger exists to keep.
-func TestEveryRefusedAttemptIsRecorded(t *testing.T) {
+// TestARetryBeforeAnOverflowDoesNotSpendTheRecoveryBudget.
+//
+// A request retried at the transport is an attempt to make ONE model call. The
+// recovery budget counts model calls after a refusal. Charging the budget per
+// transport attempt makes a retry before the first overflow exhaust recovery,
+// so a refusal that should have been shortened and retried becomes terminal —
+// while every attempt still has to be ledgered for what it cost.
+func TestARetryBeforeAnOverflowDoesNotSpendTheRecoveryBudget(t *testing.T) {
 	transport := &sequenceTransport{responses: []*http.Response{
 		{StatusCode: 503, Body: io.NopCloser(strings.NewReader(
 			`{"error":{"message":"busy"},"usage":{"prompt_tokens":70,"completion_tokens":0}}`))},
-		// No content: recovery is deliberately skipped once blocks have been
-		// shown, so an overflow that matters for recovery is one detected
-		// before anything reached the consumer.
+		// The refusal itself, with nothing shown to the consumer first.
 		{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseReply(
 			`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1100001,"completion_tokens":0}}`)))},
+		// The shortened retry, which must actually happen.
 		{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseReply(
 			`{"choices":[{"delta":{"content":"shorter"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":1}}`)))},
 	}}
@@ -738,18 +741,28 @@ func TestEveryRefusedAttemptIsRecorded(t *testing.T) {
 	registry, _, _ := tools.NewFixtureRegistry()
 	sess := session.New("You are pi-go.")
 	agent, err := runtime.New(runtime.Config{
-		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
-		Session: sess, Now: fixedClock(),
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry, Session: sess,
+		Summarize: func(context.Context, []ai.Message) (string, []ai.Message, error) {
+			return "shortened", nil, nil
+		},
+		Now: fixedClock(),
 	})
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
 	}
-	_ = agent.Run(context.Background(), "hello")
-
-	if n := sess.OverflowAttempts(); n != 2 {
-		t.Fatalf("a retry followed by an overflow recorded %d refused attempts, want 2", n)
+	if runErr := agent.Run(context.Background(), "hello"); runErr != nil {
+		t.Fatalf("the first overflow was not recovered: %v", runErr)
 	}
+
+	if transport.requests != 3 {
+		t.Fatalf("made %d requests, want 3: a transport retry, the refusal, and the "+
+			"shortened retry the refusal is entitled to", transport.requests)
+	}
+	if n := sess.OverflowAttempts(); n != 1 {
+		t.Fatalf("one refused model call consumed %d units of recovery budget", n)
+	}
+	// Both attempts behind the refusal were billed.
 	if got := sess.OverflowUsage().InputTokens; got != 70+1100001 {
-		t.Fatalf("refused attempts total %d input tokens, want %d", got, 70+1100001)
+		t.Fatalf("refused attempts ledgered %d input tokens, want %d", got, 70+1100001)
 	}
 }

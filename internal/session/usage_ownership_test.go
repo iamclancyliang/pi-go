@@ -108,3 +108,46 @@ func TestAStoredOverflowAttemptIsOwnedToo(t *testing.T) {
 		t.Fatalf("the caller rewrote a persisted entry: %v", got.CacheReadTokens)
 	}
 }
+
+// TestTheOverflowLedgerIsNotEditableByAReader: a reader that could edit what it
+// read would be editing the ledger itself.
+func TestTheOverflowLedgerIsNotEditableByAReader(t *testing.T) {
+	sess := session.New("system")
+	if err := sess.RecordOverflowAttempt("refused", ai.Usage{
+		InputTokens: 10, CacheReadTokens: count(5), Reported: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	view := sess.OverflowUsage()
+	*view.CacheReadTokens = 999
+	if again := sess.OverflowUsage(); *again.CacheReadTokens != 5 {
+		t.Fatalf("a reader rewrote the overflow ledger: %d", *again.CacheReadTokens)
+	}
+}
+
+// TestRestoringSpendOnlyEntriesDoesNotSpendTheBudget: the cost of a transport
+// attempt is durable, but it was never a refused model call, so reopening must
+// not charge recovery for it.
+func TestRestoringSpendOnlyEntriesDoesNotSpendTheBudget(t *testing.T) {
+	store := &session.MemoryStore{}
+	sess := session.WithStore("system", store)
+
+	if err := sess.RecordOverflowSpend(ai.Usage{InputTokens: 70, Reported: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RecordOverflowAttempt("refused", ai.Usage{InputTokens: 1000, Reported: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := session.Restore(context.Background(), "system", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := reopened.OverflowAttempts(); n != 1 {
+		t.Fatalf("reopening charged %d units of recovery budget, want 1", n)
+	}
+	if got := reopened.OverflowUsage().InputTokens; got != 1070 {
+		t.Fatalf("reopened ledger holds %d input tokens, want 1070", got)
+	}
+}

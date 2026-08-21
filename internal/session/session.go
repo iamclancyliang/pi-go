@@ -376,6 +376,30 @@ func (s *Session) Settlement(resultID string) (ToolSettlement, bool) {
 // The attempt is recorded but never projected. Sending it back would resend the
 // thing that was rejected, and offering it to a summariser would let a provider
 // error be written into the conversation as something that was said.
+// RecordOverflowSpend ledgers what a provider attempt behind a refusal cost,
+// WITHOUT consuming any recovery budget.
+//
+// The two are different things and were briefly conflated: a request retried at
+// the transport is an attempt to make one model call, while the recovery budget
+// counts model calls after a refusal. Charging the budget per transport attempt
+// meant a retry before the first overflow exhausted recovery, and a refusal that
+// should have been shortened and retried became terminal instead.
+func (s *Session) RecordOverflowSpend(usage ai.Usage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.store != nil {
+		if err := s.store.Append(context.Background(), Entry{
+			Overflow: &OverflowAttempt{Detail: "provider attempt behind a refusal", Usage: usage, SpendOnly: true},
+		}); err != nil {
+			return fmt.Errorf("session: recording an overflow attempt's cost: %w", err)
+		}
+	}
+	s.overflowUsage = s.overflowUsage.Add(usage)
+	return nil
+}
+
+// RecordOverflowAttempt records one refused MODEL CALL: it consumes one unit of
+// the recovery budget and ledgers what the refusal cost.
 func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -399,7 +423,9 @@ func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 func (s *Session) OverflowUsage() ai.Usage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.overflowUsage
+	// A copy: the optional counts are pointers, and a reader that could edit
+	// them would be editing the ledger.
+	return s.overflowUsage.Clone()
 }
 
 // OverflowAttempts reports how many recoveries have been tried for the current
@@ -531,27 +557,11 @@ func (s *Session) Usage() ai.Usage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	// Accumulated through the one place that knows how: a second hand-written
+	// fold is how the overflow total came to drop fields that this one kept.
 	var total ai.Usage
-	var cacheRead, reasoning int
-	var sawCacheRead, sawReasoning bool
 	for _, a := range s.attempts {
-		total.Reported = total.Reported || a.Reported
-		total.InputTokens += a.InputTokens
-		total.OutputTokens += a.OutputTokens
-		if a.CacheReadTokens != nil {
-			cacheRead += *a.CacheReadTokens
-			sawCacheRead = true
-		}
-		if a.ReasoningTokens != nil {
-			reasoning += *a.ReasoningTokens
-			sawReasoning = true
-		}
-	}
-	if sawCacheRead {
-		total.CacheReadTokens = &cacheRead
-	}
-	if sawReasoning {
-		total.ReasoningTokens = &reasoning
+		total = total.Add(a)
 	}
 	return total
 }
