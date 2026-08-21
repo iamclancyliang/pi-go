@@ -1,7 +1,9 @@
 package deepseek
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -33,6 +35,15 @@ const providerName = "deepseek"
 // fail builds a classified failure from this provider.
 func fail(f Failure, status int, detail string) *Error {
 	return &Error{Provider: providerName, Failure: f, Status: status, Detail: detail}
+}
+
+// stopped reports an error that says the call was stopped rather than failed.
+//
+// Read from the chain rather than from the caller's context: a body can report
+// a stop it was told about before that context is observably done, and a call
+// that was stopped is over either way.
+func stopped(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // classifyStatus maps an HTTP status onto a failure.

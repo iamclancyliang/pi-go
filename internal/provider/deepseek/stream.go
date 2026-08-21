@@ -131,6 +131,11 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 	)
 
 	cancelled := false
+	// Why a stopped call stopped. Usually the caller's own context, but the
+	// body can report a stop it was told about before that context is
+	// observably done — and then ctx.Err() is nil while the call is over all
+	// the same, so the reason has to be carried rather than asked for later.
+	var stoppedBy error
 	// A CONTENT event may be abandoned when the caller stops listening: it is
 	// one of many and the reply is being cut short anyway.
 	send := func(events ...ai.StreamEvent) bool {
@@ -156,7 +161,11 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 	// it vanish because they stopped it, and a channel that simply closes tells
 	// them nothing about what they have.
 	endCancelled := func() {
-		ev, err := acc.Fail(ai.StopAborted, ctx.Err())
+		cause := stoppedBy
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		ev, err := acc.Fail(ai.StopAborted, cause)
 		if err != nil {
 			return
 		}
@@ -397,7 +406,15 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 		return
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		fail(FailureTransient, err.Error())
+		// A stop reported through the error rather than through the context
+		// ends as one. Classifying it would report the caller's own stop as a
+		// provider failure, and a deadline would leave as retryable — while
+		// flattening it to text would lose the cause from errors.Is entirely.
+		if stopped(err) {
+			cancelled, stoppedBy = true, err
+			return
+		}
+		fail(FailureTransient, scrub(err.Error(), ""))
 		return
 	}
 	// The stream ended without a stop reason, so the reply is not known to be

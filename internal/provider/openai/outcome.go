@@ -56,7 +56,7 @@ func wireFailure(stage, key string, err error) error {
 	// one it was told about before that context is observably done, and
 	// classifying it would tell a caller to retry what was just stopped —
 	// worse, a deadline would leave as retryable.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if stopped(err) {
 		return err
 	}
 	failure := FailureUnknown
@@ -67,6 +67,15 @@ func wireFailure(stage, key string, err error) error {
 	// transport error names the request it failed on, headers and all, and a
 	// key that does not look like one would otherwise survive into it.
 	return fail(failure, 0, stage+": "+scrub(err.Error(), key))
+}
+
+// stopped reports an error that says the call was stopped rather than failed.
+//
+// Read from the chain rather than from the caller's context: a transport can
+// report a cancellation it was told about before that context is observably
+// done, and a call that was stopped is over either way.
+func stopped(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // transient reports an error that a later attempt might survive.

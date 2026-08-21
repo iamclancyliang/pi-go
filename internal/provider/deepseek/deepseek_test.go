@@ -1242,3 +1242,65 @@ func TestARetriedCallKeepsTheCredentialItStartedWith(t *testing.T) {
 		}
 	}
 }
+
+// haltingBody delivers what it was given and then fails, as a body does when
+// the transport underneath it is stopped mid-reply.
+type haltingBody struct {
+	prefix *strings.Reader
+	err    error
+}
+
+func (h *haltingBody) Read(p []byte) (int, error) {
+	if h.prefix.Len() > 0 {
+		return h.prefix.Read(p)
+	}
+	return 0, h.err
+}
+
+func (h *haltingBody) Close() error { return nil }
+
+// TestAStreamStoppedMidReplyEndsAborted: a stopped call is not a failed one.
+// The caller's context stays live here, so only the error chain can say what
+// happened — and reported as a failure, a deadline would leave as retryable
+// while the cause disappeared from errors.Is entirely.
+func TestAStreamStoppedMidReplyEndsAborted(t *testing.T) {
+	for name, cause := range map[string]error{
+		"a cancellation": context.Canceled,
+		"a deadline":     context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := &countingTransport{respond: func(int) *http.Response {
+				return &http.Response{StatusCode: 200, Body: &haltingBody{
+					prefix: strings.NewReader("data: " +
+						`{"choices":[{"delta":{"content":"partial"}}]}` + "\n\n"),
+					err: fmt.Errorf("body stopped: %w", cause),
+				}}
+			}}
+			events, err := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"}).Stream(
+				context.Background(), ai.Request{
+					Model: "deepseek-v4-flash", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+				})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var final *ai.AssistantMessage
+			for ev := range events {
+				if ev.Final != nil {
+					final = ev.Final
+				}
+			}
+			if final == nil {
+				t.Fatal("the stream ended without a terminal event")
+			}
+			if final.StopReason != ai.StopAborted {
+				t.Fatalf("a stopped call ended as %q, not aborted", final.StopReason)
+			}
+			if !errors.Is(final.Cause, cause) {
+				t.Fatalf("the cause was lost: %v", final.Cause)
+			}
+			if _, classified := ai.FailureOf(final.Cause); classified {
+				t.Fatalf("a stopped call was reported as a provider failure: %v", final.Cause)
+			}
+		})
+	}
+}

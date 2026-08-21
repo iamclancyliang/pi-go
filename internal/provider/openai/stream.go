@@ -119,6 +119,11 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	next := 0
 
 	cancelled := false
+	// Why a stopped call stopped. Usually the caller's own context, but a
+	// transport can report a cancellation it was told about before that context
+	// is observably done — and then ctx.Err() is nil while the call is over all
+	// the same, so the reason has to be carried rather than asked for later.
+	var stoppedBy error
 	// A CONTENT event may be abandoned when the caller stops listening: it is
 	// one of many, and the reply is being cut short anyway.
 	send := func(events ...ai.StreamEvent) bool {
@@ -155,7 +160,11 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		if !cancelled {
 			return
 		}
-		ev, accErr := acc.Fail(ai.StopAborted, ctx.Err())
+		cause := stoppedBy
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		ev, accErr := acc.Fail(ai.StopAborted, cause)
 		if accErr != nil {
 			return
 		}
@@ -185,6 +194,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 			// as a failure invites a retry of what they just cancelled.
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				cancelled = true
+				return
+			}
+			// A stop reported through the error rather than through the
+			// context ends the same way. Ending it as a failure would put a
+			// reply in the record as one the provider broke, and a caller
+			// reading the ending to decide what to say would say the wrong
+			// thing about its own cancellation.
+			if stopped(err) {
+				cancelled, stoppedBy = true, err
 				return
 			}
 			if refused := held.refusal(); refused != nil {
