@@ -726,8 +726,10 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 
 	resp, err := o.inner.Generate(ctx, req)
 	if errors.Is(err, ai.ErrContextOverflow) {
-		// The refused call still reports what it cost, and it was still billed.
-		return o.recoverFromOverflow(ctx, req, resp.Usage, err)
+		// The refused call still reports what it cost, and it was still read.
+		// The counts come from the failure, not from the response: a call that
+		// failed has no response to carry them.
+		return o.recoverFromOverflow(ctx, req, consumedFrom(err, resp.Usage), err)
 	}
 	if err != nil {
 		// A failure that knows what it consumed is ledgered like any other
@@ -1309,4 +1311,34 @@ func (o *observingPort) recordConsumed(err error) {
 	for _, u := range reporter.Consumed() {
 		o.session.RecordUsage(u)
 	}
+}
+
+// consumedFrom is what a failed call used, preferring what the failure itself
+// reports over an empty response.
+func consumedFrom(err error, fallback ai.Usage) ai.Usage {
+	var reporter ai.UsageReporter
+	if !errors.As(err, &reporter) {
+		return fallback
+	}
+	var total ai.Usage
+	for _, u := range reporter.Consumed() {
+		if !u.Reported {
+			continue
+		}
+		total.Reported = true
+		total.InputTokens += u.InputTokens
+		total.OutputTokens += u.OutputTokens
+		if u.CacheReadTokens != nil {
+			sum := u.CacheReadTokens
+			if total.CacheReadTokens != nil {
+				combined := *total.CacheReadTokens + *u.CacheReadTokens
+				sum = &combined
+			}
+			total.CacheReadTokens = sum
+		}
+	}
+	if !total.Reported {
+		return fallback
+	}
+	return total
 }

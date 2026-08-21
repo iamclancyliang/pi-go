@@ -67,3 +67,22 @@ func TestTheSamePromptTotalsTheSameWhetherCached(t *testing.T) {
 			cold.Total(), warm.Total())
 	}
 }
+
+// TestASnapshotDoesNotChangeAfterItIsTaken: the optional counts are pointers, so
+// a copied struct still shares them. A ledger entry a caller can edit records
+// nothing.
+func TestASnapshotDoesNotChangeAfterItIsTaken(t *testing.T) {
+	original := ai.Usage{
+		InputTokens: 10, OutputTokens: 2,
+		CacheReadTokens: ptr(5), ReasoningTokens: ptr(1), Reported: true,
+	}
+	snapshot := original.Clone()
+
+	*original.CacheReadTokens = 999
+	*original.ReasoningTokens = 999
+
+	if *snapshot.CacheReadTokens != 5 || *snapshot.ReasoningTokens != 1 {
+		t.Fatalf("editing the original rewrote the snapshot: cache=%d reasoning=%d",
+			*snapshot.CacheReadTokens, *snapshot.ReasoningTokens)
+	}
+}

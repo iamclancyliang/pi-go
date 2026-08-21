@@ -1,6 +1,7 @@
 package deepseek
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -142,3 +143,37 @@ func stopReason(raw string) (ok bool, truncated bool, failure Failure) {
 
 // Consumed reports what the failed call used, so a ledger can hold it.
 func (e *Error) Consumed() []ai.Usage { return e.Usage }
+
+// BodyClassifier refines a status-derived failure using the response body.
+//
+// It exists because a status code is not always enough: some providers report
+// an exhausted balance inside an ordinary rate-limit response, and retrying
+// that spends money on a request that cannot succeed. DeepSeek does not — it
+// has its own status for exhaustion — so this is nil by default and the
+// classification stays purely typed.
+type BodyClassifier func(status int, body []byte) Failure
+
+// ExhaustionInBody recognises an exhausted balance reported inside another
+// status, using the provider's own error code rather than prose.
+//
+// This is the one place a body is inspected, and it may only make a failure
+// MORE terminal. It cannot turn a terminal failure into a retryable one, so a
+// misreading here can waste a retry at worst, never spend against a balance
+// that is already gone.
+func ExhaustionInBody(status int, body []byte) Failure {
+	if status != http.StatusTooManyRequests {
+		return ""
+	}
+	var parsed struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	if parsed.Error.Code == "insufficient_balance" {
+		return FailureQuota
+	}
+	return ""
+}

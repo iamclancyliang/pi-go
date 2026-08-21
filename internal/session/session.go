@@ -506,14 +506,16 @@ func cloneMessages(in []ai.Message) []ai.Message {
 func (s *Session) RecordUsage(u ai.Usage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.attempts = append(s.attempts, u)
+	// Stored as a copy: the caller keeps a value with the same pointers in it,
+	// and a ledger a caller can still edit is not a record of anything.
+	s.attempts = append(s.attempts, u.Clone())
 }
 
 // Attempts is what each model call reported, in order.
 func (s *Session) Attempts() []ai.Usage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]ai.Usage(nil), s.attempts...)
+	return ai.CloneUsages(s.attempts)
 }
 
 // Usage is the whole conversation's reported consumption, derived by summing

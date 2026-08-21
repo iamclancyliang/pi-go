@@ -2,7 +2,6 @@ package deepseek
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -41,13 +40,11 @@ func (p *Port) Generate(ctx context.Context, req ai.Request) (ai.Response, error
 		if final.Usage.Reported {
 			consumed = append(consumed, final.Usage)
 		}
-		var classified *Error
-		if errors.As(final.Cause, &classified) && len(consumed) > 0 {
-			withUsage := *classified
-			withUsage.Usage = consumed
-			return ai.Response{}, &withUsage
-		}
-		return ai.Response{}, final.Cause
+		// Every failure carries its counts, not only the classified ones: an
+		// overflow is a wrapped sentinel rather than this package's error type,
+		// and it is exactly the failure the runtime recovers from — so losing
+		// its usage means paying for the refused attempt and reporting nothing.
+		return ai.Response{}, ai.WithUsage(final.Cause, consumed...)
 	}
 
 	var text, reasoning strings.Builder

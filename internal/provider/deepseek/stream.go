@@ -306,9 +306,6 @@ func (p *Port) pump(ctx context.Context, body io.Reader, out chan<- ai.StreamEve
 				// fragments of several calls (0, 1, 0, 1), and closing the
 				// earlier one would leave its remaining arguments with nowhere
 				// to land.
-				// Close a text or thinking block before the first call, but
-				// never another tool-call block: its remaining fragments would
-				// have nowhere to land.
 				if started && kind != ai.BlockToolCall {
 					if !closeBlocks(index) {
 						return

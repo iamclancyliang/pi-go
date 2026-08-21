@@ -171,6 +171,36 @@ type Usage struct {
 	Reported bool
 }
 
+// Clone returns a Usage that shares nothing with this one.
+//
+// The optional counts are pointers, so a plain assignment hands out a value
+// whose fields can be rewritten through the original. A snapshot that changes
+// after it was taken is not a snapshot.
+func (u Usage) Clone() Usage {
+	cloned := u
+	if u.CacheReadTokens != nil {
+		v := *u.CacheReadTokens
+		cloned.CacheReadTokens = &v
+	}
+	if u.ReasoningTokens != nil {
+		v := *u.ReasoningTokens
+		cloned.ReasoningTokens = &v
+	}
+	return cloned
+}
+
+// CloneUsages deep-copies a slice of usage values.
+func CloneUsages(in []Usage) []Usage {
+	if in == nil {
+		return nil
+	}
+	out := make([]Usage, len(in))
+	for i, u := range in {
+		out[i] = u.Clone()
+	}
+	return out
+}
+
 // Total is every token the call reported using.
 //
 // Cache reads are included. InputTokens is the UNCACHED remainder of the
@@ -197,6 +227,30 @@ func (u Usage) Total() int {
 type UsageReporter interface {
 	Consumed() []Usage
 }
+
+// WithUsage attaches what a call consumed to the error describing its failure,
+// without changing what that error IS.
+//
+// The cause keeps wrapping, so errors.Is still recognises an overflow as an
+// overflow. Attaching usage only to one concrete error type meant every other
+// failure — including the overflow this runtime recovers from — arrived with
+// nothing to record, and a recovery that shortens and retries would then bill
+// twice while reporting once.
+func WithUsage(cause error, used ...Usage) error {
+	if cause == nil || len(used) == 0 {
+		return cause
+	}
+	return &usageError{cause: cause, used: used}
+}
+
+type usageError struct {
+	cause error
+	used  []Usage
+}
+
+func (e *usageError) Error() string     { return e.cause.Error() }
+func (e *usageError) Unwrap() error     { return e.cause }
+func (e *usageError) Consumed() []Usage { return e.used }
 
 // ErrContextOverflow reports that a request was refused for exceeding the
 // model's context, rather than for any transient reason.

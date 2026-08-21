@@ -57,6 +57,11 @@ type Config struct {
 	// is the field this provider reads.
 	MaxOutputTokens int
 
+	// ClassifyBody refines a status-derived failure using the response body.
+	// Optional, and nil for this provider: DeepSeek reports an exhausted
+	// balance as its own status, so nothing needs to read a body to find it.
+	ClassifyBody BodyClassifier
+
 	// Retry bounds retries of one request. The zero value is one request and no
 	// retry, which is what ships.
 	Retry RetryPolicy
@@ -260,6 +265,11 @@ func failureFrom(resp *http.Response, key string) error {
 
 // failureFromBytes classifies a failure from bytes already read.
 func failureFromBytes(status int, raw []byte, key string) error {
+	return failureWith(classifyStatus(status), status, raw, key)
+}
+
+// failureWith builds a failure whose classification was already decided.
+func failureWith(failure Failure, status int, raw []byte, key string) error {
 	var body struct {
 		Error struct {
 			Message string `json:"message"`
@@ -278,7 +288,7 @@ func failureFromBytes(status int, raw []byte, key string) error {
 		detail = fmt.Sprintf("unparsed body, %d bytes", len(raw))
 	}
 	return &Error{
-		Failure: classifyStatus(status),
+		Failure: failure,
 		Status:  status,
 		Detail:  scrub(detail, key),
 	}
@@ -330,8 +340,7 @@ func (p *Port) resolve(ctx context.Context) (Credential, error) {
 // attempt, and a ledger holding only the last one undercounts exactly the spend
 // the retry created. A total is derived from these, never accumulated into.
 type Attempt struct {
-	Status int
-	Usage  ai.Usage
+	Usage ai.Usage
 }
 
 // send performs the request, retrying within the configured budget.
@@ -365,7 +374,16 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			return resp, attempts, nil
 		}
 
+		// The body is read once, here, and used for both the classification and
+		// the message: reading it twice would need it buffered anyway, and the
+		// classification has to happen BEFORE the retry decision.
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		failure := classifyStatus(resp.StatusCode)
+		if p.cfg.ClassifyBody != nil {
+			if refined := p.cfg.ClassifyBody(resp.StatusCode, raw); refined != "" {
+				failure = refined
+			}
+		}
 		decision, capErr := decideRetry(resp, failure, attempt, p.cfg.Retry)
 		if capErr != nil {
 			resp.Body.Close()
@@ -374,21 +392,18 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		if !decision.retry {
 			defer resp.Body.Close()
 			// The attempt that failed last read the request too, so it joins
-			// the earlier ones. The body is read once: usage first, then the
-			// message, from the bytes already in hand.
-			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-			final := append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBytes(raw)})
+			// the earlier ones.
+			final := append(attempts, Attempt{Usage: usageFromBytes(raw)})
 			// The attempts behind this failure travel with it. Returning them
 			// alongside an error nobody reads them from is how a call that
 			// failed after several billed attempts ledgers nothing at all.
 			return nil, final, withAttempts(
-				failureFromBytes(resp.StatusCode, raw, p.credentialForScrubbing(ctx)), final)
+				failureWith(failure, resp.StatusCode, raw, p.credentialForScrubbing(ctx)), final)
 		}
 		// What a failed attempt reported using, if it said. A rate-limit body
 		// rarely carries usage, but an attempt that did read the request and
 		// then failed must not be recorded as free.
-		retriedRaw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		attempts = append(attempts, Attempt{Status: resp.StatusCode, Usage: usageFromBytes(retriedRaw)})
+		attempts = append(attempts, Attempt{Usage: usageFromBytes(raw)})
 		resp.Body.Close()
 		if waitErr := wait(ctx, decision.after); waitErr != nil {
 			return nil, attempts, waitErr

@@ -637,3 +637,76 @@ func TestAttemptsSurviveACallThatNeverSucceeds(t *testing.T) {
 			total.InputTokens)
 	}
 }
+
+// TestCollectedOverflowStillReportsWhatItUsed: an overflow the runtime recovers
+// from was still read and still billed. Recovering with an empty count means
+// paying for the refused attempt and reporting nothing for it.
+func TestCollectedOverflowStillReportsWhatItUsed(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(`{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1100001,"completion_tokens":1}}`),
+		sseReply(`{"choices":[{"delta":{"content":"shorter"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}`),
+	}}
+	streaming, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32, ContextWindow: 1_100_000,
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model:     generateOnly{inner: streaming},
+		ModelName: "deepseek-v4-flash", Tools: registry, Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	_ = agent.Run(context.Background(), "hello")
+
+	if got := sess.OverflowUsage(); got.InputTokens != 1100001 {
+		t.Fatalf("the refused attempt reported %d input tokens, want 1100001: "+
+			"a recovery that records nothing bills for a call it does not account for",
+			got.InputTokens)
+	}
+}
+
+// TestSeveralProviderToolCallsKeepTheOrderTheModelAsked.
+//
+// Source order is not recoverable after the fact: once the calls start running,
+// the only order anything can observe is the order they happened to finish. A
+// provider that streams several calls at once must still leave history in the
+// order the model asked for them.
+func TestSeveralProviderToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
+	transport := &scriptedTransport{replies: []string{
+		sseReply(
+			// Interleaved on the wire, and the second call's identity arrives
+			// before the first one's arguments finish.
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"first","type":"function","function":{"name":"list_files","arguments":"{\"pre"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"second","type":"function","function":{"name":"file_read","arguments":"{\"pa"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"fix\":\"\"}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"th\":\"README.md\"}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		),
+		sseReply(`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`),
+	}}
+	_, sess := runWithProvider(t, transport)
+
+	var asked []string
+	var answered []string
+	for _, m := range sess.Truth() {
+		for _, c := range m.ToolCalls {
+			asked = append(asked, c.ID)
+		}
+		if m.Role == ai.RoleTool {
+			answered = append(answered, m.ToolCallID)
+		}
+	}
+	want := []string{"first", "second"}
+	if len(asked) != 2 || asked[0] != want[0] || asked[1] != want[1] {
+		t.Fatalf("history records the calls as %v, want %v", asked, want)
+	}
+	if len(answered) != 2 || answered[0] != want[0] || answered[1] != want[1] {
+		t.Fatalf("results landed as %v, want source order %v", answered, want)
+	}
+}

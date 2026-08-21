@@ -93,6 +93,10 @@ func (m AssistantMessage) Clone() AssistantMessage {
 		cloned.Blocks = make([]Block, len(m.Blocks))
 		copy(cloned.Blocks, m.Blocks)
 	}
+	// Usage holds pointers for its optional counts, so copying the struct alone
+	// leaves the snapshot sharing them with the message it came from.
+	cloned.Usage = m.Usage.Clone()
+	cloned.EarlierAttempts = CloneUsages(m.EarlierAttempts)
 	return cloned
 }
 

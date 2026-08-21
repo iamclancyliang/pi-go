@@ -1087,3 +1087,50 @@ func TestABlockEndsBeforeTheNextBegins(t *testing.T) {
 		}
 	}
 }
+
+// TestExhaustionInsideARateLimitIsStillTerminal.
+//
+// DeepSeek reports an exhausted balance as its own status, so status alone
+// separates it from a throttle here. This control holds the rule that outlives
+// that convenience: classification happens BEFORE the retry decision, so a
+// provider that reports exhaustion inside a 429 is still not retried. Both
+// fixtures carry the same status; only the typed cause differs.
+func TestExhaustionInsideARateLimitIsStillTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		classify func(status int, body []byte) deepseek.Failure
+		wantReqs int
+	}{
+		{
+			name:     "an ordinary throttle is retried",
+			body:     `{"error":{"message":"You are sending requests too quickly","code":"rate_limit"}}`,
+			wantReqs: 2,
+		},
+		{
+			name:     "exhaustion carried in the same status is not",
+			body:     `{"error":{"message":"You have run out of balance","code":"insufficient_balance"}}`,
+			wantReqs: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &retryTransport{responses: []*http.Response{
+				status(429, tc.body),
+				sse(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`),
+			}}
+			p, err := deepseek.New(deepseek.Config{
+				Model: "m", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"},
+				MaxOutputTokens: 8,
+				Retry:           deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond},
+				ClassifyBody:    deepseek.ExhaustionInBody,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = p.Generate(context.Background(), ai.Request{Model: "m"})
+			if tr.requests != tc.wantReqs {
+				t.Fatalf("made %d requests, want %d", tr.requests, tc.wantReqs)
+			}
+		})
+	}
+}
