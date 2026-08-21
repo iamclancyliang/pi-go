@@ -3,6 +3,7 @@ package openai_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -787,5 +788,135 @@ func TestAContentIndexThatSkipsIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "renumber") {
 		t.Fatalf("the failure did not explain itself: %v", err)
+	}
+}
+
+// leakyResolver holds a secret in a field of its own, as a caller's resolver
+// might.
+type leakyResolver struct{ Secret string }
+
+func (l leakyResolver) Resolve(context.Context) (string, error) { return l.Secret, nil }
+
+// TestAConfigDoesNotPrintACallersSecret: a resolver is supplied from outside and
+// may carry a key. Formatting the config would then print it, whatever care the
+// port itself takes.
+func TestAConfigDoesNotPrintACallersSecret(t *testing.T) {
+	const secret = "sk-a-callers-secret-value"
+	cfg := openai.Config{
+		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
+		Credentials: leakyResolver{Secret: secret},
+	}
+	for name, rendered := range map[string]string{
+		"%v":  fmt.Sprintf("%v", cfg),
+		"%+v": fmt.Sprintf("%+v", cfg),
+		"%#v": fmt.Sprintf("%#v", cfg),
+	} {
+		if strings.Contains(rendered, secret) {
+			t.Fatalf("formatting a config with %s printed the key: %s", name, rendered)
+		}
+	}
+}
+
+// TestAMissingCredentialIsATypedAbsence: a caller must be able to tell "nothing
+// configured" from "the provider rejected what we sent".
+func TestAMissingCredentialIsATypedAbsence(t *testing.T) {
+	p, err := openai.New(openai.Config{
+		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
+		Credentials: openai.CredentialFunc(func(context.Context) (string, error) {
+			return "", nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, genErr := p.Generate(context.Background(), ai.Request{
+		Model: "m", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	var classified *openai.Error
+	if !errors.As(genErr, &classified) {
+		t.Fatalf("a missing credential produced %v, which a caller cannot branch on", genErr)
+	}
+	if classified.Failure != openai.FailureAuth {
+		t.Fatalf("classified %s", classified.Failure)
+	}
+}
+
+// TestAResolverErrorDoesNotCarryItsKeyOut: a resolver that puts the key into its
+// own error would otherwise hand it to whatever logs the failure.
+func TestAResolverErrorDoesNotCarryItsKeyOut(t *testing.T) {
+	const secret = "sk-leaked-through-an-error"
+	p, err := openai.New(openai.Config{
+		Model: "m", Transport: &recordedTransport{}, MaxOutputTokens: 8,
+		Credentials: openai.CredentialFunc(func(context.Context) (string, error) {
+			return "", fmt.Errorf("vault refused for key %s", secret)
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, genErr := p.Generate(context.Background(), ai.Request{
+		Model: "m", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if genErr == nil {
+		t.Fatal("expected a failure")
+	}
+	if strings.Contains(genErr.Error(), secret) {
+		t.Fatalf("the key reached the error: %v", genErr)
+	}
+}
+
+// TestARedirectIsNotFollowed: a redirect is another request, and the default
+// client follows them. A call budgeted for one request would then quietly make
+// several — each billable, none counted.
+func TestARedirectIsNotFollowed(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{
+		{
+			StatusCode: 307,
+			Header:     http.Header{"Location": []string{"https://elsewhere.example/v1/responses"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"moved"}}`)),
+		},
+		recorded(
+			`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+			`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		),
+	}}
+
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a redirect was followed and the reply treated as an answer")
+	}
+	if tr.requests != 1 {
+		t.Fatalf("made %d requests for one call; a redirect must not add another", tr.requests)
+	}
+}
+
+// TestATerminalAtEndOfStreamIsStillRead: a final event needs no blank line
+// after it to be valid, so a reply that ends at EOF must not lose its status,
+// model and usage.
+func TestATerminalAtEndOfStreamIsStillRead(t *testing.T) {
+	// No trailing blank line after the terminal event.
+	body := "event: x\ndata: " +
+		`{"type":"response.created","response":{"id":"r","model":"gpt-eof","status":"in_progress"}}` +
+		"\n\nevent: x\ndata: " +
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-eof","status":"completed","usage":{"input_tokens":6,"output_tokens":1}}}`
+	tr := &recordedTransport{responses: []*http.Response{{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}}}
+
+	resp, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Model != "gpt-eof" {
+		t.Fatalf("a terminal at end of stream was missed: model %q", resp.Model)
+	}
+	if resp.Usage.InputTokens != 6 {
+		t.Fatalf("usage from a terminal at EOF: %d", resp.Usage.InputTokens)
 	}
 }

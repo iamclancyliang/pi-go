@@ -12,11 +12,10 @@ import (
 
 // Credentials supplies the key for a call.
 //
-// The port RECEIVES a resolved credential rather than resolving one. Ownership
-// of that decision — a stored value winning over the environment, a blank value
-// counting as unset, absence being a typed failure — belongs in one place for
-// every provider, not re-implemented per provider with its own subtly different
-// order.
+// The port asks; it does not decide. Which source wins — a stored value over an
+// environment variable, a blank value counting as unset — is owned by whatever
+// is injected here, so that ordering lives in one place instead of being
+// re-implemented per provider with its own subtly different rules.
 type Credentials interface {
 	Resolve(ctx context.Context) (string, error)
 }
@@ -59,6 +58,18 @@ type Port struct {
 	cfg Config
 }
 
+// String and GoString keep a Config out of anything that formats it.
+//
+// A resolver is supplied by a caller and may hold a secret in a field of its
+// own; formatting the Config would then print it. Describing the Config instead
+// of ranging over it keeps that impossible here whatever the caller injected.
+func (c Config) String() string {
+	return "openai.Config{Model:" + c.Model + ", BaseURL:" + c.BaseURL + "}"
+}
+
+// GoString matches String, so %#v cannot reach further than %v.
+func (c Config) GoString() string { return c.String() }
+
 // String and GoString keep configuration out of anything that formats a port.
 func (p *Port) String() string {
 	return "openai.Port{Model:" + p.cfg.Model + ", BaseURL:" + p.cfg.BaseURL + "}"
@@ -87,10 +98,17 @@ func New(cfg Config) (*Port, error) {
 func (p *Port) resolve(ctx context.Context) (string, error) {
 	key, err := p.cfg.Credentials.Resolve(ctx)
 	if err != nil {
-		return "", err
+		// Not passed through as it arrived: a resolver that put the key into
+		// its own error would hand it to whatever logs this.
+		return "", &Error{Failure: FailureAuth, Detail: scrub(err.Error(), "")}
 	}
 	if key == "" {
-		return "", fmt.Errorf("openai: the credential source returned nothing")
+		// Absence is a typed failure, not prose, so a caller can tell "nothing
+		// configured" from "the provider rejected what we sent".
+		return "", &Error{
+			Failure: FailureAuth,
+			Detail:  "no credential was supplied for this provider",
+		}
 	}
 	return key, nil
 }

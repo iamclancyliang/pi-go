@@ -136,7 +136,7 @@ func classifyBody(status int, raw []byte) (Failure, bool) {
 		return FailureQuota, true
 	case "invalid_api_key", "invalid_organization":
 		return FailureAuth, true
-	case "context_length_exceeded", "string_above_max_length":
+	case "context_length_exceeded":
 		// Not a Failure: the runtime recovers from this by shortening, so it
 		// leaves this package as the shared sentinel rather than as a refusal.
 		return "", false

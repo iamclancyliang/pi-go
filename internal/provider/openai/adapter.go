@@ -112,7 +112,14 @@ func textBlock(text string) *schema.ContentBlock {
 // reachable from nowhere else, so nothing inside the SDK can attach one
 // attempt's terminal to another request.
 func (p *Port) httpClient(held *capture, key string) *http.Client {
-	return &http.Client{Transport: &captureTransport{
-		inner: p.cfg.Transport, capture: held, key: key,
-	}}
+	return &http.Client{
+		Transport: &captureTransport{inner: p.cfg.Transport, capture: held, key: key},
+		// A redirect is another request. The default client follows them, so a
+		// call that was budgeted for one request could quietly make several —
+		// each billable, none counted. Declining leaves the response as it
+		// arrived, so the redirect is reported rather than obeyed.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }

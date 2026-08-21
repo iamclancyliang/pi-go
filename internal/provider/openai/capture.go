@@ -236,7 +236,34 @@ func (t *teeBody) Read(p []byte) (int, error) {
 		t.pending = append(t.pending, p[:n]...)
 		t.scan()
 	}
+	if err != nil && !t.done {
+		// The stream ended. A final event needs no blank line after it to be
+		// valid, so whatever is still buffered is parsed now — otherwise the
+		// terminal of a reply that ended at EOF is lost, and its status, model
+		// and usage all become unknown.
+		t.flush()
+	}
 	return n, err
+}
+
+// flush parses whatever remains once no more bytes are coming.
+//
+// The last line of a stream has no newline after it, so scanning alone leaves
+// it in the buffer. At EOF there is nothing further to wait for, and a terminal
+// sitting in that final line would otherwise be lost.
+func (t *teeBody) flush() {
+	t.scan()
+	if trailing := bytes.TrimSpace(t.pending); len(trailing) > 0 {
+		t.pending = nil
+		if chunk, ok := bytes.CutPrefix(trailing, []byte("data:")); ok {
+			t.event = append(t.event, bytes.TrimSpace(chunk)...)
+		}
+	}
+	if len(t.event) > 0 {
+		payload := t.event
+		t.event = nil
+		t.handle(payload)
+	}
 }
 
 func (t *teeBody) Close() error { return t.inner.Close() }
