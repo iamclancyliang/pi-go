@@ -5,6 +5,8 @@ go 1.25
 require (
 	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/components/model/agenticopenai v0.2.2
+	github.com/cloudwego/eino-ext/components/model/agenticqwen v0.1.0
+	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
 )
 
 require (
