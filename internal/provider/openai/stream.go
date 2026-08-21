@@ -74,7 +74,8 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	held *capture, out chan<- ai.StreamEvent) {
 
 	acc := ai.NewAccumulator(p.cfg.Model)
-	blocks := map[int]int{} // provider index -> block index
+	blocks := map[int]int{}         // provider index -> block index
+	kinds := map[int]ai.BlockKind{} // block index -> kind, while it is open
 	next := 0
 
 	send := func(events ...ai.StreamEvent) bool {
@@ -131,9 +132,29 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 			}
 			at, known := blocks[providerIndex(block)]
 			if !known {
+				// A block ends before the next begins, so a consumer rendering
+				// as it goes is never told a block is still growing when it is
+				// not. Tool-call blocks are the exception: a provider may
+				// interleave their fragments, and closing one when another
+				// appears would leave its remaining arguments nowhere to land.
+				for open, openKind := range kinds {
+					if openKind == ai.BlockToolCall {
+						continue
+					}
+					closed, err := acc.Close(open)
+					if err != nil {
+						fail(err)
+						return
+					}
+					delete(kinds, open)
+					if !send(closed) {
+						return
+					}
+				}
 				at = next
 				next++
 				blocks[providerIndex(block)] = at
+				kinds[at] = kind
 			}
 			events, err := acc.Push(ai.Chunk{Index: at, Kind: kind, Delta: text, Call: call})
 			if err != nil {
@@ -147,8 +168,8 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	}
 
 	// Everything still open closes before the reply ends.
-	open := make([]int, 0, len(blocks))
-	for _, at := range blocks {
+	open := make([]int, 0, len(kinds))
+	for at := range kinds {
 		open = append(open, at)
 	}
 	sort.Ints(open)

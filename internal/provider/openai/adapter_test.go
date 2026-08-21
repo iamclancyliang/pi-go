@@ -2,6 +2,7 @@ package openai_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -291,5 +292,90 @@ func TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich(t *testing.T) {
 	}
 	if resp.Model == "gpt-asked-for" {
 		t.Fatal("the requested model was reported as the one that served the reply")
+	}
+}
+
+// TestAFailedReplyStillReportsWhatItRead: a reply the provider abandoned had
+// its request read, and a ledger that dropped those counts would be optimistic
+// about exactly the calls that went wrong.
+func TestAFailedReplyStillReportsWhatItRead(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"partial"}`,
+		`{"type":"response.failed","response":{"id":"r","model":"gpt-served","status":"failed","usage":{"input_tokens":42,"output_tokens":3}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a failed reply was returned as an answer")
+	}
+	var reporter ai.UsageReporter
+	if !errors.As(err, &reporter) {
+		t.Fatalf("the failure carries no usage: %v", err)
+	}
+	var input int
+	for _, u := range reporter.Consumed() {
+		input += u.InputTokens
+	}
+	if input != 42 {
+		t.Fatalf("a failed call reported %d input tokens, want 42", input)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("sent %d requests", tr.requests)
+	}
+}
+
+// TestBlocksArriveInOrderAndTheStreamEndsOnce: a consumer rendering as it goes
+// needs each block finished before the next begins, and exactly one ending.
+func TestBlocksArriveInOrderAndTheStreamEndsOnce(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs","type":"reasoning","summary":[]}}`,
+		`{"type":"response.reasoning_summary_part.added","item_id":"rs","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs","output_index":0,"summary_index":0,"delta":"thinking"}`,
+		`{"type":"response.reasoning_summary_text.done","item_id":"rs","output_index":0,"summary_index":0,"text":"thinking"}`,
+		`{"type":"response.reasoning_summary_part.done","item_id":"rs","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"thinking"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs","type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":1,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":1,"content_index":0,"delta":"answer"}`,
+		`{"type":"response.output_text.done","item_id":"m","output_index":1,"content_index":0,"text":"answer"}`,
+		`{"type":"response.content_part.done","item_id":"m","output_index":1,"content_index":0,"part":{"type":"output_text","text":"answer"}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"answer"}]}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":4,"output_tokens":2}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	stream, err := p.Stream(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	open := map[int]bool{}
+	terminals := 0
+	for ev := range stream {
+		switch ev.Kind {
+		case ai.StreamTextStart, ai.StreamThinkingStart, ai.StreamToolCallStart:
+			for at, still := range open {
+				if still {
+					t.Fatalf("block %d began while block %d was still open", ev.ContentIndex, at)
+				}
+			}
+			open[ev.ContentIndex] = true
+		case ai.StreamTextEnd, ai.StreamThinkingEnd, ai.StreamToolCallEnd:
+			open[ev.ContentIndex] = false
+		case ai.StreamDone, ai.StreamError:
+			terminals++
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("the stream produced %d terminal events, want exactly 1", terminals)
 	}
 }
