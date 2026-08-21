@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	agenticopenai "github.com/cloudwego/eino-ext/components/model/agenticopenai"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -37,10 +38,15 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	// This call's own record, held by the client it is about to use.
 	held := &capture{}
 	noRetries := 0
-	model, err := agenticopenai.NewResponsesModel(ctx, &agenticopenai.ResponsesConfig{
+	outputCap := p.cfg.MaxOutputTokens
+	chat, err := agenticopenai.NewResponsesModel(ctx, &agenticopenai.ResponsesConfig{
 		APIKey:  key,
 		BaseURL: p.cfg.BaseURL,
 		Model:   req.Model,
+		// The cap has to reach the request. Requiring it at construction says
+		// nothing about what was sent, and a reply with no cap is a bill nobody
+		// chose.
+		MaxTokens: &outputCap,
 		// The adapter's own retry is switched off. Retrying inside the SDK
 		// would send billable requests this repository never counted and could
 		// not classify.
@@ -51,7 +57,14 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		return nil, fmt.Errorf("openai: building the model: %w", err)
 	}
 
-	reader, err := model.Stream(ctx, messages)
+	// Tools travel with the call. A request that omits them leaves the model
+	// unable to ask for anything, which looks like a model that chose not to.
+	var opts []einomodel.Option
+	if specs := toolSpecs(req.Tools); len(specs) > 0 {
+		opts = append(opts, einomodel.WithTools(specs))
+	}
+
+	reader, err := chat.Stream(ctx, messages, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("openai: starting the stream: %w", err)
 	}
@@ -73,7 +86,10 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.AgenticMessage],
 	held *capture, out chan<- ai.StreamEvent) {
 
-	acc := ai.NewAccumulator(p.cfg.Model)
+	// Seeded empty: the model that served a reply comes from the reply. Seeding
+	// it with the configured name would report a model nobody confirmed, and a
+	// substitution would be invisible.
+	acc := ai.NewAccumulator("")
 	blocks := map[int]int{}         // provider index -> block index
 	kinds := map[int]ai.BlockKind{} // block index -> kind, while it is open
 	next := 0
@@ -160,7 +176,10 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 				// interleave their fragments, and closing one when another
 				// appears would leave its remaining arguments nowhere to land.
 				for open, openKind := range kinds {
-					if openKind == ai.BlockToolCall {
+					// Tool-call blocks stay open only for each other: a
+					// provider may interleave their fragments. Any other kind
+					// beginning means every open block has finished.
+					if openKind == ai.BlockToolCall && kind == ai.BlockToolCall {
 						continue
 					}
 					closed, err := acc.Close(open)
@@ -202,6 +221,20 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 			return
 		}
 		if !send(closed) {
+			return
+		}
+	}
+
+	// The provider's own ordering is checked against what it announced, not
+	// against what arrived: the adapter renumbers blocks contiguously from zero
+	// whatever the provider sent, so a gap is invisible after conversion.
+	// Accepting a renumbered stream would report an order the provider never
+	// sent.
+	for at, announced := range held.announcedIndices() {
+		if announced != at {
+			fail(fmt.Errorf(
+				"openai: the provider announced item index %d where %d was expected; "+
+					"refusing to renumber a stream that skips", announced, at))
 			return
 		}
 	}
@@ -263,4 +296,19 @@ func describe(block *schema.ContentBlock) (ai.BlockKind, string, ai.ToolCall, bo
 	default:
 		return "", "", ai.ToolCall{}, false
 	}
+}
+
+// known reports whether a provider index already has a block.
+func known(blocks map[int]int, index int) bool {
+	_, ok := blocks[index]
+	return ok
+}
+
+// toolSpecs converts this repository's tool descriptions for the adapter.
+func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
+	out := make([]*schema.ToolInfo, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, &schema.ToolInfo{Name: spec.Name, Desc: spec.Description})
+	}
+	return out
 }

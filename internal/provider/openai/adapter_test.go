@@ -16,11 +16,13 @@ import (
 type recordedTransport struct {
 	requests  int
 	responses []*http.Response
+	sent      []string
 }
 
 func (r *recordedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
-		_, _ = io.Copy(io.Discard, req.Body)
+		body, _ := io.ReadAll(req.Body)
+		r.sent = append(r.sent, string(body))
 	}
 	r.requests++
 	if r.requests > len(r.responses) {
@@ -290,8 +292,12 @@ func TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if resp.Model == "gpt-asked-for" {
-		t.Fatal("the requested model was reported as the one that served the reply")
+	// Empty, not "some other name": the only honest answer when the provider
+	// did not say is that it did not say. Asserting merely that it differs from
+	// the requested model would pass while the CONFIGURED model was reported —
+	// which is just as much a name nobody confirmed.
+	if resp.Model != "" {
+		t.Fatalf("the reply named no model, but %q was reported as having served it", resp.Model)
 	}
 }
 
@@ -422,5 +428,98 @@ func TestACancelledStreamStillEnds(t *testing.T) {
 	}
 	if final.StopReason != ai.StopAborted {
 		t.Fatalf("terminal reason %v, want %v", final.StopReason, ai.StopAborted)
+	}
+}
+
+// TestTheRequestActuallyCarriesTheCapAndTheTools.
+//
+// Requiring an output cap at construction says nothing about what was sent, and
+// a reply with no cap is a bill nobody chose. Tools omitted from the request
+// leave the model unable to ask for anything, which is indistinguishable from a
+// model that chose not to. Both are asserted on the bytes that went out.
+func TestTheRequestActuallyCarriesTheCapAndTheTools(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	if _, err := p.Generate(context.Background(), ai.Request{
+		Model:    "gpt-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		Tools:    []ai.ToolSpec{{Name: "list_files", Description: "list the files"}},
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(tr.sent) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	body := tr.sent[0]
+	for _, want := range []string{`"max_output_tokens":64`, `"list_files"`, `"list the files"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the request body is missing %s\n%s", want, body)
+		}
+	}
+}
+
+// TestABlockIndexThatSkipsIsRefused: renumbering a stream to look contiguous
+// hides a malformed one instead of reporting it, and the reply would then claim
+// an order the provider never sent.
+func TestABlockIndexThatSkipsIsRefused(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		// The provider's first item is at index 3, with nothing before it.
+		`{"type":"response.output_item.added","output_index":3,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":3,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":3,"content_index":0,"delta":"x"}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a stream whose first block was index 3 was renumbered and accepted")
+	}
+	if !strings.Contains(err.Error(), "renumber") {
+		t.Fatalf("the failure did not explain itself: %v", err)
+	}
+}
+
+// TestTextDoesNotBeginWhileAToolCallIsOpen: tool-call blocks stay open only for
+// each other, since a provider may interleave their fragments. Any other kind
+// beginning means the earlier blocks are finished.
+func TestTextDoesNotBeginWhileAToolCallIsOpen(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"fc","type":"function_call","call_id":"c1","name":"list_files","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc","output_index":0,"delta":"{}"}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":1,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":1,"content_index":0,"delta":"after"}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	stream, err := p.Stream(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := map[int]bool{}
+	for ev := range stream {
+		switch ev.Kind {
+		case ai.StreamTextStart, ai.StreamThinkingStart, ai.StreamToolCallStart:
+			for at, still := range open {
+				if still {
+					t.Fatalf("block %d began while block %d was still open", ev.ContentIndex, at)
+				}
+			}
+			open[ev.ContentIndex] = true
+		case ai.StreamTextEnd, ai.StreamThinkingEnd, ai.StreamToolCallEnd:
+			open[ev.ContentIndex] = false
+		}
 	}
 }

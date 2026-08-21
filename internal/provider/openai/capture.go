@@ -52,6 +52,13 @@ type capture struct {
 	mu       sync.Mutex
 	requests int
 	attempts []terminal
+
+	// itemIndices is every output index the provider announced, in order.
+	//
+	// Recorded here because the adapter renumbers: by the time blocks reach
+	// this repository they are contiguous from zero whatever the provider sent,
+	// so a gap can only be seen in the provider's own bytes.
+	itemIndices []int
 }
 
 func (c *capture) startAttempt() {
@@ -63,6 +70,20 @@ func (c *capture) startAttempt() {
 
 // observe records what an attempt reported. The attempt is identified by
 // position in this call's own list, not by matching content.
+// observeItem records an index the provider announced.
+func (c *capture) observeItem(index int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.itemIndices = append(c.itemIndices, index)
+}
+
+// announcedIndices is what the provider said, in the order it said it.
+func (c *capture) announcedIndices() []int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]int(nil), c.itemIndices...)
+}
+
 func (c *capture) observe(t terminal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -121,7 +142,11 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// the stream the caller is about to read, and buffering it whole would turn
 	// a stream into a wait.
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-		resp.Body = &teeBody{inner: resp.Body, onTerminal: t.capture.observe}
+		resp.Body = &teeBody{
+			inner:      resp.Body,
+			onTerminal: t.capture.observe,
+			onItem:     t.capture.observeItem,
+		}
 		return resp, nil
 	}
 
@@ -141,6 +166,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 type teeBody struct {
 	inner      io.ReadCloser
 	onTerminal func(terminal)
+	onItem     func(int)
 	pending    []byte
 	done       bool
 }
@@ -171,7 +197,11 @@ func (t *teeBody) scan() {
 		if !ok {
 			continue
 		}
-		if found, ok := terminalFromEvent(bytes.TrimSpace(payload)); ok {
+		payload = bytes.TrimSpace(payload)
+		if index, ok := itemIndexFromEvent(payload); ok && t.onItem != nil {
+			t.onItem(index)
+		}
+		if found, ok := terminalFromEvent(payload); ok {
 			t.done = true
 			t.onTerminal(found)
 			return
@@ -244,4 +274,20 @@ func terminalFromResponse(raw []byte) (terminal, bool) {
 		return terminal{}, false
 	}
 	return body.toTerminal(), true
+}
+
+// itemIndexFromEvent reads the output index the provider announced for a new
+// item, which is where its own ordering is visible.
+func itemIndexFromEvent(payload []byte) (int, bool) {
+	var event struct {
+		Type        string `json:"type"`
+		OutputIndex *int   `json:"output_index"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || event.OutputIndex == nil {
+		return 0, false
+	}
+	if event.Type != "response.output_item.added" {
+		return 0, false
+	}
+	return *event.OutputIndex, true
 }
