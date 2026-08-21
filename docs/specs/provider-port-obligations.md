@@ -82,6 +82,7 @@ be replaced.
 | A block ends before the next begins | `TestABlockEndsBeforeTheNextBegins` |
 | A block the provider announced without a position fails before its content reaches a consumer, and still fails when it carries none | `TestAnAnnouncementWithNoIdentityFailsBeforeItsContent`, `TestAnAnnouncementWithNoIdentityAndNoContentStillFails`, `TestAWellFormedStreamStillPasses` |
 | A cancelled stream still delivers exactly one terminal, carrying what had arrived | `TestACancelledStreamStillEnds` |
+| Streaming and collecting agree on content, reasoning, calls, served model and usage presence | `TestStreamingAndCollectingAgree` |
 | A call stopped mid-reply ends aborted rather than failed, whether the context or the error chain says so | `TestAStreamStoppedMidReplyEndsAborted` |
 | Overflow is inferred from counts, only against a measured window, and never invented without one | `TestCountBasedOverflowDetection`, `TestConfigurationRefusesAWindowItWouldMisuse` |
 

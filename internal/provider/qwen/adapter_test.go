@@ -874,3 +874,182 @@ func TestACancellationInsideATransportErrorStaysCancellation(t *testing.T) {
 		})
 	}
 }
+
+// TestStreamingAndCollectingAgree: two ways of asking cannot become two
+// answers. The collected path is the streamed one drained, and a difference
+// between them would mean one of the two has its own conversion.
+func TestStreamingAndCollectingAgree(t *testing.T) {
+	chunks := []string{
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking"}}]}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"the "}}]}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"alpha","arguments":"{}"}}]}}]}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4}}}`,
+	}
+
+	collected, err := ask(t, newPort(t, &recordedTransport{
+		responses: []*http.Response{streamed(chunks...)}}))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	events, err := newPort(t, &recordedTransport{
+		responses: []*http.Response{streamed(chunks...)}}).Stream(context.Background(), ai.Request{
+		Model: "qwen-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var final *ai.AssistantMessage
+	terminals := 0
+	for ev := range events {
+		if ev.Terminal() {
+			terminals++
+			final = ev.Final
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("the stream delivered %d terminal events, want exactly 1", terminals)
+	}
+
+	var text, reasoning strings.Builder
+	var calls []ai.ToolCall
+	for _, b := range final.Blocks {
+		switch b.Kind {
+		case ai.BlockText:
+			text.WriteString(b.Text)
+		case ai.BlockThinking:
+			reasoning.WriteString(b.Text)
+		case ai.BlockToolCall:
+			calls = append(calls, b.Call)
+		}
+	}
+	if text.String() != collected.Content {
+		t.Fatalf("streamed content %q, collected %q", text.String(), collected.Content)
+	}
+	if reasoning.String() != collected.Reasoning {
+		t.Fatalf("streamed reasoning %q, collected %q", reasoning.String(), collected.Reasoning)
+	}
+	if len(calls) != len(collected.ToolCalls) {
+		t.Fatalf("streamed %d calls, collected %d", len(calls), len(collected.ToolCalls))
+	}
+	if final.Model != collected.Model {
+		t.Fatalf("streamed model %q, collected %q", final.Model, collected.Model)
+	}
+	if final.Usage.Total() != collected.Usage.Total() {
+		t.Fatalf("streamed total %d, collected %d", final.Usage.Total(), collected.Usage.Total())
+	}
+	// A reported zero and an absent count must agree too, not just the total.
+	if final.Usage.Reported != collected.Usage.Reported {
+		t.Fatal("the two paths disagree about whether usage was reported at all")
+	}
+}
+
+// TestABodyReadFailureDoesNotCarryTheCallsKey: a read that fails partway can
+// name the request it was reading. Left to the shape pass alone, a key that
+// does not look like one survives into the report.
+func TestABodyReadFailureDoesNotCarryTheCallsKey(t *testing.T) {
+	const secret = "7c1e-not-shaped-like-a-key"
+	p, err := qwen.New(qwen.Config{
+		Model: "qwen-test", MaxOutputTokens: 8,
+		Credential: ai.StoredCredential(secret, "a test"),
+		Transport: &recordedTransport{responses: []*http.Response{{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: &haltingBody{
+				prefix: strings.NewReader("data: " +
+					`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"partial"}}]}` +
+					"\n\n"),
+				err: fmt.Errorf("proxy dropped the connection for Authorization=%s", secret),
+			},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, genErr := p.Generate(context.Background(), ai.Request{
+		Model: "qwen-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if genErr == nil {
+		t.Fatal("expected a failure")
+	}
+	if strings.Contains(genErr.Error(), secret) {
+		t.Fatalf("the key this call used reached the failure: %v", genErr)
+	}
+}
+
+// openBody delivers what it was given and then waits, ending only when the
+// caller's context does — which is what a real transport does to a body when
+// the request it belongs to is cancelled. A fixture that ignored the context
+// would hang instead of proving anything.
+type openBody struct {
+	prefix *strings.Reader
+	ctx    context.Context
+}
+
+func (b *openBody) Read(p []byte) (int, error) {
+	if b.prefix.Len() > 0 {
+		return b.prefix.Read(p)
+	}
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (b *openBody) Close() error { return nil }
+
+// TestACancelledStreamStillEnds: a consumer that watched a reply appear should
+// not have it vanish because they stopped it, and a channel that simply closes
+// says nothing about what they have.
+func TestACancelledStreamStillEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancelled below once content has arrived; this releases the body if it
+	// never does, so a fixture that stops sending fails the test rather than
+	// hanging it.
+	defer cancel()
+	tr := &recordedTransport{responses: []*http.Response{{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: &openBody{
+			prefix: strings.NewReader("data: " +
+				`{"id":"c1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"already said"}}]}` +
+				"\n\n"),
+			ctx: ctx,
+		},
+	}}}
+	events, err := newPort(t, tr).Stream(ctx, ai.Request{
+		Model: "qwen-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var final *ai.AssistantMessage
+	terminals := 0
+	for ev := range events {
+		if ev.Kind == ai.StreamTextDelta {
+			// Cancelled only once something has arrived, so the terminal has
+			// something to carry.
+			cancel()
+		}
+		if ev.Terminal() {
+			terminals++
+			final = ev.Final
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("a cancelled stream delivered %d terminal events, want exactly 1", terminals)
+	}
+	if final.StopReason != ai.StopAborted {
+		t.Fatalf("a cancelled stream ended as %q", final.StopReason)
+	}
+	if !errors.Is(final.Cause, context.Canceled) {
+		t.Fatalf("the cause was lost: %v", final.Cause)
+	}
+	var shown strings.Builder
+	for _, b := range final.Blocks {
+		shown.WriteString(b.Text)
+	}
+	if shown.String() != "already said" {
+		t.Fatalf("what had already arrived was lost: %q", shown.String())
+	}
+}
