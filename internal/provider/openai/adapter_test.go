@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
@@ -31,9 +32,7 @@ func (r *recordedTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return r.responses[r.requests-1], nil
 }
 
-type fixedEnv struct{}
-
-func (fixedEnv) Lookup(context.Context, string) (string, error) { return "test-key", nil }
+var fixedKey = openai.CredentialFunc(func(context.Context) (string, error) { return "test-key", nil })
 
 func recorded(events ...string) *http.Response {
 	var b strings.Builder
@@ -50,7 +49,7 @@ func recorded(events ...string) *http.Response {
 func newPort(t *testing.T, tr http.RoundTripper) *openai.Port {
 	t.Helper()
 	p, err := openai.New(openai.Config{
-		Model: "gpt-test", Transport: tr, Environment: fixedEnv{}, MaxOutputTokens: 64,
+		Model: "gpt-test", Transport: tr, Credentials: fixedKey, MaxOutputTokens: 64,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -110,7 +109,7 @@ func TestAReplyArrivesThroughTheAdapter(t *testing.T) {
 // cannot be built without an output cap.
 func TestThisPortRefusesAConfigurationItCannotHonour(t *testing.T) {
 	base := openai.Config{
-		Model: "m", Transport: &recordedTransport{}, Environment: fixedEnv{}, MaxOutputTokens: 8,
+		Model: "m", Transport: &recordedTransport{}, Credentials: fixedKey, MaxOutputTokens: 8,
 	}
 	for _, tc := range []struct {
 		name   string
@@ -118,7 +117,7 @@ func TestThisPortRefusesAConfigurationItCannotHonour(t *testing.T) {
 	}{
 		{"no model", func(c *openai.Config) { c.Model = "" }},
 		{"no transport", func(c *openai.Config) { c.Transport = nil }},
-		{"no environment", func(c *openai.Config) { c.Environment = nil }},
+		{"no credential source", func(c *openai.Config) { c.Credentials = nil }},
 		{"no output cap", func(c *openai.Config) { c.MaxOutputTokens = 0 }},
 		{"negative output cap", func(c *openai.Config) { c.MaxOutputTokens = -1 }},
 	} {
@@ -134,7 +133,7 @@ func TestThisPortRefusesAConfigurationItCannotHonour(t *testing.T) {
 
 // TestAnUnsupportedBlockIsReportedNotDropped.
 //
-// This tranche supports text, reasoning and function tool calls. A block of any
+// This package handles text, reasoning and function tool calls. A block of any
 // other kind is content the rest of this repository has no contract for, and
 // dropping it silently would hand back a reply that is missing something nobody
 // mentioned.
@@ -336,8 +335,11 @@ func TestAFailedReplyStillReportsWhatItRead(t *testing.T) {
 	}
 }
 
-// TestBlocksArriveInOrderAndTheStreamEndsOnce: a consumer rendering as it goes
-// needs each block finished before the next begins, and exactly one ending.
+// TestBlocksArriveInOrderAndTheStreamEndsOnce.
+//
+// A consumer rendering as it goes needs a block finished before another begins,
+// and exactly one ending. Tool-call blocks are the one exception and stay open
+// for each other, because a provider may interleave their fragments.
 func TestBlocksArriveInOrderAndTheStreamEndsOnce(t *testing.T) {
 	tr := &recordedTransport{responses: []*http.Response{recorded(
 		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
@@ -521,5 +523,200 @@ func TestTextDoesNotBeginWhileAToolCallIsOpen(t *testing.T) {
 		case ai.StreamTextEnd, ai.StreamThinkingEnd, ai.StreamToolCallEnd:
 			open[ev.ContentIndex] = false
 		}
+	}
+}
+
+func refusal(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// TestFailuresAreClassifiedByValue: nothing downstream reads an error's text, so
+// a provider that rewords a message cannot change what this repository does —
+// and for a billing failure that difference is money.
+func TestFailuresAreClassifiedByValue(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		want      openai.Failure
+		retryable bool
+	}{
+		{
+			name: "exhausted quota", status: 429,
+			body: `{"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"you are out"}}`,
+			want: openai.FailureQuota,
+		},
+		{
+			name: "ordinary throttle", status: 429,
+			body:      `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`,
+			want:      openai.FailureThrottled,
+			retryable: true,
+		},
+		{
+			// The code alone, with no matching type: the provider does not
+			// always send both, and reading only the type would let an
+			// exhausted balance through as something retryable.
+			name: "exhausted quota reported by code alone", status: 429,
+			body: `{"error":{"type":"rate_limit_error","code":"billing_hard_limit_reached","message":"limit"}}`,
+			want: openai.FailureQuota,
+		},
+		{
+			name: "rejected credential", status: 401,
+			body: `{"error":{"type":"invalid_request_error","code":"invalid_api_key","message":"bad key"}}`,
+			want: openai.FailureAuth,
+		},
+		{
+			name: "refused request", status: 400,
+			body: `{"error":{"type":"invalid_request_error","code":"unknown_parameter","message":"no"}}`,
+			want: openai.FailureRefused,
+		},
+		{
+			name: "server failure", status: 503,
+			body:      `{"error":{"type":"server_error","message":"busy"}}`,
+			want:      openai.FailureTransient,
+			retryable: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &recordedTransport{responses: []*http.Response{refusal(tc.status, tc.body)}}
+			_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+				Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			var classified *openai.Error
+			if !errors.As(err, &classified) {
+				t.Fatalf("failure %v is not classified", err)
+			}
+			if classified.Failure != tc.want {
+				t.Fatalf("classified %s, want %s", classified.Failure, tc.want)
+			}
+			if classified.Failure.Retryable() != tc.retryable {
+				t.Fatalf("retryable %v, want %v", classified.Failure.Retryable(), tc.retryable)
+			}
+		})
+	}
+}
+
+// TestQuotaAndThrottleShareAStatusAndDiffer: both are 429, and only one is worth
+// retrying. Reading the status alone cannot tell them apart.
+func TestQuotaAndThrottleShareAStatusAndDiffer(t *testing.T) {
+	quota := `{"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"gone"}}`
+	throttle := `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow"}}`
+
+	var got []openai.Failure
+	for _, body := range []string{quota, throttle} {
+		tr := &recordedTransport{responses: []*http.Response{refusal(429, body)}}
+		_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+			Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		})
+		var classified *openai.Error
+		if !errors.As(err, &classified) {
+			t.Fatalf("failure %v is not classified", err)
+		}
+		got = append(got, classified.Failure)
+	}
+	if got[0] == got[1] {
+		t.Fatalf("both 429s classified as %s; the status cannot be what separates them", got[0])
+	}
+	if got[0].Retryable() {
+		t.Fatal("an exhausted quota was marked retryable")
+	}
+	if !got[1].Retryable() {
+		t.Fatal("an ordinary throttle was marked terminal")
+	}
+}
+
+// TestATooLargeRequestReachesTheRecoveryPath: an overflow is the shared sentinel
+// the runtime shortens and retries on, not a provider-specific refusal.
+func TestATooLargeRequestReachesTheRecoveryPath(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refusal(400,
+		`{"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"too long"}}`)}}
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("a too-large request produced %v, so the shortening path never runs", err)
+	}
+}
+
+// TestATerminalSplitAcrossDataLinesIsStillRead: an event's data may arrive as
+// several `data:` lines meant to be joined. Parsing them separately drops the
+// terminal of any event large enough to be split.
+func TestATerminalSplitAcrossDataLinesIsStillRead(t *testing.T) {
+	body := "event: x\ndata: {\"type\":\"response.completed\",\"response\":\n" +
+		"data: {\"id\":\"r\",\"model\":\"gpt-split\",\"status\":\"completed\",\n" +
+		"data: \"usage\":{\"input_tokens\":8,\"output_tokens\":1}}}\n\n"
+	tr := &recordedTransport{responses: []*http.Response{{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}}}
+
+	resp, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Model != "gpt-split" {
+		t.Fatalf("a terminal split across data lines was missed: model %q", resp.Model)
+	}
+	if resp.Usage.InputTokens != 8 {
+		t.Fatalf("usage from a split terminal: %d input tokens", resp.Usage.InputTokens)
+	}
+}
+
+// blockingBody never returns data. A stream waiting on a provider that has gone
+// quiet is the case where cancellation has to be noticed while WAITING, not
+// only while handing an event to a consumer.
+type blockingBody struct{ ctx context.Context }
+
+// Read blocks until the request's context ends, as a real transport's body
+// does: net/http aborts an in-flight read when the request is cancelled.
+func (b *blockingBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+func (b *blockingBody) Close() error { return nil }
+
+// TestCancellingWhileWaitingForDataIsAnAbort: the caller stopped, so the reply
+// was cut short by them. Reporting it as a provider failure would invite a
+// retry of the request they just cancelled.
+func TestCancellingWhileWaitingForDataIsAnAbort(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tr := &recordedTransport{responses: []*http.Response{{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &blockingBody{ctx: ctx},
+	}}}
+	p := newPort(t, tr)
+	stream, err := p.Stream(ctx, ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	var final *ai.AssistantMessage
+	for ev := range stream {
+		if ev.Final != nil {
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		t.Fatal("a stream cancelled while waiting closed with no terminal")
+	}
+	if final.StopReason != ai.StopAborted {
+		t.Fatalf("terminal reason %v, want %v: the caller stopped, the provider did not fail",
+			final.StopReason, ai.StopAborted)
 	}
 }

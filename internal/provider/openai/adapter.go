@@ -11,7 +11,7 @@ import (
 
 // toAgentic converts this repository's messages into the adapter's.
 //
-// Only what this tranche supports: text, an assistant's reasoning, tool calls
+// Only what this package handles: text, an assistant's reasoning, tool calls
 // and tool results. Anything else would be a block the rest of this repository
 // has no contract for, and quietly dropping it would leave a caller believing
 // it was sent.
@@ -111,6 +111,8 @@ func textBlock(text string) *schema.ContentBlock {
 // One client per logical call, holding this call's capture. The record is
 // reachable from nowhere else, so nothing inside the SDK can attach one
 // attempt's terminal to another request.
-func (p *Port) httpClient(held *capture) *http.Client {
-	return &http.Client{Transport: &captureTransport{inner: p.cfg.Transport, capture: held}}
+func (p *Port) httpClient(held *capture, key string) *http.Client {
+	return &http.Client{Transport: &captureTransport{
+		inner: p.cfg.Transport, capture: held, key: key,
+	}}
 }

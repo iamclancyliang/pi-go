@@ -2,26 +2,30 @@ package openai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// Environment is where a credential is read from.
+// Credentials supplies the key for a call.
 //
-// Injected, with no fallback to the process environment: omitting it fails
-// rather than quietly reaching the real one.
-type Environment interface {
-	Lookup(ctx context.Context, name string) (string, error)
+// The port RECEIVES a resolved credential rather than resolving one. Ownership
+// of that decision — a stored value winning over the environment, a blank value
+// counting as unset, absence being a typed failure — belongs in one place for
+// every provider, not re-implemented per provider with its own subtly different
+// order.
+type Credentials interface {
+	Resolve(ctx context.Context) (string, error)
 }
 
-// EnvVars is the ordered list of variables a credential may come from.
-var EnvVars = []string{"OPENAI_API_KEY"}
+// CredentialFunc adapts a function to Credentials.
+type CredentialFunc func(ctx context.Context) (string, error)
 
-// ErrNoCredential reports that no credential was found.
-var ErrNoCredential = errors.New("openai: no credential")
+// Resolve implements Credentials.
+func (f CredentialFunc) Resolve(ctx context.Context) (string, error) { return f(ctx) }
 
 // DefaultBaseURL is the provider's documented endpoint.
 const DefaultBaseURL = "https://api.openai.com/v1"
@@ -38,8 +42,9 @@ type Config struct {
 	// cannot reach the network by omission.
 	Transport http.RoundTripper
 
-	// Environment supplies the credential. Required.
-	Environment Environment
+	// Credentials supplies the key. Required, and there is no default: a test
+	// cannot reach a real credential by omission.
+	Credentials Credentials
 
 	// MaxOutputTokens caps the reply. Required and positive: a cap that can be
 	// omitted is not a cap.
@@ -67,8 +72,8 @@ func New(cfg Config) (*Port, error) {
 		return nil, fmt.Errorf("openai: a model is required")
 	case cfg.Transport == nil:
 		return nil, fmt.Errorf("openai: a transport is required; there is no default")
-	case cfg.Environment == nil:
-		return nil, fmt.Errorf("openai: an environment is required; there is no default")
+	case cfg.Credentials == nil:
+		return nil, fmt.Errorf("openai: a credential source is required; there is no default")
 	case cfg.MaxOutputTokens <= 0:
 		return nil, fmt.Errorf("openai: MaxOutputTokens must be positive, got %d", cfg.MaxOutputTokens)
 	}
@@ -78,22 +83,29 @@ func New(cfg Config) (*Port, error) {
 	return &Port{cfg: cfg}, nil
 }
 
-// resolve produces the credential a request authenticates with.
+// resolve asks for the credential this request authenticates with.
 func (p *Port) resolve(ctx context.Context) (string, error) {
-	for _, name := range EnvVars {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		value, err := p.cfg.Environment.Lookup(ctx, name)
-		if err != nil {
-			return "", fmt.Errorf("openai: reading %s: %w", name, err)
-		}
-		if value != "" {
-			return value, nil
-		}
+	key, err := p.cfg.Credentials.Resolve(ctx)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("%w: %s is not set", ErrNoCredential, EnvVars[0])
+	if key == "" {
+		return "", fmt.Errorf("openai: the credential source returned nothing")
+	}
+	return key, nil
 }
+
+// scrub removes a credential from text about to become an error.
+func scrub(text, key string) string {
+	if key != "" {
+		text = strings.ReplaceAll(text, key, "<redacted>")
+	}
+	return credentialShape.ReplaceAllString(text, "<redacted>")
+}
+
+// credentialShape matches key formats and bearer headers, so a value that is
+// not the configured key still does not survive into a report.
+var credentialShape = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|bearer\s+\S+)`)
 
 // usageFrom turns a captured terminal into this repository's usage.
 //
@@ -144,13 +156,20 @@ func failureFromStatus(status string, incomplete string) (ai.StopReason, error) 
 		if incomplete == "max_output_tokens" {
 			return ai.StopLength, nil
 		}
-		return ai.StopError, fmt.Errorf("openai: reply incomplete: %s", incomplete)
+		if incomplete == "content_filter" {
+			return ai.StopError, &Error{Failure: FailureRefused,
+				Detail: "the provider's filters removed the content"}
+		}
+		return ai.StopError, &Error{Failure: FailureInterrupted,
+			Detail: "reply incomplete: " + incomplete}
 	case "failed", "cancelled", "expired":
-		return ai.StopError, fmt.Errorf("openai: reply %s", status)
+		return ai.StopError, &Error{Failure: FailureInterrupted, Detail: "reply " + status}
 	case "":
-		return ai.StopError, errors.New("openai: the provider reported no status")
+		return ai.StopError, &Error{Failure: FailureUnknown,
+			Detail: "the provider reported no status"}
 	default:
 		// An unrecognised terminal state cannot be assumed complete.
-		return ai.StopError, fmt.Errorf("openai: unrecognised status %q", status)
+		return ai.StopError, &Error{Failure: FailureUnknown,
+			Detail: fmt.Sprintf("unrecognised status %q", status)}
 	}
 }

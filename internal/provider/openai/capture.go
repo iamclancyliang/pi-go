@@ -53,6 +53,9 @@ type capture struct {
 	requests int
 	attempts []terminal
 
+	// failure is the classified reason a request was refused, when one was.
+	failure error
+
 	// itemIndices is every output index the provider announced, in order.
 	//
 	// Recorded here because the adapter renumbers: by the time blocks reach
@@ -71,6 +74,20 @@ func (c *capture) startAttempt() {
 // observe records what an attempt reported. The attempt is identified by
 // position in this call's own list, not by matching content.
 // observeItem records an index the provider announced.
+// observeFailure records why a request was refused.
+func (c *capture) observeFailure(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.failure = err
+}
+
+// refusal is the classified failure, if the provider refused.
+func (c *capture) refusal() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failure
+}
+
 func (c *capture) observeItem(index int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -129,6 +146,7 @@ func (c *capture) earlier() []terminal {
 type captureTransport struct {
 	inner   http.RoundTripper
 	capture *capture
+	key     string
 }
 
 func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -154,10 +172,18 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	raw, readErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(raw))
-	if readErr == nil {
-		if found, ok := terminalFromResponse(raw); ok {
-			t.capture.observe(found)
-		}
+	if readErr != nil {
+		return resp, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// Classified here, where the status and the provider's own error code
+		// both exist. After this the adapter turns it into prose, and a
+		// classification rebuilt from prose is one a change of wording breaks.
+		t.capture.observeFailure(failureFrom(resp.StatusCode, raw, t.key))
+		return resp, nil
+	}
+	if found, ok := terminalFromResponse(raw); ok {
+		t.capture.observe(found)
 	}
 	return resp, nil
 }
@@ -168,6 +194,7 @@ type teeBody struct {
 	onTerminal func(terminal)
 	onItem     func(int)
 	pending    []byte
+	event      []byte
 	done       bool
 }
 
@@ -193,20 +220,43 @@ func (t *teeBody) scan() {
 		line := t.pending[:idx]
 		t.pending = t.pending[idx+1:]
 
-		payload, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			// A blank line ends an event: parse whatever its data lines built.
+			if len(t.event) > 0 {
+				payload := t.event
+				t.event = nil
+				if t.handle(payload) {
+					return
+				}
+			}
+			continue
+		}
+		chunk, ok := bytes.CutPrefix(trimmed, []byte("data:"))
 		if !ok {
 			continue
 		}
-		payload = bytes.TrimSpace(payload)
+		// A single event's data may arrive across several `data:` lines, which
+		// the provider intends to be concatenated. Parsing each line alone
+		// would drop the terminal of any event large enough to be split.
+		t.event = append(t.event, bytes.TrimSpace(chunk)...)
+		continue
+	}
+}
+
+// handle parses one complete event, reporting whether the terminal was found.
+func (t *teeBody) handle(payload []byte) bool {
+	{
 		if index, ok := itemIndexFromEvent(payload); ok && t.onItem != nil {
 			t.onItem(index)
 		}
 		if found, ok := terminalFromEvent(payload); ok {
 			t.done = true
 			t.onTerminal(found)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // wireResponse is only the parts this capture is responsible for. Everything

@@ -51,7 +51,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// would send billable requests this repository never counted and could
 		// not classify.
 		MaxRetries: &noRetries,
-		HTTPClient: p.httpClient(held),
+		HTTPClient: p.httpClient(held, key),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: building the model: %w", err)
@@ -66,6 +66,12 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 
 	reader, err := chat.Stream(ctx, messages, opts...)
 	if err != nil {
+		// A refusal was classified at the transport, where the status and the
+		// provider's own code still existed. Preferring it keeps a caller
+		// branching on a value rather than on the adapter's prose.
+		if refused := held.refusal(); refused != nil {
+			return nil, refused
+		}
 		return nil, fmt.Errorf("openai: starting the stream: %w", err)
 	}
 
@@ -73,6 +79,13 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	go func() {
 		defer close(out)
 		defer reader.Close()
+
+		// Cancellation reaches a blocked read through the request's context:
+		// the transport aborts the body, the read fails, and this notices. That
+		// is the RoundTripper contract rather than something this code can
+		// enforce, so a transport that ignores the context would hold this
+		// goroutine open — which is worth knowing about the transport rather
+		// than papering over here.
 		p.pump(ctx, reader, held, out)
 	}()
 	return out, nil
@@ -156,13 +169,28 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 			break
 		}
 		if err != nil {
+			// A caller who stopped waiting gets an abort, not an error about
+			// the provider: the reply was cut short by them, and reporting it
+			// as a failure invites a retry of what they just cancelled.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				cancelled = true
+				return
+			}
+			if refused := held.refusal(); refused != nil {
+				fail(refused)
+				return
+			}
 			fail(fmt.Errorf("openai: reading the stream: %w", err))
+			return
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			cancelled = true
 			return
 		}
 		for _, block := range chunk.ContentBlocks {
 			kind, text, call, ok := describe(block)
 			if !ok {
-				// A block this tranche does not support. Reporting it is the
+				// A block this package does not handle. Reporting it is the
 				// point: silently dropping content would leave a caller with a
 				// reply that is missing something nobody mentioned.
 				fail(fmt.Errorf("openai: unsupported content block %q", block.Type))
@@ -272,7 +300,7 @@ func providerIndex(block *schema.ContentBlock) int {
 }
 
 // describe maps a block onto this repository's kinds, reporting whether it is
-// one this tranche supports.
+// one this package handles.
 func describe(block *schema.ContentBlock) (ai.BlockKind, string, ai.ToolCall, bool) {
 	switch block.Type {
 	case schema.ContentBlockTypeAssistantGenText:
