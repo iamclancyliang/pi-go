@@ -32,6 +32,7 @@ var einoIsAllowedIn = []string{
 	// enforced separately by TestAProviderExposesNoFrameworkType rather than by
 	// this list.
 	"internal/provider/openai",
+	"internal/provider/qwen",
 }
 
 const einoModule = "github.com/cloudwego/eino"
@@ -107,30 +108,94 @@ func TestAProviderExposesNoFrameworkType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repository root: %v", err)
 	}
-	dir := filepath.Join(root, "internal", "provider", "openai")
+	// Every provider that is allowed to name the framework, so a new one is
+	// covered by being added to that list rather than by remembering to add it
+	// here as well.
+	for _, allowed := range einoIsAllowedIn {
+		if !strings.HasPrefix(allowed, "internal/provider/") {
+			continue
+		}
+		dir := filepath.Join(root, filepath.FromSlash(allowed))
 
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, 0)
-	if err != nil {
-		t.Fatalf("parsing %s: %v", dir, err)
-	}
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, dir, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", dir, err)
+		}
 
-	for _, pkg := range pkgs {
-		for path, file := range pkg.Files {
-			if strings.HasSuffix(path, "_test.go") {
-				continue
-			}
-			aliases := frameworkAliases(file)
-			if len(aliases) == 0 {
-				continue
-			}
-			for _, decl := range file.Decls {
-				for _, offence := range exportedUsesFramework(decl, aliases) {
-					t.Errorf("%s: exported %s has a framework type in its signature",
-						filepath.Base(path), offence)
+		for _, pkg := range pkgs {
+			for path, file := range pkg.Files {
+				if strings.HasSuffix(path, "_test.go") {
+					continue
+				}
+				aliases := frameworkAliases(file)
+				if len(aliases) == 0 {
+					continue
+				}
+				for _, decl := range file.Decls {
+					for _, offence := range exportedUsesFramework(decl, aliases) {
+						t.Errorf("%s/%s: exported %s has a framework type in its signature",
+							allowed, filepath.Base(path), offence)
+					}
 				}
 			}
 		}
+	}
+}
+
+// rejectedAdapters are framework adapters this repository has tried and found
+// unable to carry something it promises. They may be named where the evidence
+// lives and nowhere else: a rejected adapter that reaches the product is one
+// somebody wired in believing the earlier finding no longer applied.
+var rejectedAdapters = map[string]string{
+	"github.com/cloudwego/eino-ext/components/model/agenticqwen": "loses the identity of " +
+		"interleaved tool calls; see the probes that record it",
+}
+
+// ruleDeclaration marks the file holding the list above.
+const ruleDeclaration = "rejectedAdapters = map[string]" + "string{"
+
+// TestARejectedAdapterStaysOutOfTheProduct.
+func TestARejectedAdapterStaysOutOfTheProduct(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("repository root: %v", err)
+	}
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "vendor", "spikes":
+				// The evidence lives in spikes: showing what an adapter does
+				// wrong means importing it.
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		source, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(source), ruleDeclaration) {
+			// The file that lists them for this rule has to name them, and
+			// naming them there is what stops them being used elsewhere.
+			return nil
+		}
+		for adapter, why := range rejectedAdapters {
+			if strings.Contains(string(source), adapter) {
+				rel, _ := filepath.Rel(root, path)
+				t.Errorf("%s names %s, which %s", rel, adapter, why)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking: %v", err)
 	}
 }
 

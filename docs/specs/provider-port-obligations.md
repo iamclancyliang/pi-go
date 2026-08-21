@@ -76,7 +76,8 @@ be replaced.
 | Obligation | Enforced by |
 | --- | --- |
 | Fragments of one tool call reassemble into one call with its identity intact | `TestAToolCallSplitAcrossChunksStaysOneCall` |
-| Interleaved calls stay apart | `TestInterleavedToolCallFragmentsStayApart` |
+| Interleaved calls stay apart | `TestInterleavedToolCallFragmentsStayApart`, `TestInterleavedToolCallsStayApart` |
+| A tool-call position that is missing, opened twice, skipped, or continued before it was opened is refused | `TestAToolCallFragmentWithNoPositionIsRefused`, `TestAStreamWhoseCallPositionsDoNotHoldIsRefused` |
 | Text after several open calls closes all of them | `TestTextAfterInterleavedCallsClosesEveryBlock` |
 | A block ends before the next begins | `TestABlockEndsBeforeTheNextBegins` |
 | A block the provider announced without a position fails before its content reaches a consumer, and still fails when it carries none | `TestAnAnnouncementWithNoIdentityFailsBeforeItsContent`, `TestAnAnnouncementWithNoIdentityAndNoContentStillFails`, `TestAWellFormedStreamStillPasses` |
