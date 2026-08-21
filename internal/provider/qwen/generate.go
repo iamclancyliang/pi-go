@@ -2,7 +2,6 @@ package qwen
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -60,5 +59,4 @@ var (
 	_ ai.Port          = (*Port)(nil)
 	_ ai.StreamingPort = (*Port)(nil)
 	_ error            = (*Error)(nil)
-	_                  = errors.Is
 )

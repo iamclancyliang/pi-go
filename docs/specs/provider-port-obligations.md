@@ -90,11 +90,13 @@ be replaced.
 
 | Obligation | Enforced by |
 | --- | --- |
-| A reply becomes history, and reasoning does not leak into the answer | `TestAProviderReplyReachesTheRuntime` |
+| A reply becomes history, and reasoning does not leak into the answer | `TestAProviderReplyReachesTheRuntime`, `TestAQwenReplyBecomesHistoryAndIsLedgered` |
 | Reasoning returns on the next request, on both paths | `TestReasoningReturnsToTheProviderOnTheNextRound`, `TestReasoningReturnsOnTheCollectedPathToo`, `TestQwenReasoningReturnsToTheProviderOnTheNextRound` |
 | Reasoning survives persisting and reopening | `TestReasoningSurvivesReopeningTheSession` |
 | A tool call from a provider is refused by policy and recorded before it runs | `TestAProviderToolCallIsRefusedByPolicyAndRecordedFirst`, `TestAnOpenAIToolCallIsRefusedByPolicyAndRecordedFirst`, `TestAQwenToolCallIsRefusedByPolicyAndRecordedFirst` |
 | The tools a caller registered reach the request, checked against the bytes sent | `TestQwenToolsReachTheProvider` |
-| A tool result travels in a shape the provider accepts, proven by sending it | `TestAQwenToolResultTravelsInAShapeTheProviderAccepts` |
-| Several calls keep the order the model asked for | `TestSeveralProviderToolCallsKeepTheOrderTheModelAsked` |
+| A tool result leaves the process addressed to its call, in the role the protocol names | `TestAQwenToolResultReachesTheWireInTheProtocolShape` |
+| Several calls keep the order the model asked for, through the policy and the results | `TestSeveralProviderToolCallsKeepTheOrderTheModelAsked`, `TestSeveralQwenToolCallsKeepTheOrderTheModelAsked` |
+| A refusal reaches the model, not only the session | `TestAQwenPolicyRefusalReachesTheModel` |
+| A tool call announces both halves to a renderer, refused or not | `TestAQwenToolCallAnnouncesBothHalvesToARenderer`, `TestAQwenToolCallIsRefusedByPolicyAndRecordedFirst` |
 | A failure inside a 200 stops the run instead of arriving as an answer | `TestAProviderFailureStopsTheRun` |

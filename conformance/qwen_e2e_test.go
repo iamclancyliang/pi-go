@@ -179,23 +179,32 @@ func TestAQwenToolCallIsRefusedByPolicyAndRecordedFirst(t *testing.T) {
 		t.Fatal("the refusal never reached the model as the call's result, so the model " +
 			"cannot tell a refusal from a call that vanished")
 	}
-	var sawToolEvents bool
+	var starts, ends int
 	for _, kind := range rec.Kinds() {
-		if kind == events.KindToolStart || kind == events.KindToolEnd {
-			sawToolEvents = true
+		switch kind {
+		case events.KindToolStart:
+			starts++
+		case events.KindToolEnd:
+			ends++
 		}
 	}
-	if !sawToolEvents {
-		t.Fatal("a refused tool call produced no tool events for a renderer to show")
+	if starts != 1 || ends != 1 {
+		t.Fatalf("a refused call gave a renderer %d starts and %d ends, want one of each; "+
+			"a call shown as still running is one the reader is waiting on", starts, ends)
 	}
 }
 
-// TestAQwenToolResultTravelsInAShapeTheProviderAccepts.
+// TestAQwenToolResultReachesTheWireInTheProtocolShape.
 //
-// The shape a result is sent in is not something this repository's own
-// conversion test can settle: it passed for a role the provider refuses, twice,
-// and only a run that actually sent the messages showed it.
-func TestAQwenToolResultTravelsInAShapeTheProviderAccepts(t *testing.T) {
+// What this settles is what left the process: a result addressed to the call it
+// answers, in the role the protocol names. It does not settle that the provider
+// accepted it — nothing offline can, and saying otherwise would describe
+// evidence this test does not have.
+//
+// It is still worth more than a conversion test. Twice here a shape passed
+// conversion and was refused when it was actually sent, and both times the
+// conversion test could not have known.
+func TestAQwenToolResultReachesTheWireInTheProtocolShape(t *testing.T) {
 	transport := &qwenTransport{responses: []*http.Response{
 		qwenToolCallReply("call_1", "list_files"),
 		qwenTextReply("done", 4, 1),
@@ -221,7 +230,7 @@ func TestAQwenToolResultTravelsInAShapeTheProviderAccepts(t *testing.T) {
 	// The second request is the one carrying the result back.
 	second := transport.sent[1]
 	if !strings.Contains(second, `"role":"tool"`) || !strings.Contains(second, `"call_1"`) {
-		t.Fatalf("the result did not travel as an answer to the call: %s", second)
+		t.Fatalf("the result did not leave as an answer to the call: %s", second)
 	}
 }
 
@@ -319,5 +328,161 @@ func TestQwenReasoningReturnsToTheProviderOnTheNextRound(t *testing.T) {
 	// different things to a model reading its own history.
 	if !strings.Contains(transport.sent[1], `"reasoning_content"`) {
 		t.Fatalf("reasoning came back as something else: %s", transport.sent[1])
+	}
+}
+
+// TestAQwenReplyBecomesHistoryAndIsLedgered.
+//
+// A reply that answered but never entered the session is a turn the next
+// request will not contain, and tokens that were spent but never recorded are a
+// bill with no line for them.
+func TestAQwenReplyBecomesHistoryAndIsLedgered(t *testing.T) {
+	transport := &qwenTransport{responses: []*http.Response{qwenTextReply("the answer", 11, 4)}}
+	sess := session.New("You are pi-go.")
+	registry, _, _ := tools.NewFixtureRegistry()
+	agent, err := runtime.New(runtime.Config{
+		Model: qwenPort(t, transport), ModelName: "qwen-test", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var answered bool
+	for _, m := range sess.Truth() {
+		if m.Role == ai.RoleAssistant && m.Content == "the answer" {
+			answered = true
+		}
+	}
+	if !answered {
+		t.Fatal("the reply never became history, so the next request would not contain it")
+	}
+	used := sess.Usage()
+	if used.InputTokens != 11 || used.OutputTokens != 4 {
+		t.Fatalf("the ledger holds %d in and %d out, want 11 and 4", used.InputTokens, used.OutputTokens)
+	}
+}
+
+// TestSeveralQwenToolCallsKeepTheOrderTheModelAsked.
+//
+// Order is part of what the model said. The package tests show fragments
+// reassembling in order; this shows the order surviving the runtime — which
+// decides, executes and renders them, and could reorder at any of the three.
+func TestSeveralQwenToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
+	transport := &qwenTransport{responses: []*http.Response{
+		qwenRecorded(
+			`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":`+
+				`[{"index":0,"id":"call_1","type":"function","function":{"name":"list_files","arguments":"{}"}}]}}]}`,
+			`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"tool_calls":`+
+				`[{"index":1,"id":"call_2","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"README.md\"}"}}]}}]}`,
+			`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],`+
+				`"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+		),
+		qwenTextReply("done", 6, 1),
+	}}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	rec := runtime.NewRecorder()
+
+	var asked []string
+	policy := runtime.PolicyFunc(func(_ context.Context, call runtime.PolicyCall) runtime.Decision {
+		asked = append(asked, call.ToolCallID)
+		return runtime.Decision{}
+	})
+	agent, err := runtime.New(runtime.Config{
+		Model: qwenPort(t, transport), ModelName: "qwen-test", Tools: registry, Session: sess,
+		Policy: policy, Observers: []events.Observer{rec}, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := []string{"call_1", "call_2"}
+	if len(asked) != 2 || asked[0] != want[0] || asked[1] != want[1] {
+		t.Fatalf("the policy was asked in order %v, want %v", asked, want)
+	}
+	var results []string
+	for _, m := range sess.Truth() {
+		if m.Role == ai.RoleTool {
+			results = append(results, m.ToolCallID)
+		}
+	}
+	if len(results) != 2 || results[0] != want[0] || results[1] != want[1] {
+		t.Fatalf("results returned in order %v, want %v", results, want)
+	}
+}
+
+// TestAQwenPolicyRefusalReachesTheModel.
+//
+// A refusal recorded only in the session is one the model never reads. The next
+// request is where it has to appear, or the model asks again for something that
+// will be refused again.
+func TestAQwenPolicyRefusalReachesTheModel(t *testing.T) {
+	transport := &qwenTransport{responses: []*http.Response{
+		qwenToolCallReply("call_1", "list_files"),
+		qwenTextReply("understood", 3, 1),
+	}}
+	registry, _, _ := tools.NewFixtureRegistry()
+	agent, err := runtime.New(runtime.Config{
+		Model: qwenPort(t, transport), ModelName: "qwen-test", Tools: registry,
+		Session: session.New("You are pi-go."), Now: fixedClock(),
+		Policy: runtime.PolicyFunc(func(context.Context, runtime.PolicyCall) runtime.Decision {
+			return runtime.Decision{Denied: true, Reason: "refused by policy"}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(transport.sent) != 2 {
+		t.Fatalf("a refused call took %d requests, want 2", len(transport.sent))
+	}
+	if !strings.Contains(transport.sent[1], "refused by policy") {
+		t.Fatalf("the refusal never left the process: %s", transport.sent[1])
+	}
+}
+
+// TestAQwenToolCallAnnouncesBothHalvesToARenderer.
+//
+// A renderer showing a call as still running is showing something that already
+// finished. Both halves have to arrive, so asserting that either one did would
+// pass on a stream that only ever opens calls.
+func TestAQwenToolCallAnnouncesBothHalvesToARenderer(t *testing.T) {
+	transport := &qwenTransport{responses: []*http.Response{
+		qwenToolCallReply("call_1", "list_files"),
+		qwenTextReply("done", 3, 1),
+	}}
+	registry, _, _ := tools.NewFixtureRegistry()
+	rec := runtime.NewRecorder()
+	agent, err := runtime.New(runtime.Config{
+		Model: qwenPort(t, transport), ModelName: "qwen-test", Tools: registry,
+		Session: session.New("You are pi-go."), Observers: []events.Observer{rec},
+		Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	if err := agent.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var starts, ends int
+	for _, kind := range rec.Kinds() {
+		switch kind {
+		case events.KindToolStart:
+			starts++
+		case events.KindToolEnd:
+			ends++
+		}
+	}
+	if starts != 1 || ends != 1 {
+		t.Fatalf("a renderer saw %d starts and %d ends, want one of each", starts, ends)
 	}
 }

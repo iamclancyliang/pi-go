@@ -52,6 +52,14 @@ reads a store must sample per call, or a replaced credential never takes effect.
 does hold everywhere is that one call resolves at most once and uses that value for every attempt
 and for reporting. Stated correctly in `69f31dc`.
 
+## `df327fd` — a message about the mistake instead of the change
+
+It described how a file came to be committed rather than what the change did. What it should have
+said: the file removed is `docs/research/provider-contract-source-audit.md`, a working note used
+while auditing this repository's provider contract against its sources. It is scratch: it records
+one reader's route through the code on one day, not anything this repository documents, and it has
+no reader once that reading is finished. Untracking it leaves it on disk and out of the history.
+
 ## Wording that does not stand on its own
 
 Three messages use terms that mean nothing to a reader who was not present when they were written:
