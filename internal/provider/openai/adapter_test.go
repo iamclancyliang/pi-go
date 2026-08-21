@@ -155,3 +155,141 @@ func TestAnUnsupportedBlockIsReportedNotDropped(t *testing.T) {
 		t.Fatalf("the failure did not say what it could not handle: %v", err)
 	}
 }
+
+// TestTwoInterleavedToolCallsKeepTheirIdentity.
+//
+// This is the control that disqualified the DeepSeek adapter: it turned a valid
+// interleaved stream into four calls whose continuations had lost their ID and
+// name. A provider may stream several calls at once, so an adapter that tracks
+// only the most recent index cannot carry them.
+func TestTwoInterleavedToolCallsKeepTheirIdentity(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-test","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"first","arguments":""}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"fc_2","type":"function_call","call_id":"call_b","name":"second","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"a\""}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_2","output_index":1,"delta":"{\"b\""}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":":1}"}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_2","output_index":1,"delta":":2}"}`,
+		`{"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\"a\":1}"}`,
+		`{"type":"response.function_call_arguments.done","item_id":"fc_2","output_index":1,"arguments":"{\"b\":2}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"first","arguments":"{\"a\":1}","status":"completed"}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"fc_2","type":"function_call","call_id":"call_b","name":"second","arguments":"{\"b\":2}","status":"completed"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-test","status":"completed","usage":{"input_tokens":5,"output_tokens":4}}}`,
+	)}}
+	p := newPort(t, tr)
+
+	resp, err := p.Generate(context.Background(), ai.Request{
+		Model:    "gpt-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "call two things"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("two interleaved calls became %d: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	// Source order, and identity on both.
+	if resp.ToolCalls[0].ID != "call_a" || resp.ToolCalls[0].Name != "first" {
+		t.Fatalf("first call arrived as %+v", resp.ToolCalls[0])
+	}
+	if resp.ToolCalls[1].ID != "call_b" || resp.ToolCalls[1].Name != "second" {
+		t.Fatalf("second call arrived as %+v", resp.ToolCalls[1])
+	}
+	for i, want := range []string{`{"a":1}`, `{"b":2}`} {
+		if resp.ToolCalls[i].Args != want {
+			t.Fatalf("call %d reassembled as %q, want %q", i, resp.ToolCalls[i].Args, want)
+		}
+	}
+}
+
+// TestStreamAndGenerateAgreeOnTheSameReply: the single reply is the stream
+// collected, so the two must not be able to disagree. Driving both from the
+// same recording is what makes that checkable rather than assumed.
+func TestStreamAndGenerateAgreeOnTheSameReply(t *testing.T) {
+	events := []string{
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"one "}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"two"}`,
+		`{"type":"response.output_text.done","item_id":"m","output_index":0,"content_index":0,"text":"one two"}`,
+		`{"type":"response.content_part.done","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":"one two"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"one two"}]}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":9,"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0}}}}`,
+	}
+	req := ai.Request{Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}}}
+
+	collected, err := newPort(t, &recordedTransport{responses: []*http.Response{recorded(events...)}}).
+		Generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	stream, err := newPort(t, &recordedTransport{responses: []*http.Response{recorded(events...)}}).
+		Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var final *ai.AssistantMessage
+	terminals := 0
+	for ev := range stream {
+		if ev.Final != nil {
+			final = ev.Final
+			terminals++
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("the stream produced %d terminal events, want exactly 1", terminals)
+	}
+
+	var text string
+	for _, b := range final.Blocks {
+		if b.Kind == ai.BlockText {
+			text += b.Text
+		}
+	}
+	if text != collected.Content {
+		t.Fatalf("streamed %q, collected %q", text, collected.Content)
+	}
+	if final.Model != collected.Model {
+		t.Fatalf("streamed model %q, collected %q", final.Model, collected.Model)
+	}
+	if final.Usage.Total() != collected.Usage.Total() {
+		t.Fatalf("streamed total %d, collected %d", final.Usage.Total(), collected.Usage.Total())
+	}
+	// A reported zero must survive both paths as a reported zero.
+	if final.Usage.ReasoningTokens == nil || *final.Usage.ReasoningTokens != 0 {
+		t.Fatalf("a reported zero became %v on the streamed path", final.Usage.ReasoningTokens)
+	}
+	if collected.Usage.ReasoningTokens == nil || *collected.Usage.ReasoningTokens != 0 {
+		t.Fatalf("a reported zero became %v on the collected path", collected.Usage.ReasoningTokens)
+	}
+}
+
+// TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich: reporting the model
+// that was asked for would make a substitution invisible, and inventing one is
+// worse than admitting the reply did not say.
+func TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.created","response":{"id":"r","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"x"}`,
+		`{"type":"response.output_text.done","item_id":"m","output_index":0,"content_index":0,"text":"x"}`,
+		`{"type":"response.content_part.done","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":"x"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"x"}]}}`,
+		// Completed, with no model named.
+		`{"type":"response.completed","response":{"id":"r","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)}}
+
+	resp, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-asked-for", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Model == "gpt-asked-for" {
+		t.Fatal("the requested model was reported as the one that served the reply")
+	}
+}

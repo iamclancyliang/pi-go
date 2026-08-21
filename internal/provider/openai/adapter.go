@@ -30,18 +30,18 @@ func toAgentic(msgs []ai.Message) ([]*schema.AgenticMessage, error) {
 func oneAgentic(m ai.Message) (*schema.AgenticMessage, error) {
 	switch m.Role {
 	case ai.RoleSystem:
+		// A system message carries INPUT text, not generated text. The adapter
+		// refuses a generated-text block here, and rightly: the two mean
+		// different things even though both hold a string.
 		return &schema.AgenticMessage{
 			Role:          schema.AgenticRoleType(schema.System),
-			ContentBlocks: []*schema.ContentBlock{textBlock(m.Content)},
+			ContentBlocks: []*schema.ContentBlock{inputTextBlock(m.Content)},
 		}, nil
 
 	case ai.RoleUser:
 		return &schema.AgenticMessage{
-			Role: schema.AgenticRoleType(schema.User),
-			ContentBlocks: []*schema.ContentBlock{{
-				Type:          schema.ContentBlockTypeUserInputText,
-				UserInputText: &schema.UserInputText{Text: m.Content},
-			}},
+			Role:          schema.AgenticRoleType(schema.User),
+			ContentBlocks: []*schema.ContentBlock{inputTextBlock(m.Content)},
 		}, nil
 
 	case ai.RoleAssistant:
@@ -90,6 +90,15 @@ func oneAgentic(m ai.Message) (*schema.AgenticMessage, error) {
 	}
 }
 
+// inputTextBlock is text going TO the model.
+func inputTextBlock(text string) *schema.ContentBlock {
+	return &schema.ContentBlock{
+		Type:          schema.ContentBlockTypeUserInputText,
+		UserInputText: &schema.UserInputText{Text: text},
+	}
+}
+
+// textBlock is text the model generated.
 func textBlock(text string) *schema.ContentBlock {
 	return &schema.ContentBlock{
 		Type:             schema.ContentBlockTypeAssistantGenText,
