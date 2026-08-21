@@ -130,7 +130,10 @@ func cloneEntry(e Entry) Entry {
 		return Entry{Checkpoint: &cp}
 	}
 	if e.Overflow != nil {
+		// Usage holds pointers for its optional counts, so copying the struct
+		// alone leaves the stored entry sharing them with the caller's value.
 		attempt := *e.Overflow
+		attempt.Usage = e.Overflow.Usage.Clone()
 		return Entry{Overflow: &attempt}
 	}
 	if e.Intent != nil {

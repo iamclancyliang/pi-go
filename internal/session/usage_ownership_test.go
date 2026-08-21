@@ -1,6 +1,7 @@
 package session_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -82,5 +83,28 @@ func TestSeveralRefusedAttemptsAreEachRecorded(t *testing.T) {
 	if total.CacheReadTokens != nil || total.ReasoningTokens != nil {
 		t.Fatalf("summing silences produced cache=%v reasoning=%v",
 			total.CacheReadTokens, total.ReasoningTokens)
+	}
+}
+
+// TestAStoredOverflowAttemptIsOwnedToo: the store keeps entries, so it has to
+// own them. A caller that keeps editing the value it handed over would
+// otherwise be editing what was recorded.
+func TestAStoredOverflowAttemptIsOwnedToo(t *testing.T) {
+	store := &session.MemoryStore{}
+	sess := session.WithStore("system", store)
+
+	handed := ai.Usage{InputTokens: 900, CacheReadTokens: count(7), Reported: true}
+	if err := sess.RecordOverflowAttempt("refused", handed); err != nil {
+		t.Fatal(err)
+	}
+	*handed.CacheReadTokens = 999
+
+	reopened, err := session.Restore(context.Background(), "system", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.OverflowUsage()
+	if got.CacheReadTokens == nil || *got.CacheReadTokens != 7 {
+		t.Fatalf("the caller rewrote a persisted entry: %v", got.CacheReadTokens)
 	}
 }
