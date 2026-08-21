@@ -1200,3 +1200,45 @@ func TestOneCallResolvesItsCredentialOnce(t *testing.T) {
 		t.Fatalf("one call read the environment %d times", e.lookups)
 	}
 }
+
+// TestARetriedCallKeepsTheCredentialItStartedWith: a retry is another attempt at
+// the same call, not a new one. Re-reading between attempts would send two
+// requests under two identities with nothing recording that it happened, and
+// would scrub the second attempt's failure with a key the first one used.
+func TestARetriedCallKeepsTheCredentialItStartedWith(t *testing.T) {
+	const first, second = "key-the-call-began-with", "key-that-arrived-midway"
+	e := &changingEnv{keys: []string{first, second}}
+	tr := &countingTransport{respond: func(n int) *http.Response {
+		if n == 1 {
+			return status(503, `{"error":{"message":"try again"}}`)
+		}
+		return status(401, `{"error":{"message":"rejected `+first+`"}}`)
+	}}
+	p, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: tr, Environment: e, MaxOutputTokens: 16,
+		Retry: deepseek.RetryPolicy{MaxRetries: 1},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, genErr := p.Generate(context.Background(), ai.Request{
+		Model: "deepseek-v4-flash", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if genErr == nil {
+		t.Fatal("expected a refusal")
+	}
+	if tr.requests != 2 {
+		t.Fatalf("made %d requests, want 2", tr.requests)
+	}
+	if e.lookups != 1 {
+		t.Fatalf("a retried call read the environment %d times", e.lookups)
+	}
+	if strings.Contains(genErr.Error(), first) {
+		t.Fatalf("the key the call was made with survived into the failure: %v", genErr)
+	}
+	for _, sent := range tr.bodies {
+		if strings.Contains(sent, second) {
+			t.Fatal("an attempt used a credential the call did not begin with")
+		}
+	}
+}

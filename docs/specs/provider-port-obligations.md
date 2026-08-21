@@ -18,8 +18,8 @@ be replaced.
 | --- | --- |
 | The key is reached only through injected configuration; a missing seam fails rather than falling back | `TestAPortWithoutASuppliedTransportIsRefused` |
 | Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence`, `TestAStoredCredentialWinsAndABlankVariableIsSkipped` |
-| Resolution happens once, off the request path: the port is given a resolved value, not a resolver | `TestAMissingCredentialIsATypedAbsence` |
-| One call resolves once; the key a failure is scrubbed with is the key the request was sent with | `TestOneCallResolvesItsCredentialOnce` |
+| A provider with no other source is handed a resolved value rather than a resolver, so nothing varies per request | `TestAMissingCredentialIsATypedAbsence` |
+| One logical call resolves at most once and uses that value for every attempt and for scrubbing | `TestOneCallResolvesItsCredentialOnce`, `TestARetriedCallKeepsTheCredentialItStartedWith` |
 | A transport error is scrubbed of the configured key by identity, not left to its shape | `TestATransportErrorDoesNotCarryTheConfiguredKey` |
 | A lookup that fails with the value in its own error does not carry it out | `TestALookupErrorDoesNotCarryTheValueOut` |
 | Scrubbing removes both the exact value and anything key-shaped | `TestScrubbingRemovesBothWhatIsKnownAndWhatIsShaped` |

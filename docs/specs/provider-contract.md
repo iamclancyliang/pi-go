@@ -432,11 +432,19 @@ credential resolution testable without touching the real environment, and this r
 `"stored credential"` or the name of the env var that supplied it. That is the value that may appear
 in a log or a diagnostic; the key itself has no such path.
 
-**Resolution is not on the request path.** A port is given a resolved value, not something to ask.
-The order above answers "which configured source wins", which is one question for the process rather
-than one per request: a port that resolved per call could authenticate two calls a second apart as
-different identities with nothing recording that it had. It also keeps a caller's own resolver, and
-whatever that holds, out of the path a request takes.
+**One logical call holds one credential.** A call resolves at most once and uses that single value
+for the request, for every attempt inside it, and for scrubbing whatever failure comes back.
+Re-reading mid-call is the defect this rules out: it can send two attempts under two identities with
+nothing recording that it happened, and it removes the key configured *now* from a report about a
+request sent with the key configured *then* — so a key that was just replaced survives into the
+report of the request that used it.
+
+**Where that value is sampled depends on what can change.** A provider whose credential can only
+come from configuration resolves once, outside the request path, and is handed the resolved value;
+nothing later can vary. A provider that also reads a store must sample per call, because a stored
+credential can be replaced between calls and freezing it at construction would keep using the key a
+rotation just retired. What is fixed either way is the number per call, which is one — not the
+lifetime, which the provider's own sources decide.
 
 **A failed lookup does not carry what it found.** A source can return a value and an error together,
 and one that names what it was holding hands the key to whatever logs the failure. Removal is by
