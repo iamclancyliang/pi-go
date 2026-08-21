@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,14 @@ func fail(f Failure, status int, detail string) *Error {
 // retryable, since guessing that an unrecognised failure would survive a repeat
 // buys another billed request on no evidence.
 func wireFailure(stage, key string, err error) error {
+	// A cancellation or a deadline is returned as it arrived, whoever noticed
+	// it. Asking the caller's own context is not enough: a transport can report
+	// one it was told about before that context is observably done, and
+	// classifying it would tell a caller to retry what was just stopped —
+	// worse, a deadline would leave as retryable.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	failure := FailureUnknown
 	if transient(err) {
 		failure = FailureTransient

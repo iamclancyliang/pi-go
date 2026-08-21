@@ -42,7 +42,7 @@ be replaced.
 | The provider's own retry instruction outranks the status, and reaches the caller that decides | `TestTheProvidersOwnRetryInstructionSurvives`, `TestAProvidersOwnRetryInstructionReachesOneCaller`, `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
 | An exhausted balance stays terminal however the provider or the status reads | `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
 | A reply that asked for tools says so rather than reporting a plain ending | `TestAReplyAskingForToolsSaysSo` |
-| Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation`, `TestSetupCancellationStaysCancellation`, `TestALookupCancellationStaysCancellation` |
+| Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation`, `TestSetupCancellationStaysCancellation`, `TestACancellationInsideATransportErrorStaysCancellation`, `TestALookupCancellationStaysCancellation` |
 
 ## Retry and cost
 

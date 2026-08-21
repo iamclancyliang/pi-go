@@ -1279,3 +1279,34 @@ func TestSetupCancellationStaysCancellation(t *testing.T) {
 		t.Fatalf("the caller's own cancellation was reported as a provider failure: %v", err)
 	}
 }
+
+// TestACancellationInsideATransportErrorStaysCancellation.
+//
+// The caller's own context is not the only place a cancellation appears: a
+// transport can report one it was told about before that context is observably
+// done. Classified, it would tell a caller to retry what was just stopped —
+// and a deadline would leave as retryable, which is worse than merely wrong.
+func TestACancellationInsideATransportErrorStaysCancellation(t *testing.T) {
+	for name, cause := range map[string]error{
+		"a cancellation": context.Canceled,
+		"a deadline":     context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// The caller's own context stays live throughout.
+			ctx := context.Background()
+			tr := &failingTransport{err: fmt.Errorf("transport stopped: %w", cause)}
+			_, err := newPort(t, tr).Generate(ctx, ai.Request{
+				Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+			})
+			if !errors.Is(err, cause) {
+				t.Fatalf("the cause was lost: %v", err)
+			}
+			if _, classified := ai.FailureOf(err); classified {
+				t.Fatalf("a stopped call was reported as a provider failure: %v", err)
+			}
+			if ai.Retryable(err) {
+				t.Fatalf("a stopped call was judged worth repeating: %v", err)
+			}
+		})
+	}
+}
