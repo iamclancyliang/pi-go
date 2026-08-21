@@ -287,7 +287,7 @@ func TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich(t *testing.T) {
 	)}}
 
 	resp, err := newPort(t, tr).Generate(context.Background(), ai.Request{
-		Model: "gpt-asked-for", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -295,7 +295,8 @@ func TestAServedModelIsAbsentWhenTheProviderDidNotSayWhich(t *testing.T) {
 	// Empty, not "some other name": the only honest answer when the provider
 	// did not say is that it did not say. Asserting merely that it differs from
 	// the requested model would pass while the CONFIGURED model was reported —
-	// which is just as much a name nobody confirmed.
+	// which is just as much a name nobody confirmed. Both are "gpt-test" here,
+	// so only emptiness distinguishes a captured truth from an echo.
 	if resp.Model != "" {
 		t.Fatalf("the reply named no model, but %q was reported as having served it", resp.Model)
 	}
@@ -771,16 +772,37 @@ func TestAFailureInsideA200NamesItsOwnReason(t *testing.T) {
 // inside an item just as it renumbers the items, so a gap is invisible after
 // conversion and accepting it reports an order the provider never sent.
 func TestAContentIndexThatSkipsIsRefused(t *testing.T) {
-	tr := &recordedTransport{responses: []*http.Response{recorded(
-		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
-		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
-		// The first content part of this item is announced at index 3.
-		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":3,"part":{"type":"output_text","text":""}}`,
-		`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":3,"delta":"x"}`,
-		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
-	)}}
+	skipping := func() *recordedTransport {
+		return &recordedTransport{responses: []*http.Response{recorded(
+			`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+			// The first content part of this item is announced at index 3.
+			`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":3,"part":{"type":"output_text","text":""}}`,
+			`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":3,"delta":"x"}`,
+			`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		)}}
+	}
+	tr := skipping()
+	tr2 := skipping
 
-	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+	// Nothing renumbered may reach the consumer first: a consumer cannot unsee
+	// what it has already been given, so the stream must fail before any block
+	// event carrying the wrong order is delivered.
+	stream, streamErr := newPort(t, tr).Stream(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if streamErr != nil {
+		t.Fatal(streamErr)
+	}
+	for ev := range stream {
+		switch ev.Kind {
+		case ai.StreamTextStart, ai.StreamTextDelta, ai.StreamThinkingStart,
+			ai.StreamThinkingDelta, ai.StreamToolCallStart, ai.StreamToolCallDelta:
+			t.Fatalf("a %s event was delivered before the skipped index was caught", ev.Kind)
+		}
+	}
+
+	_, err := newPort(t, tr2()).Generate(context.Background(), ai.Request{
 		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
 	})
 	if err == nil {
@@ -918,5 +940,25 @@ func TestATerminalAtEndOfStreamIsStillRead(t *testing.T) {
 	}
 	if resp.Usage.InputTokens != 6 {
 		t.Fatalf("usage from a terminal at EOF: %d", resp.Usage.InputTokens)
+	}
+}
+
+// TestAPortServesOnlyTheModelItWasBuiltFor: a configured model that is only
+// validated and printed is a second source of truth about which model is in
+// play, and the wrong one to believe when reading a reply.
+func TestAPortServesOnlyTheModelItWasBuiltFor(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{recorded(
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed"}}`,
+	)}}
+	p := newPort(t, tr) // built for "gpt-test"
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "some-other-model", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a request naming a different model was served anyway")
+	}
+	if tr.requests != 0 {
+		t.Fatalf("sent %d requests for a model this port does not serve", tr.requests)
 	}
 }

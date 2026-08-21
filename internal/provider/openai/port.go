@@ -34,7 +34,13 @@ const DefaultBaseURL = "https://api.openai.com/v1"
 // No raw key appears here. A configuration object is printed eventually, and a
 // secret living on one goes with it.
 type Config struct {
-	// Model is required. There is no default and no catalog to consult.
+	// Model is the model this port serves. Required.
+	//
+	// It is not a default: a request names its own model, and one naming a
+	// different model is refused rather than quietly served by this port. A
+	// value that only gets validated and printed is a second source of truth
+	// about which model is in play, and the wrong one to believe when
+	// diagnosing a reply.
 	Model string
 
 	// Transport carries requests. Required, and there is no default: a test

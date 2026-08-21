@@ -20,6 +20,13 @@ import (
 // collects what this produces rather than repeating the work: two
 // request-building paths drift, and only one of them ends up exercised.
 func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEvent, error) {
+	if req.Model != "" && req.Model != p.cfg.Model {
+		return nil, &Error{
+			Failure: FailureRefused,
+			Detail: fmt.Sprintf("this port serves %q; the request named %q",
+				p.cfg.Model, req.Model),
+		}
+	}
 	if req.Model == "" {
 		// No catalog to consult and no default invented: a request that names
 		// nothing would otherwise reach whichever model this port happens to
@@ -196,8 +203,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 				fail(fmt.Errorf("openai: unsupported content block %q", block.Type))
 				return
 			}
-			at, known := blocks[providerIndex(block)]
-			if !known {
+			// Checked HERE, as the block arrives. Validating at the end would
+			// let renumbered content reach the consumer first, and a consumer
+			// cannot unsee what it has already been given.
+			if err := checkAnnounced(held); err != nil {
+				fail(err)
+				return
+			}
+			at, seen := blocks[providerIndex(block)]
+			if !seen {
 				// A block ends before the next begins, so a consumer rendering
 				// as it goes is never told a block is still growing when it is
 				// not. Tool-call blocks are the exception: a provider may
@@ -250,33 +264,6 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		}
 		if !send(closed) {
 			return
-		}
-	}
-
-	// The provider's own ordering is checked against what it announced, not
-	// against what arrived: the adapter renumbers blocks contiguously from zero
-	// whatever the provider sent, so a gap is invisible after conversion.
-	// Accepting a renumbered stream would report an order the provider never
-	// sent.
-	for at, announced := range held.announcedIndices() {
-		if announced != at {
-			fail(fmt.Errorf(
-				"openai: the provider announced item index %d where %d was expected; "+
-					"refusing to renumber a stream that skips", announced, at))
-			return
-		}
-	}
-
-	// Content ordering is checked the same way, because the adapter renumbers
-	// content indices within an item just as it renumbers the items.
-	for item, announced := range held.announcedContent() {
-		for at, index := range announced {
-			if index != at {
-				fail(fmt.Errorf(
-					"openai: item %d announced content index %d where %d was expected; "+
-						"refusing to renumber a stream that skips", item, index, at))
-				return
-			}
 		}
 	}
 
@@ -339,12 +326,6 @@ func describe(block *schema.ContentBlock) (ai.BlockKind, string, ai.ToolCall, bo
 	}
 }
 
-// known reports whether a provider index already has a block.
-func known(blocks map[int]int, index int) bool {
-	_, ok := blocks[index]
-	return ok
-}
-
 // toolSpecs converts this repository's tool descriptions for the adapter.
 func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 	out := make([]*schema.ToolInfo, 0, len(specs))
@@ -352,4 +333,29 @@ func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 		out = append(out, &schema.ToolInfo{Name: spec.Name, Desc: spec.Description})
 	}
 	return out
+}
+
+// checkAnnounced reports a stream whose own indices skip.
+//
+// The adapter renumbers items and their content contiguously from zero whatever
+// the provider sent, so a gap is invisible after conversion, and accepting one
+// would report an order the provider never sent.
+func checkAnnounced(held *capture) error {
+	for at, announced := range held.announcedIndices() {
+		if announced != at {
+			return fmt.Errorf(
+				"openai: the provider announced item index %d where %d was expected; "+
+					"refusing to renumber a stream that skips", announced, at)
+		}
+	}
+	for item, announced := range held.announcedContent() {
+		for at, index := range announced {
+			if index != at {
+				return fmt.Errorf(
+					"openai: item %d announced content index %d where %d was expected; "+
+						"refusing to renumber a stream that skips", item, index, at)
+			}
+		}
+	}
+	return nil
 }
