@@ -418,10 +418,12 @@ func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 	return nil
 }
 
-// OverflowUsage is what the refused attempts cost.
+// OverflowUsage is everything the overflow path used: the transport attempts
+// made while trying to complete a model call, plus the refused calls
+// themselves.
 //
-// Kept separate from the conversation: the calls were paid for and must be
-// auditable, while nothing they returned belongs in what the model is shown.
+// Kept separate from the conversation: all of it was paid for and must be
+// auditable, while nothing it returned belongs in what the model is shown.
 func (s *Session) OverflowUsage() ai.Usage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

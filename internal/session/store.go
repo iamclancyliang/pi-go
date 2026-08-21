@@ -77,12 +77,14 @@ type OverflowAttempt struct {
 	// recovery budget — and restoring it must not consume one either.
 	SpendOnly bool
 
-	// Detail is what the provider reported, kept for auditing rather than for
-	// the model to read.
+	// Detail explains this record for someone auditing it afterwards, rather
+	// than for the model to read. For a refusal it is what the provider
+	// reported; for a transport attempt it says that is what the record is.
 	Detail string
 
-	// Usage is what the refused call still cost. A rejected request is billed
-	// like any other, so dropping it under-reports what the user paid.
+	// Usage is what THIS record's attempt or call used. A request is billed
+	// whether it was answered, refused, or retried at the transport, so
+	// dropping any of them under-reports what the user paid.
 	Usage ai.Usage
 }
 
