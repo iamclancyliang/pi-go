@@ -78,11 +78,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 	kinds := map[int]ai.BlockKind{} // block index -> kind, while it is open
 	next := 0
 
+	cancelled := false
+	// A CONTENT event may be abandoned when the caller stops listening: it is
+	// one of many, and the reply is being cut short anyway.
 	send := func(events ...ai.StreamEvent) bool {
 		for _, ev := range events {
 			select {
 			case out <- ev:
 			case <-ctx.Done():
+				cancelled = true
 				return false
 			}
 		}
@@ -102,6 +106,24 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		}
 		sendTerminal(ev)
 	}
+
+	// A cancelled stream still ends with a terminal carrying what had already
+	// arrived. A consumer that watched a reply appear should not have it vanish
+	// because they stopped it, and a channel that simply closes says nothing
+	// about what they have.
+	defer func() {
+		if !cancelled {
+			return
+		}
+		ev, accErr := acc.Fail(ai.StopAborted, ctx.Err())
+		if accErr != nil {
+			return
+		}
+		if ev.Final != nil {
+			ev.Final.Usage = usageFrom(held.last())
+		}
+		sendTerminal(ev)
+	}()
 
 	startEv, err := acc.Begin()
 	if err != nil {

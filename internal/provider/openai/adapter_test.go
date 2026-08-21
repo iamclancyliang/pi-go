@@ -379,3 +379,48 @@ func TestBlocksArriveInOrderAndTheStreamEndsOnce(t *testing.T) {
 		t.Fatalf("the stream produced %d terminal events, want exactly 1", terminals)
 	}
 }
+
+// TestACancelledStreamStillEnds: a consumer that watched a reply arrive keeps
+// what arrived and is told it was aborted, rather than left with a channel that
+// simply closed.
+func TestACancelledStreamStillEnds(t *testing.T) {
+	events := []string{
+		`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"m","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`,
+	}
+	for i := 0; i < 400; i++ {
+		events = append(events,
+			`{"type":"response.output_text.delta","item_id":"m","output_index":0,"content_index":0,"delta":"x"}`)
+	}
+	tr := &recordedTransport{responses: []*http.Response{recorded(events...)}}
+	p := newPort(t, tr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := p.Stream(ctx, ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var final *ai.AssistantMessage
+	read := 0
+	for ev := range stream {
+		read++
+		if read == 3 {
+			cancel()
+		}
+		if ev.Final != nil {
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		t.Fatal("a cancelled stream closed with no terminal, so a consumer cannot tell " +
+			"an abort from a completed reply")
+	}
+	if final.StopReason != ai.StopAborted {
+		t.Fatalf("terminal reason %v, want %v", final.StopReason, ai.StopAborted)
+	}
+}
