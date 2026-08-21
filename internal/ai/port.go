@@ -201,6 +201,37 @@ func CloneUsages(in []Usage) []Usage {
 	return out
 }
 
+// Add accumulates another call's usage into this one.
+//
+// Every field, not just the two obvious ones: a running total that quietly
+// drops cache reads and reasoning reports less than was used, and drops the
+// reporting state too, so the result claims the provider said nothing.
+func (u Usage) Add(other Usage) Usage {
+	// Counts accumulate whatever the flag says. Skipping an entry because it
+	// was not marked reported drops real numbers — the same silent loss this
+	// method exists to stop.
+	sum := u.Clone()
+	sum.Reported = sum.Reported || other.Reported
+	sum.InputTokens += other.InputTokens
+	sum.OutputTokens += other.OutputTokens
+	sum.CacheReadTokens = addOptional(sum.CacheReadTokens, other.CacheReadTokens)
+	sum.ReasoningTokens = addOptional(sum.ReasoningTokens, other.ReasoningTokens)
+	return sum
+}
+
+// addOptional keeps absent distinct from zero while summing: two silences stay
+// silent, and a reported value plus silence stays the reported value.
+func addOptional(a, b *int) *int {
+	if b == nil {
+		return a
+	}
+	total := *b
+	if a != nil {
+		total += *a
+	}
+	return &total
+}
+
 // Total is every token the call reported using.
 //
 // Cache reads are included. InputTokens is the UNCACHED remainder of the

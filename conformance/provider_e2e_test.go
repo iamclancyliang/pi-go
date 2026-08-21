@@ -710,3 +710,46 @@ func TestSeveralProviderToolCallsKeepTheOrderTheModelAsked(t *testing.T) {
 		t.Fatalf("results landed as %v, want source order %v", answered, want)
 	}
 }
+
+// TestEveryRefusedAttemptIsRecorded: a call that retried and then overflowed was
+// billed for each attempt, and folding them into one entry loses the boundary
+// the ledger exists to keep.
+func TestEveryRefusedAttemptIsRecorded(t *testing.T) {
+	transport := &sequenceTransport{responses: []*http.Response{
+		{StatusCode: 503, Body: io.NopCloser(strings.NewReader(
+			`{"error":{"message":"busy"},"usage":{"prompt_tokens":70,"completion_tokens":0}}`))},
+		// No content: recovery is deliberately skipped once blocks have been
+		// shown, so an overflow that matters for recovery is one detected
+		// before anything reached the consumer.
+		{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseReply(
+			`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1100001,"completion_tokens":0}}`)))},
+		{StatusCode: 200, Body: io.NopCloser(strings.NewReader(sseReply(
+			`{"choices":[{"delta":{"content":"shorter"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":1}}`)))},
+	}}
+
+	port, err := deepseek.New(deepseek.Config{
+		Model: "deepseek-v4-flash", Transport: transport, Environment: fixedEnv{},
+		MaxOutputTokens: 32, ContextWindow: 1_100_000,
+		Retry: deepseek.RetryPolicy{MaxRetries: 2, BaseDelay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("deepseek.New: %v", err)
+	}
+	registry, _, _ := tools.NewFixtureRegistry()
+	sess := session.New("You are pi-go.")
+	agent, err := runtime.New(runtime.Config{
+		Model: port, ModelName: "deepseek-v4-flash", Tools: registry,
+		Session: sess, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	_ = agent.Run(context.Background(), "hello")
+
+	if n := sess.OverflowAttempts(); n != 2 {
+		t.Fatalf("a retry followed by an overflow recorded %d refused attempts, want 2", n)
+	}
+	if got := sess.OverflowUsage().InputTokens; got != 70+1100001 {
+		t.Fatalf("refused attempts total %d input tokens, want %d", got, 70+1100001)
+	}
+}

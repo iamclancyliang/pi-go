@@ -1097,10 +1097,10 @@ func TestABlockEndsBeforeTheNextBegins(t *testing.T) {
 // fixtures carry the same status; only the typed cause differs.
 func TestExhaustionInsideARateLimitIsStillTerminal(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		body     string
-		classify func(status int, body []byte) deepseek.Failure
-		wantReqs int
+		name        string
+		body        string
+		wantReqs    int
+		wantFailure deepseek.Failure
 	}{
 		{
 			name:     "an ordinary throttle is retried",
@@ -1108,9 +1108,10 @@ func TestExhaustionInsideARateLimitIsStillTerminal(t *testing.T) {
 			wantReqs: 2,
 		},
 		{
-			name:     "exhaustion carried in the same status is not",
-			body:     `{"error":{"message":"You have run out of balance","code":"insufficient_balance"}}`,
-			wantReqs: 1,
+			name:        "exhaustion carried in the same status is not",
+			body:        `{"error":{"message":"You have run out of balance","code":"insufficient_balance"}}`,
+			wantReqs:    1,
+			wantFailure: deepseek.FailureQuota,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1120,16 +1121,35 @@ func TestExhaustionInsideARateLimitIsStillTerminal(t *testing.T) {
 			}}
 			p, err := deepseek.New(deepseek.Config{
 				Model: "m", Transport: tr, Environment: env{"DEEPSEEK_API_KEY": "k"},
-				MaxOutputTokens: 8,
-				Retry:           deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond},
-				ClassifyBody:    deepseek.ExhaustionInBody,
+				MaxOutputTokens:  8,
+				Retry:            deepseek.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond},
+				DetectExhaustion: deepseek.ExhaustionInBody,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _ = p.Generate(context.Background(), ai.Request{Model: "m"})
+			_, genErr := p.Generate(context.Background(), ai.Request{Model: "m"})
 			if tr.requests != tc.wantReqs {
 				t.Fatalf("made %d requests, want %d", tr.requests, tc.wantReqs)
+			}
+			// The request count alone would pass with the wrong classification,
+			// so the typed cause is asserted too — that is the half of "same
+			// status, different cause" the count cannot see.
+			if tc.wantFailure == "" {
+				if genErr != nil {
+					t.Fatalf("the retry succeeded but returned %v", genErr)
+				}
+				return
+			}
+			var classified *deepseek.Error
+			if !errors.As(genErr, &classified) {
+				t.Fatalf("failure %v is not classified", genErr)
+			}
+			if classified.Failure != tc.wantFailure {
+				t.Fatalf("classified %s, want %s", classified.Failure, tc.wantFailure)
+			}
+			if classified.Failure.Retryable() {
+				t.Fatalf("%s is marked retryable", classified.Failure)
 			}
 		})
 	}

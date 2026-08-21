@@ -388,8 +388,7 @@ func (s *Session) RecordOverflowAttempt(detail string, usage ai.Usage) error {
 		}
 	}
 	s.overflowAttempts++
-	s.overflowUsage.InputTokens += usage.InputTokens
-	s.overflowUsage.OutputTokens += usage.OutputTokens
+	s.overflowUsage = s.overflowUsage.Add(usage)
 	return nil
 }
 
@@ -536,10 +535,7 @@ func (s *Session) Usage() ai.Usage {
 	var cacheRead, reasoning int
 	var sawCacheRead, sawReasoning bool
 	for _, a := range s.attempts {
-		if !a.Reported {
-			continue
-		}
-		total.Reported = true
+		total.Reported = total.Reported || a.Reported
 		total.InputTokens += a.InputTokens
 		total.OutputTokens += a.OutputTokens
 		if a.CacheReadTokens != nil {

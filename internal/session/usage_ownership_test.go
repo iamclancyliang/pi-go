@@ -29,3 +29,58 @@ func TestTheLedgerOwnsWhatItRecords(t *testing.T) {
 		t.Fatalf("a reader rewrote the ledger: %d", *again[0].CacheReadTokens)
 	}
 }
+
+// TestOverflowKeepsEveryReportedField: the refused attempt was billed, and the
+// ledger has to carry what the provider actually said — including the optional
+// counts and the fact that it reported at all. Accumulating only the two
+// obvious fields reports less than was used and then claims nothing was said.
+func TestOverflowKeepsEveryReportedField(t *testing.T) {
+	sess := session.New("system")
+	if err := sess.RecordOverflowAttempt("refused", ai.Usage{
+		InputTokens: 1000, OutputTokens: 3,
+		CacheReadTokens: count(5), ReasoningTokens: count(2), Reported: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := sess.OverflowUsage()
+	if got.CacheReadTokens == nil || *got.CacheReadTokens != 5 {
+		t.Fatalf("cache reads survived as %v", got.CacheReadTokens)
+	}
+	if got.ReasoningTokens == nil || *got.ReasoningTokens != 2 {
+		t.Fatalf("reasoning survived as %v", got.ReasoningTokens)
+	}
+	if !got.Reported {
+		t.Fatal("a recorded attempt claims the provider reported nothing")
+	}
+	if got.Total() != 1008 {
+		t.Fatalf("total %d, want 1008 (1000 uncached + 5 cached + 3 output)", got.Total())
+	}
+}
+
+// TestSeveralRefusedAttemptsAreEachRecorded: a call that retried before
+// overflowing was billed for every attempt, and one entry loses the boundary.
+func TestSeveralRefusedAttemptsAreEachRecorded(t *testing.T) {
+	sess := session.New("system")
+	for _, used := range []ai.Usage{
+		{InputTokens: 70, Reported: true},
+		{InputTokens: 30, Reported: true},
+	} {
+		if err := sess.RecordOverflowAttempt("refused", used); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := sess.OverflowAttempts(); n != 2 {
+		t.Fatalf("recorded %d refused attempts, want 2", n)
+	}
+	if got := sess.OverflowUsage().InputTokens; got != 100 {
+		t.Fatalf("refused attempts total %d input tokens, want 100", got)
+	}
+	// Neither attempt reported the optional counts, so the sum must not claim
+	// they were reported as zero.
+	total := sess.OverflowUsage()
+	if total.CacheReadTokens != nil || total.ReasoningTokens != nil {
+		t.Fatalf("summing silences produced cache=%v reasoning=%v",
+			total.CacheReadTokens, total.ReasoningTokens)
+	}
+}

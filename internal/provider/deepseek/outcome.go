@@ -144,25 +144,27 @@ func stopReason(raw string) (ok bool, truncated bool, failure Failure) {
 // Consumed reports what the failed call used, so a ledger can hold it.
 func (e *Error) Consumed() []ai.Usage { return e.Usage }
 
-// BodyClassifier refines a status-derived failure using the response body.
+// ExhaustionDetector reports whether a response body confirms an exhausted
+// balance that its status code did not.
+//
+// It returns a BOOLEAN rather than a failure, so the one-way rule is a property
+// of the type rather than a promise in a comment: this can turn something into
+// quota, and it cannot turn quota into anything. An earlier version took a
+// failure and documented that it "may only make a failure more terminal" —
+// which the type happily allowed a caller to violate, downgrading an exhausted
+// balance into a retryable throttle and spending against a balance that is
+// already gone.
 //
 // It exists because a status code is not always enough: some providers report
-// an exhausted balance inside an ordinary rate-limit response, and retrying
-// that spends money on a request that cannot succeed. DeepSeek does not — it
-// has its own status for exhaustion — so this is nil by default and the
-// classification stays purely typed.
-type BodyClassifier func(status int, body []byte) Failure
+// exhaustion inside an ordinary rate-limit response. DeepSeek does not — it has
+// its own status for it — so this is nil by default.
+type ExhaustionDetector func(status int, body []byte) bool
 
 // ExhaustionInBody recognises an exhausted balance reported inside another
 // status, using the provider's own error code rather than prose.
-//
-// This is the one place a body is inspected, and it may only make a failure
-// MORE terminal. It cannot turn a terminal failure into a retryable one, so a
-// misreading here can waste a retry at worst, never spend against a balance
-// that is already gone.
-func ExhaustionInBody(status int, body []byte) Failure {
+func ExhaustionInBody(status int, body []byte) bool {
 	if status != http.StatusTooManyRequests {
-		return ""
+		return false
 	}
 	var parsed struct {
 		Error struct {
@@ -170,10 +172,7 @@ func ExhaustionInBody(status int, body []byte) Failure {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
+		return false
 	}
-	if parsed.Error.Code == "insufficient_balance" {
-		return FailureQuota
-	}
-	return ""
+	return parsed.Error.Code == "insufficient_balance"
 }

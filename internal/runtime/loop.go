@@ -590,7 +590,7 @@ type observingPort struct {
 // shortening the context would resend what was just refused, and a second refusal
 // is the operation failing — not an empty answer, which reads to a caller as the
 // model having nothing to say.
-func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent ai.Usage, cause error) (ai.Response, error) {
+func (o *observingPort) recoverFromOverflow(ctx context.Context, req ai.Request, spent []ai.Usage, cause error) (ai.Response, error) {
 	o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 		e.Detail.Err = cause.Error()
 	})
@@ -984,7 +984,10 @@ func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested st
 	if !ok {
 		return nil, false
 	}
-	retry, err := o.shortenForRetry(ctx, req, failed.Final.Cause, failed.Final.Usage)
+	// Every attempt behind the refusal, not only the last: the earlier ones were
+	// billed too.
+	spent := append(ai.CloneUsages(failed.Final.EarlierAttempts), failed.Final.Usage.Clone())
+	retry, err := o.shortenForRetry(ctx, req, failed.Final.Cause, spent)
 	if err != nil {
 		// Recovery itself failed. Reporting the refusal it was recovering from
 		// sends a reader after the context size when the shortening is what
@@ -1027,10 +1030,17 @@ func (o *observingPort) reopen(ctx context.Context, req ai.Request, requested st
 // terminal failure has already been recorded, so the caller reports the original
 // refusal rather than inventing a different one.
 func (o *observingPort) shortenForRetry(ctx context.Context, req ai.Request,
-	cause error, spent ai.Usage) (*ai.Request, error) {
+	cause error, spent []ai.Usage) (*ai.Request, error) {
 
-	if err := o.session.RecordOverflowAttempt(cause.Error(), spent); err != nil {
-		return nil, err
+	// One record per attempt: a call that retried before overflowing was billed
+	// for each of them.
+	if len(spent) == 0 {
+		spent = []ai.Usage{{}}
+	}
+	for _, used := range spent {
+		if err := o.session.RecordOverflowAttempt(cause.Error(), used); err != nil {
+			return nil, err
+		}
 	}
 
 	if o.summarize == nil || o.session.OverflowAttempts() > 1 {
@@ -1313,32 +1323,21 @@ func (o *observingPort) recordConsumed(err error) {
 	}
 }
 
-// consumedFrom is what a failed call used, preferring what the failure itself
-// reports over an empty response.
-func consumedFrom(err error, fallback ai.Usage) ai.Usage {
+// consumedFrom is what a failed call used, one entry per attempt.
+//
+// Kept apart rather than summed: a call that retried before overflowing spent
+// on every attempt, and folding them into one entry loses the boundaries the
+// ledger is supposed to keep.
+func consumedFrom(err error, fallback ai.Usage) []ai.Usage {
+	// The failure is preferred because it knows about every attempt; the
+	// response's own usage is the fallback. Neither is filtered on the reported
+	// flag: a caller that filled in counts without setting it still reported
+	// them, and dropping those would lose real numbers.
 	var reporter ai.UsageReporter
-	if !errors.As(err, &reporter) {
-		return fallback
-	}
-	var total ai.Usage
-	for _, u := range reporter.Consumed() {
-		if !u.Reported {
-			continue
-		}
-		total.Reported = true
-		total.InputTokens += u.InputTokens
-		total.OutputTokens += u.OutputTokens
-		if u.CacheReadTokens != nil {
-			sum := u.CacheReadTokens
-			if total.CacheReadTokens != nil {
-				combined := *total.CacheReadTokens + *u.CacheReadTokens
-				sum = &combined
-			}
-			total.CacheReadTokens = sum
+	if errors.As(err, &reporter) {
+		if consumed := reporter.Consumed(); len(consumed) > 0 {
+			return ai.CloneUsages(consumed)
 		}
 	}
-	if !total.Reported {
-		return fallback
-	}
-	return total
+	return []ai.Usage{fallback.Clone()}
 }

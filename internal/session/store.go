@@ -177,8 +177,7 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			// Durable, and deliberately not part of the conversation: it is
 			// counted against the recovery budget and never projected.
 			s.overflowAttempts++
-			s.overflowUsage.InputTokens += e.Overflow.Usage.InputTokens
-			s.overflowUsage.OutputTokens += e.Overflow.Usage.OutputTokens
+			s.overflowUsage = s.overflowUsage.Add(e.Overflow.Usage)
 			continue
 		case e.Failure != nil:
 			s.failure = e.Failure

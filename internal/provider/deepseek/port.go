@@ -57,10 +57,13 @@ type Config struct {
 	// is the field this provider reads.
 	MaxOutputTokens int
 
-	// ClassifyBody refines a status-derived failure using the response body.
-	// Optional, and nil for this provider: DeepSeek reports an exhausted
-	// balance as its own status, so nothing needs to read a body to find it.
-	ClassifyBody BodyClassifier
+	// DetectExhaustion recognises an exhausted balance hidden inside another
+	// status. Optional, and nil for this provider: DeepSeek reports exhaustion
+	// as its own status, so nothing needs to read a body to find it.
+	//
+	// It can only classify something AS exhaustion, never away from it, which
+	// is why it returns a boolean rather than a failure.
+	DetectExhaustion ExhaustionDetector
 
 	// Retry bounds retries of one request. The zero value is one request and no
 	// retry, which is what ships.
@@ -379,10 +382,8 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 		// classification has to happen BEFORE the retry decision.
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		failure := classifyStatus(resp.StatusCode)
-		if p.cfg.ClassifyBody != nil {
-			if refined := p.cfg.ClassifyBody(resp.StatusCode, raw); refined != "" {
-				failure = refined
-			}
+		if p.cfg.DetectExhaustion != nil && p.cfg.DetectExhaustion(resp.StatusCode, raw) {
+			failure = FailureQuota
 		}
 		decision, capErr := decideRetry(resp, failure, attempt, p.cfg.Retry)
 		if capErr != nil {
