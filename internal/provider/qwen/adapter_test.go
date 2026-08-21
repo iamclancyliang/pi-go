@@ -943,6 +943,41 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	if final.Usage.Reported != collected.Usage.Reported {
 		t.Fatal("the two paths disagree about whether usage was reported at all")
 	}
+
+	// And how the reply ended. The collected path carries the ending as the one
+	// thing a caller acts on — whether the answer was cut short — so a
+	// disagreement here is a caller told a truncated reply was complete.
+	cut := []string{
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"role":"assistant","content":"half an "}}]}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":2,"completion_tokens":9}}`,
+	}
+	short, err := ask(t, newPort(t, &recordedTransport{
+		responses: []*http.Response{streamed(cut...)}}))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !short.Truncated {
+		t.Fatal("a reply the provider cut short was collected as complete")
+	}
+	shortEvents, err := newPort(t, &recordedTransport{
+		responses: []*http.Response{streamed(cut...)}}).Stream(context.Background(), ai.Request{
+		Model: "qwen-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var shortFinal *ai.AssistantMessage
+	for ev := range shortEvents {
+		if ev.Terminal() {
+			shortFinal = ev.Final
+		}
+	}
+	if shortFinal.StopReason != ai.StopLength {
+		t.Fatalf("streamed ending %q, want the cap doing its job", shortFinal.StopReason)
+	}
+	if short.Truncated != (shortFinal.StopReason == ai.StopLength) {
+		t.Fatal("the two paths disagree about whether the reply was cut short")
+	}
 }
 
 // TestABodyReadFailureDoesNotCarryTheCallsKey: a read that fails partway can
