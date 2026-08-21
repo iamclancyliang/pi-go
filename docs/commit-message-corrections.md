@@ -68,15 +68,15 @@ and both halves were wrong.
 
 ## Wording that does not stand on its own
 
-Five messages use terms that mean nothing to a reader who was not present when they were written:
-"this tranche" in `b2347d9` and `aa7e137`, "obligations list" in `9acdd46`, "only temporary checks
-had covered" and "hung for ninety seconds" in `b8e5156`, and "temporary" again in `e0ca52c`.
+Four messages use terms that mean nothing to a reader who was not present when they were written:
+"this tranche" in `b2347d9` and `aa7e137`, "obligations list" in `9acdd46`, and both "only temporary
+checks had covered" and "hung for ninety seconds" in `b8e5156`.
 
 What they referred to: "this tranche" meant the set of content-block kinds the adapter handled at
 that point, which was text, reasoning and tool calls — anything else ended the reply with a failure
 naming it. "obligations list" meant `docs/specs/provider-port-obligations.md`, the table of
-behaviours every provider adapter has to carry. The rest describe how the work was checked before it
-was committed, which is not a fact about the change: what `b8e5156` and `e0ca52c` did was add
+behaviours every provider adapter has to carry. The two in `b8e5156` describe how the work was
+checked before it was committed, which is not a fact about the change: what that commit did was add
 regression tests for behaviours that had none.
 
 A commit message is read years later by someone with only the diff for context. A word that requires
