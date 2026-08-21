@@ -43,6 +43,16 @@ type Message struct {
 
 	// ToolCallID is set on tool messages, pairing back to the ToolCall.
 	ToolCallID string
+
+	// Reasoning is what an assistant worked through before answering, when the
+	// provider reports it separately from the answer.
+	//
+	// Kept apart from Content because they are different things: Content is
+	// what was said, and a renderer showing reasoning as the answer would be
+	// quoting the model's notes. It is kept AT ALL because some providers
+	// require the reasoning of earlier turns to be sent back with the next
+	// request, and a history that dropped it cannot continue that conversation.
+	Reasoning string
 }
 
 // ToolSpec describes a tool to the model. It is deliberately a copy of the
@@ -75,14 +85,26 @@ type Response struct {
 	Content   string
 	ToolCalls []ToolCall
 
+	// Reasoning is what the model worked through, when the provider reports it
+	// apart from the answer. It is not part of Content: a caller showing it as
+	// the answer would be quoting the model's notes rather than its reply.
+	Reasoning string
+
 	// Model is the model that actually served the request, which is not
 	// necessarily Request.Model — a middleware may substitute it. Reporting
 	// what served the call is what makes model_changed provable rather than
 	// assumed.
 	Model string
 
-	// Usage is what the provider says the call cost. Zero means the provider
-	// reported nothing, which is different from a call that cost nothing.
+	// EarlierAttempts is what attempts before this one reported using.
+	//
+	// A call that retried spent on every attempt, and a ledger holding only the
+	// one that succeeded undercounts exactly the spend the retry created.
+	EarlierAttempts []Usage
+
+	// Usage is the token counts the provider reported for this call. It is not
+	// a money figure: no provider here reports one, and any currency attached
+	// downstream is computed from published prices rather than stated.
 	Usage Usage
 
 	// Truncated reports that the model stopped because it ran out of room
@@ -128,10 +150,39 @@ type StreamingPort interface {
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
+
+	// CacheReadTokens and ReasoningTokens are absent when the provider did not
+	// report them, which is not the same as reporting zero.
+	//
+	// Zero is a real answer: a model that did no reasoning reports no reasoning
+	// tokens, and a request that missed the cache reports no cache reads.
+	// Collapsing "did none" into "did not say" leaves a ledger unable to tell a
+	// provider that reasoned without billing tokens from one that never said how
+	// many it used. A pointer is the smallest thing that can hold that difference.
+	//
+	// ReasoningTokens is a SUBSET of OutputTokens, not an addition to it.
+	// Adding them double-counts.
+	CacheReadTokens *int
+	ReasoningTokens *int
+
+	// Reported distinguishes a provider that said nothing about usage from one
+	// that reported a call using no tokens. Callers that record consumption must
+	// not treat silence as nothing used.
+	Reported bool
 }
 
-// Total is the whole cost of the call.
+// Total is every token the call reported using.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
+
+// UsageReporter is an error that knows what the call it describes consumed.
+//
+// A failed call still read its request, and on the collected path the failure is
+// all the caller gets — there is no response to carry the counts. Without this
+// the same failure would be ledgered when streamed and free when not, which is
+// a difference in accounting created purely by how the reply was read.
+type UsageReporter interface {
+	Consumed() []Usage
+}
 
 // ErrContextOverflow reports that a request was refused for exceeding the
 // model's context, rather than for any transient reason.

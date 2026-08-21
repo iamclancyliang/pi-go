@@ -53,6 +53,9 @@ type Block struct {
 type AssistantMessage struct {
 	Blocks []Block
 
+	// EarlierAttempts is what attempts before this one reported using.
+	EarlierAttempts []Usage
+
 	// StopReason is empty while the reply is still arriving.
 	StopReason StopReason
 

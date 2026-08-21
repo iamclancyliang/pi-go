@@ -730,6 +730,11 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		return o.recoverFromOverflow(ctx, req, resp.Usage, err)
 	}
 	if err != nil {
+		// A failure that knows what it consumed is ledgered like any other
+		// call. Otherwise the same failure would count when streamed and be
+		// free when collected — an accounting difference created by nothing
+		// but how the reply was read.
+		o.recordConsumed(err)
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()
@@ -757,12 +762,20 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		e.Detail.ToolCallIDs = ids
 	})
 
+	// What the call reported using is recorded whether or not the reply is
+	// usable: tokens read before a failure were still read.
+	for _, earlier := range resp.EarlierAttempts {
+		o.session.RecordUsage(earlier)
+	}
+	o.session.RecordUsage(resp.Usage)
+
 	// The reply is recorded before it is acted on. A reply that was answered
 	// but never recorded leaves the tool calls that follow it referring to a
 	// request that history does not contain.
 	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   resp.Content,
+		Reasoning: resp.Reasoning,
 		ToolCalls: resp.ToolCalls,
 	}); err != nil {
 		return ai.Response{}, err
@@ -846,6 +859,10 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 			e.Detail.Model = requested
 			e.Detail.Err = err.Error()
 		})
+		// A failure that knows what it consumed is ledgered even though no reply
+		// ever arrived: the attempts behind it read the request.
+		o.recordConsumed(err)
+
 		// A reply that failed before it began is still a reply that ended. An
 		// observer told nothing waits for an end that is not coming, and cannot
 		// tell this from a stream still being set up.
@@ -1068,7 +1085,7 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 		})
 	}
 
-	text, calls := flatten(final)
+	text, reasoning, calls := flatten(final)
 	ids := make([]string, 0, len(calls))
 	for _, c := range calls {
 		ids = append(ids, c.ID)
@@ -1082,6 +1099,14 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 		}
 	})
 
+	// Usage is recorded whether or not the reply is usable. A reply that failed
+	// partway still had its request read, and a ledger that dropped those
+	// tokens would be optimistic about exactly the calls that went wrong.
+	for _, earlier := range final.EarlierAttempts {
+		o.session.RecordUsage(earlier)
+	}
+	o.session.RecordUsage(final.Usage)
+
 	// A FAILED reply is not recorded. Nothing acts on it, and writing a reply
 	// the model did not finish would leave history asserting something was said.
 	if event.Kind != ai.StreamDone {
@@ -1093,6 +1118,7 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 	if err := o.session.Append(ai.Message{
 		Role:      ai.RoleAssistant,
 		Content:   text,
+		Reasoning: reasoning,
 		ToolCalls: calls,
 	}); err != nil {
 		return err
@@ -1117,18 +1143,23 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 // block structure belongs to the reply as it arrived. Text blocks are joined in
 // order; thinking is left out, because it is the model reasoning rather than
 // something it said.
-func flatten(m *ai.AssistantMessage) (string, []ai.ToolCall) {
-	var text string
+func flatten(m *ai.AssistantMessage) (string, string, []ai.ToolCall) {
+	var text, reasoning string
 	var calls []ai.ToolCall
 	for _, block := range m.Blocks {
 		switch block.Kind {
 		case ai.BlockText:
 			text += block.Text
+		case ai.BlockThinking:
+			// Kept, not merged: some providers require it back on the next
+			// request, and dropping it here would silently end the
+			// conversation's ability to continue.
+			reasoning += block.Text
 		case ai.BlockToolCall:
 			calls = append(calls, block.Call)
 		}
 	}
-	return text, calls
+	return text, reasoning, calls
 }
 
 // recordTerminal publishes and records a finished stream, keeping any failure.
@@ -1263,4 +1294,19 @@ func (o *observingPort) recoveryFailure() error {
 	cause := o.failed
 	o.failed = nil
 	return cause
+}
+
+// recordConsumed ledgers what a failed call used, when the failure knows.
+//
+// A failure is sometimes all a caller receives — no response, and on a stream
+// that never started, no events either. Without this the same failure would
+// count when it arrived one way and be free when it arrived another.
+func (o *observingPort) recordConsumed(err error) {
+	var reporter ai.UsageReporter
+	if !errors.As(err, &reporter) {
+		return
+	}
+	for _, u := range reporter.Consumed() {
+		o.session.RecordUsage(u)
+	}
 }

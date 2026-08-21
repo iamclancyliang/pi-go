@@ -57,6 +57,14 @@ type Session struct {
 	// overflowUsage accumulates what the refused attempts cost.
 	overflowUsage ai.Usage
 
+	// attempts is what each model call reported using, kept individually.
+	//
+	// A call that retried spent on every attempt, so a ledger holding only the
+	// last one undercounts exactly the spend the retry created. The total is
+	// derived from these rather than accumulated into a running field, because
+	// a running total can be added to twice and there is then no way to tell.
+	attempts []ai.Usage
+
 	// overflowAttempts counts recoveries tried against the current input. It is
 	// rebuilt from the store, so a restart cannot hand the run a fresh budget.
 	overflowAttempts int
@@ -487,4 +495,65 @@ func cloneMessages(in []ai.Message) []ai.Message {
 		out[i] = cm
 	}
 	return out
+}
+
+// RecordUsage adds what one model call reported using.
+//
+// Every attempt is kept, including the ones that failed after the provider had
+// already read the request: tokens consumed before a failure are still
+// consumed, and a ledger that dropped them would be quietly optimistic about
+// exactly the calls that went wrong.
+func (s *Session) RecordUsage(u ai.Usage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attempts = append(s.attempts, u)
+}
+
+// Attempts is what each model call reported, in order.
+func (s *Session) Attempts() []ai.Usage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]ai.Usage(nil), s.attempts...)
+}
+
+// Usage is the whole conversation's reported consumption, derived by summing
+// the attempts.
+//
+// Derived on every call rather than maintained: a total kept alongside the
+// entries is a second source of truth, and the two disagree the first time one
+// is updated without the other.
+//
+// Reported is true when any attempt reported anything. An unreported optional
+// field stays unreported in the total: summing what was never said would invent
+// a number, and a zero here would claim the provider said zero.
+func (s *Session) Usage() ai.Usage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var total ai.Usage
+	var cacheRead, reasoning int
+	var sawCacheRead, sawReasoning bool
+	for _, a := range s.attempts {
+		if !a.Reported {
+			continue
+		}
+		total.Reported = true
+		total.InputTokens += a.InputTokens
+		total.OutputTokens += a.OutputTokens
+		if a.CacheReadTokens != nil {
+			cacheRead += *a.CacheReadTokens
+			sawCacheRead = true
+		}
+		if a.ReasoningTokens != nil {
+			reasoning += *a.ReasoningTokens
+			sawReasoning = true
+		}
+	}
+	if sawCacheRead {
+		total.CacheReadTokens = &cacheRead
+	}
+	if sawReasoning {
+		total.ReasoningTokens = &reasoning
+	}
+	return total
 }
