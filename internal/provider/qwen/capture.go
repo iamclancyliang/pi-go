@@ -17,7 +17,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -55,9 +54,8 @@ type terminal struct {
 // no shared table keyed by anything, so no failure or cancellation inside the
 // adapter can attach one call's terminal to another request.
 type capture struct {
-	mu       sync.Mutex
-	requests int
-	seen     terminal
+	mu   sync.Mutex
+	seen terminal
 
 	// failure is the classified reason a request was refused, when one was.
 	failure error
@@ -79,18 +77,6 @@ type announcement struct {
 	// provider sends once, on the fragment that opens the call.
 	named bool
 	id    string
-}
-
-func (c *capture) startAttempt() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.requests++
-}
-
-func (c *capture) requestCount() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.requests
 }
 
 // observe records what the reply reported, keeping the last value of each
@@ -168,11 +154,10 @@ func (c *capture) anonymousFragments() []string {
 	return append([]string(nil), c.anonymous...)
 }
 
-// captureTransport counts requests and reads the provider's own metadata.
+// captureTransport reads the provider's own metadata as it goes past.
 //
-// It does both because both need the same vantage point, but they are proven
-// separately: a count that is right says nothing about whether the metadata was
-// read, and vice versa.
+// It does not count requests: the injected transport already answers that from
+// the outside, and a second counter nobody reads is a claim with no reader.
 type captureTransport struct {
 	inner   http.RoundTripper
 	capture *capture
@@ -180,7 +165,6 @@ type captureTransport struct {
 }
 
 func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.capture.startAttempt()
 	resp, err := t.inner.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err
@@ -388,9 +372,4 @@ func usageFromBody(raw []byte) (ai.Usage, bool) {
 		return ai.Usage{}, false
 	}
 	return usageFrom(body.toTerminal()), true
-}
-
-// eventStream reports a response the provider is streaming.
-func eventStream(h http.Header) bool {
-	return strings.Contains(h.Get("Content-Type"), "text/event-stream")
 }
