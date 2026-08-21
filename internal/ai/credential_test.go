@@ -307,3 +307,54 @@ func TestACopyAndItsOriginalDoNotRecordOverEachOther(t *testing.T) {
 		t.Fatalf("the copy recorded over the original: %d", got[len(got)-1].InputTokens)
 	}
 }
+
+// TestNoEnvironmentIsATypedAbsenceRatherThanAPanic: a caller that configured no
+// environment and stored nothing has configured no credential. Reaching for the
+// lookup anyway ends the process on the one path where a clear message matters
+// most, since what the user has to fix is a setting.
+func TestNoEnvironmentIsATypedAbsenceRatherThanAPanic(t *testing.T) {
+	_, err := ai.ResolveCredential(context.Background(), "p", nil, "", []string{"ANY"})
+	if !errors.Is(err, ai.ErrNoCredential) {
+		t.Fatalf("no environment produced %v", err)
+	}
+
+	// A stored value still resolves: the environment is only needed when there
+	// is nothing to resolve without it.
+	found, err := ai.ResolveCredential(context.Background(), "p", nil, "from-store", []string{"ANY"})
+	if err != nil || found.Key() != "from-store" {
+		t.Fatalf("a stored key needed an environment: %v, %v", found, err)
+	}
+}
+
+// TestAFailureReadsAsWhatItIs: a failure is read by a person deciding what to
+// change. One with no response behind it must not print a status it never had,
+// and one with a status must show it — a report that says "status 0" sends that
+// person looking for a response that does not exist.
+func TestAFailureReadsAsWhatItIs(t *testing.T) {
+	withResponse := (&ai.ProviderError{
+		Provider: "p", Failure: ai.FailureThrottled, Status: 429, Detail: "slow down",
+	}).Error()
+	if !strings.Contains(withResponse, "429") || !strings.Contains(withResponse, "slow down") {
+		t.Fatalf("a refused request did not report its status: %s", withResponse)
+	}
+
+	withNone := (&ai.ProviderError{
+		Provider: "p", Failure: ai.FailureAuth, Detail: "no credential",
+	}).Error()
+	if strings.Contains(withNone, "status") || strings.Contains(withNone, "0") {
+		t.Fatalf("a failure with no response invented one: %s", withNone)
+	}
+	if !strings.Contains(withNone, "no credential") {
+		t.Fatalf("the reason was lost: %s", withNone)
+	}
+}
+
+// TestCopyingNothingIsNothing: Clone is reached through an error value that may
+// be absent, and a copy that panics on absence turns a report into a crash at
+// the moment something has already gone wrong.
+func TestCopyingNothingIsNothing(t *testing.T) {
+	var absent *ai.ProviderError
+	if absent.Clone() != nil {
+		t.Fatal("copying nothing produced something")
+	}
+}
