@@ -60,9 +60,11 @@ note made while reading this repository's provider contract against its sources.
 reader's route through the code on one day; it is not something this repository documents, and it
 has no reader once that reading is finished.
 
-Untracking removes it from later commits only. It remains in the history at `651f0ab`, where it was
-added, and it remains on disk. Saying otherwise — as an earlier version of this entry did — would
-describe a reversal that git does not perform.
+What `df327fd` did, precisely: it removed the file from the tracked tree. It is still reachable in
+the history at `651f0ab`, where it was added, and a fresh checkout of any later commit does not
+contain it. Whether it exists in a given working copy is a fact about that copy, not about this
+repository — an earlier version of this entry said it was left "on disk and out of the history",
+and both halves were wrong.
 
 ## Wording that does not stand on its own
 
