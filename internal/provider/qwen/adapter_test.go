@@ -895,7 +895,7 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"the "}}]}`,
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
 		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"alpha","arguments":"{}"}}]}}]}`,
-		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4}}}`,
+		`{"id":"c1","model":"qwen-served","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}`,
 	}
 
 	collected, err := ask(t, newPort(t, &recordedTransport{
@@ -959,6 +959,16 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 	if final.Model != collected.Model {
 		t.Fatalf("streamed model %q, collected %q", final.Model, collected.Model)
 	}
+	// Field by field, not by the total. A total is symmetric: swapping what was
+	// read for what was written adds up the same and bills the wrong side.
+	if final.Usage.InputTokens != collected.Usage.InputTokens {
+		t.Fatalf("streamed %d input tokens, collected %d",
+			final.Usage.InputTokens, collected.Usage.InputTokens)
+	}
+	if final.Usage.OutputTokens != collected.Usage.OutputTokens {
+		t.Fatalf("streamed %d output tokens, collected %d",
+			final.Usage.OutputTokens, collected.Usage.OutputTokens)
+	}
 	if final.Usage.Total() != collected.Usage.Total() {
 		t.Fatalf("streamed total %d, collected %d", final.Usage.Total(), collected.Usage.Total())
 	}
@@ -976,8 +986,13 @@ func TestStreamingAndCollectingAgree(t *testing.T) {
 		t.Fatalf("streamed reasoning tokens %v, collected %v",
 			final.Usage.ReasoningTokens, collected.Usage.ReasoningTokens)
 	}
+	// Both optional counts have to be present in this fixture, or the
+	// comparisons above pass by comparing two absences.
 	if final.Usage.CacheReadTokens == nil {
 		t.Fatal("this fixture reports a cached count; without one the comparison above proves nothing")
+	}
+	if final.Usage.ReasoningTokens == nil {
+		t.Fatal("this fixture reports reasoning tokens; without them the comparison above proves nothing")
 	}
 	// The ending of this reply too, not only the truncated one below: a reply
 	// that asked for tools is a different outcome from one that finished.
