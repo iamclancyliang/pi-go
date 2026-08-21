@@ -49,12 +49,15 @@ func fail(f Failure, status int, detail string) *Error {
 // What is not recognised becomes FailureUnknown rather than something
 // retryable, since guessing that an unrecognised failure would survive a repeat
 // buys another billed request on no evidence.
-func wireFailure(stage string, err error) error {
+func wireFailure(stage, key string, err error) error {
 	failure := FailureUnknown
 	if transient(err) {
 		failure = FailureTransient
 	}
-	return fail(failure, 0, stage+": "+scrub(err.Error(), ""))
+	// The configured key is removed by identity, not left to the shape pass: a
+	// transport error names the request it failed on, headers and all, and a
+	// key that does not look like one would otherwise survive into it.
+	return fail(failure, 0, stage+": "+scrub(err.Error(), key))
 }
 
 // transient reports an error that a later attempt might survive.

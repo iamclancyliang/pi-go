@@ -225,7 +225,7 @@ func (p *Port) buildRequest(req ai.Request, stream bool, maxTokens int) wireRequ
 	return out
 }
 
-func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, error) {
+func (p *Port) post(ctx context.Context, cred Credential, body wireRequest) (*http.Response, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("deepseek: encoding request: %w", err)
@@ -234,10 +234,6 @@ func (p *Port) post(ctx context.Context, body wireRequest) (*http.Response, erro
 		p.cfg.BaseURL+"/chat/completions", bytes.NewReader(encoded))
 	if err != nil {
 		return nil, fmt.Errorf("deepseek: building request: %w", err)
-	}
-	cred, err := p.resolve(ctx)
-	if err != nil {
-		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+cred.Key())
@@ -305,17 +301,6 @@ func scrub(text, key string) string {
 // value that is not the configured key still does not survive into a report.
 var credentialShape = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|bearer\s+\S+)`)
 
-// credentialForScrubbing resolves the key only so that it can be removed from a
-// message. It returns empty rather than failing: scrubbing must never be the
-// thing that breaks reporting a failure.
-func (p *Port) credentialForScrubbing(ctx context.Context) string {
-	cred, err := p.resolve(ctx)
-	if err != nil {
-		return ""
-	}
-	return cred.Key()
-}
-
 // resolve produces the credential a request authenticates with.
 //
 // Distinct from Store.Read, which is for display: resolution is what a request
@@ -348,9 +333,19 @@ type Attempt struct {
 // number of attempts is a fact about what was sent, which is why it travels
 // with the response rather than being inferred from configuration.
 func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []Attempt, error) {
+	// Resolved once, and once only, for everything this call does with it.
+	// Resolving again to scrub a failure would remove the key that is
+	// configured NOW from a message about a request sent with the key that was
+	// configured THEN — so a key that had just been replaced would survive into
+	// the report of the request that used it.
+	cred, err := p.resolve(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var attempts []Attempt
 	for attempt := 0; ; attempt++ {
-		resp, err := p.post(ctx, body)
+		resp, err := p.post(ctx, cred, body)
 		if err != nil {
 			if isCallerCancellation(err) {
 				return nil, attempts, err
@@ -397,7 +392,7 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, []At
 			// The provider's own instruction travels with the failure, so a
 			// caller deciding whether to try again reads the same evidence
 			// this loop just did rather than re-deriving it from a status.
-			refused := failureWith(failure, resp.StatusCode, raw, p.credentialForScrubbing(ctx))
+			refused := failureWith(failure, resp.StatusCode, raw, cred.Key())
 			var classified *ai.ProviderError
 			if errors.As(refused, &classified) {
 				classified.Advice = retryAdvice(resp.Header)
@@ -442,7 +437,14 @@ func withAttempts(err error, attempts []Attempt) error {
 	if len(used) == 0 {
 		return err
 	}
-	withUsage := *classified
-	withUsage.Used = append(append([]ai.Usage(nil), used...), classified.Used...)
-	return &withUsage
+	// A copy, so the failure the caller may already hold is not edited under
+	// it. The attempts go in front of anything already recorded: they happened
+	// first.
+	withUsage := &Error{
+		Provider: classified.Provider, Failure: classified.Failure,
+		Status: classified.Status, Detail: classified.Detail, Advice: classified.Advice,
+	}
+	withUsage.Record(used...)
+	withUsage.Record(classified.Consumed()...)
+	return withUsage
 }

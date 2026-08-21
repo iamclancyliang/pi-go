@@ -71,8 +71,13 @@ type ProviderError struct {
 	// Detail is for a human reading a report. Nothing branches on it.
 	Detail string
 
-	// Used is what the attempts behind this failure reported consuming.
-	Used []Usage
+	// used is what the attempts behind this failure reported consuming.
+	//
+	// Unexported so it can only be written through Record, which copies. A
+	// field a caller can assign is one a caller still holds afterwards, and a
+	// spend that changes after the fact records nothing. Reading it back is
+	// Consumed, which copies again.
+	used []Usage
 
 	// Advice is the provider's own instruction about retrying, when it gave
 	// one. It outranks the classification, which is only an inference drawn
@@ -120,13 +125,21 @@ func (e *ProviderError) Is(target error) bool {
 	return other.Failure == e.Failure
 }
 
+// Record adds what an attempt reported consuming.
+//
+// Copies on the way in: the caller keeps its own slice, and the counts it
+// points at stay its own to change.
+func (e *ProviderError) Record(used ...Usage) {
+	e.used = append(e.used, CloneUsages(used)...)
+}
+
 // Consumed reports what the failed call used, so a ledger can hold it.
 //
 // A copy, because the failure is the record of what was spent. Handing out the
 // slice — and the optional counts it points at — would let a reader that
 // adjusts what it got change what every later reader sees, and a spend that can
 // be rewritten after the fact is not a record of anything.
-func (e *ProviderError) Consumed() []Usage { return CloneUsages(e.Used) }
+func (e *ProviderError) Consumed() []Usage { return CloneUsages(e.used) }
 
 // Retryable reports whether an error is worth another identical attempt.
 //

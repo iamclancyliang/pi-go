@@ -19,6 +19,8 @@ be replaced.
 | The key is reached only through injected configuration; a missing seam fails rather than falling back | `TestAPortWithoutASuppliedTransportIsRefused` |
 | Resolution order: stored wins, else the first set variable; blank counts as unset | `TestCredentialPrecedence`, `TestAStoredCredentialWinsAndABlankVariableIsSkipped` |
 | Resolution happens once, off the request path: the port is given a resolved value, not a resolver | `TestAMissingCredentialIsATypedAbsence` |
+| One call resolves once; the key a failure is scrubbed with is the key the request was sent with | `TestOneCallResolvesItsCredentialOnce` |
+| A transport error is scrubbed of the configured key by identity, not left to its shape | `TestATransportErrorDoesNotCarryTheConfiguredKey` |
 | A lookup that fails with the value in its own error does not carry it out | `TestALookupErrorDoesNotCarryTheValueOut` |
 | Scrubbing removes both the exact value and anything key-shaped | `TestScrubbingRemovesBothWhatIsKnownAndWhatIsShaped` |
 | Resolution stops when the caller does, between lookups and not only before them | `TestResolutionStopsWhenTheCallerDoes` |
@@ -40,7 +42,7 @@ be replaced.
 | The provider's own retry instruction outranks the status, and reaches the caller that decides | `TestTheProvidersOwnRetryInstructionSurvives`, `TestAProvidersOwnRetryInstructionReachesOneCaller`, `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
 | An exhausted balance stays terminal however the provider or the status reads | `TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance` |
 | A reply that asked for tools says so rather than reporting a plain ending | `TestAReplyAskingForToolsSaysSo` |
-| Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation` |
+| Cancellation and deadlines stay themselves rather than becoming transient provider failures | `TestCancellationStaysCancellation`, `TestCancellingABackoffStaysCancellation`, `TestSetupCancellationStaysCancellation`, `TestALookupCancellationStaysCancellation` |
 
 ## Retry and cost
 
@@ -65,7 +67,7 @@ be replaced.
 | Unreported stays distinct from reported zero, in a call and in the total | `TestUsageKeepsUnreportedApartFromZero`, `TestAnUnreportedFieldStaysUnreportedInTheTotal` |
 | Cached prompt tokens are counted once, and counted in the total | `TestCachedPromptTokensAreNotCountedTwice`, `TestTotalCountsEveryReportedToken` |
 | The ledger owns its entries: neither the writer nor a reader can edit them afterwards | `TestTheLedgerOwnsWhatItRecords`, `TestASnapshotDoesNotChangeAfterItIsTaken` |
-| A failed call's spend is owned the same way, before it ever reaches a ledger | `TestAFailuresSpendCannotBeRewritten` |
+| A failed call's spend is owned the same way — copied in and copied out — before it ever reaches a ledger | `TestAFailuresSpendCannotBeRewritten` |
 | The model that served a reply is read from the reply | `TestTheServedModelIsReported` |
 
 ## Streaming
@@ -76,7 +78,7 @@ be replaced.
 | Interleaved calls stay apart | `TestInterleavedToolCallFragmentsStayApart` |
 | Text after several open calls closes all of them | `TestTextAfterInterleavedCallsClosesEveryBlock` |
 | A block ends before the next begins | `TestABlockEndsBeforeTheNextBegins` |
-| A block the provider announced without a position fails before its content reaches a consumer | `TestAnAnnouncementWithNoIdentityFailsBeforeItsContent`, `TestAWellFormedStreamStillPasses` |
+| A block the provider announced without a position fails before its content reaches a consumer, and still fails when it carries none | `TestAnAnnouncementWithNoIdentityFailsBeforeItsContent`, `TestAnAnnouncementWithNoIdentityAndNoContentStillFails`, `TestAWellFormedStreamStillPasses` |
 | A cancelled stream still delivers exactly one terminal, carrying what had arrived | `TestACancelledStreamStillEnds` |
 | Overflow is inferred from counts, only against a measured window, and never invented without one | `TestCountBasedOverflowDetection`, `TestConfigurationRefusesAWindowItWouldMisuse` |
 

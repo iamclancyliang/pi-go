@@ -1154,3 +1154,49 @@ func TestExhaustionInsideARateLimitIsStillTerminal(t *testing.T) {
 		})
 	}
 }
+
+// changingEnv hands out a different key on each lookup, as a rotation or a
+// refresh would while a call is in flight.
+type changingEnv struct {
+	keys    []string
+	lookups int
+}
+
+func (c *changingEnv) Lookup(context.Context, string) (string, error) {
+	key := c.keys[len(c.keys)-1]
+	if c.lookups < len(c.keys) {
+		key = c.keys[c.lookups]
+	}
+	c.lookups++
+	return key, nil
+}
+
+// TestOneCallResolvesItsCredentialOnce.
+//
+// A failure is scrubbed of the key the request was sent with. Resolving again
+// to do the scrubbing removes the key configured NOW from a message about a
+// request sent with the key configured THEN, so a key that had just been
+// replaced survives into the report of the very request that used it.
+func TestOneCallResolvesItsCredentialOnce(t *testing.T) {
+	const sent, replacement = "key-in-flight-4a71", "key-that-replaced-it"
+	e := &changingEnv{keys: []string{sent, replacement}}
+	// The provider echoes what it was given, as a proxy reporting a rejected
+	// header does.
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return status(401, `{"error":{"message":"rejected Authorization: `+sent+`"}}`)
+	}}
+	p := newPort(t, tr, e)
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "deepseek-v4-flash", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if strings.Contains(err.Error(), sent) {
+		t.Fatalf("the key the request was sent with survived into the failure: %v", err)
+	}
+	if e.lookups != 1 {
+		t.Fatalf("one call read the environment %d times", e.lookups)
+	}
+}

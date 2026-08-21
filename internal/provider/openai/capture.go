@@ -246,7 +246,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// keeps a failed call from being accounted for as free.
 		if used, ok := usageFromBody(raw); ok {
 			if classified != nil {
-				classified.Used = append(classified.Used, used)
+				classified.Record(used)
 			} else {
 				refused = ai.WithUsage(refused, used)
 			}

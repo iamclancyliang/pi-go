@@ -1215,3 +1215,67 @@ func TestTheProvidersOwnRetryInstructionSurvives(t *testing.T) {
 		})
 	}
 }
+
+// TestAnAnnouncementWithNoIdentityAndNoContentStillFails: the check inside the
+// stream loop only runs when a block arrives. An announcement carrying nothing
+// would otherwise reach the end unexamined and complete — a reply built from a
+// stream this repository could not account for.
+func TestAnAnnouncementWithNoIdentityAndNoContentStillFails(t *testing.T) {
+	tr := streamOf(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-test","status":"completed","usage":{"input_tokens":1,"output_tokens":0}}}`,
+	)
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("a stream that announced an unidentified block completed successfully")
+	}
+	if !strings.Contains(err.Error(), "no output_index") {
+		t.Fatalf("the failure did not say what was missing: %v", err)
+	}
+}
+
+// TestATransportErrorDoesNotCarryTheConfiguredKey: a transport error names the
+// request it failed on, headers and all. Left to the shape pass alone, a key
+// that does not look like one survives into the report.
+func TestATransportErrorDoesNotCarryTheConfiguredKey(t *testing.T) {
+	const secret = "9f2c-not-shaped-like-a-key"
+	p, err := openai.New(openai.Config{
+		Model: "gpt-test", MaxOutputTokens: 8,
+		Credential: ai.StoredCredential(secret, "a test"),
+		Transport: &failingTransport{
+			err: fmt.Errorf("proxy rejected Authorization=%s", secret),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, genErr := p.Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if genErr == nil {
+		t.Fatal("expected a failure")
+	}
+	if strings.Contains(genErr.Error(), secret) {
+		t.Fatalf("the configured key reached the error: %v", genErr)
+	}
+}
+
+// TestSetupCancellationStaysCancellation: a caller that cannot tell its own
+// cancellation from a provider failure will report the wrong thing, and may
+// retry the request it just stopped.
+func TestSetupCancellationStaysCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := newPort(t, &failingTransport{err: context.Canceled}).Generate(ctx, ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation arrived as %v", err)
+	}
+	if _, classified := ai.FailureOf(err); classified {
+		t.Fatalf("the caller's own cancellation was reported as a provider failure: %v", err)
+	}
+}

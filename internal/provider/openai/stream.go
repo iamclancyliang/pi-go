@@ -73,7 +73,14 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		if refused := held.refusal(); refused != nil {
 			return nil, refused
 		}
-		return nil, wireFailure("starting the stream", err)
+		// Cancellation and a deadline are the caller's own outcomes, not the
+		// provider's. Classifying them as a provider failure would tell a
+		// caller to retry what it just stopped, and would hide the cause from
+		// errors.Is.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, wireFailure("starting the stream", key, err)
 	}
 
 	out := make(chan ai.StreamEvent)
@@ -184,7 +191,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 				abort(refused)
 				return
 			}
-			abort(wireFailure("reading the stream", err))
+			abort(wireFailure("reading the stream", p.cfg.Credential.Key(), err))
 			return
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -263,6 +270,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		if !send(closed) {
 			return
 		}
+	}
+
+	// Checked again once the stream has ended. The check inside the loop only
+	// runs when a block arrives, so an announcement carrying no content at all
+	// would otherwise reach the end unexamined and complete — a reply built
+	// from a stream this repository could not account for.
+	if err := checkAnnounced(held); err != nil {
+		abort(err)
+		return
 	}
 
 	// The ending comes from what the provider said, captured before the adapter

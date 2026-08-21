@@ -143,7 +143,12 @@ func TestAFailuresSpendCannotBeRewritten(t *testing.T) {
 	// other, and neither alone is enough.
 	for name, record := range map[string]func([]ai.Usage) interface{ Consumed() []ai.Usage }{
 		"a classified failure": func(used []ai.Usage) interface{ Consumed() []ai.Usage } {
-			return &ai.ProviderError{Provider: "p", Failure: ai.FailureQuota, Used: ai.CloneUsages(used)}
+			// Recorded rather than assigned, and NOT copied here first: the
+			// copying is the thing under test, and a test that does it for the
+			// code proves only that the test does it.
+			failed := &ai.ProviderError{Provider: "p", Failure: ai.FailureQuota}
+			failed.Record(used...)
+			return failed
 		},
 		"usage attached to a cause": func(used []ai.Usage) interface{ Consumed() []ai.Usage } {
 			var carrier interface{ Consumed() []ai.Usage }
@@ -217,5 +222,26 @@ func TestTheProvidersInstructionOutranksTheStatusButNotAnExhaustedBalance(t *tes
 	}
 	if ai.Retryable(errors.New("prose")) {
 		t.Fatal("an unclassified error was judged worth repeating")
+	}
+}
+
+// TestALookupCancellationStaysCancellation: wrapped in a message about reading
+// a variable, a cancellation still prints but errors.Is can no longer see it,
+// and a caller cannot tell its own stop from a broken credential source.
+func TestALookupCancellationStaysCancellation(t *testing.T) {
+	for name, cause := range map[string]error{
+		"a cancelled caller":  context.Canceled,
+		"an expired deadline": context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := &fakeEnv{
+				values: map[string]string{"SLOW": ""},
+				errs:   map[string]error{"SLOW": fmt.Errorf("looking up: %w", cause)},
+			}
+			_, err := ai.ResolveCredential(context.Background(), "p", env, "", []string{"SLOW"})
+			if !errors.Is(err, cause) {
+				t.Fatalf("the caller's own outcome arrived as %v", err)
+			}
+		})
 	}
 }

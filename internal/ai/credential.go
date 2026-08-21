@@ -76,6 +76,14 @@ func ResolveCredential(ctx context.Context, provider string, env Environment,
 			return Credential{}, err
 		}
 		value, err := env.Lookup(ctx, name)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// The caller's own outcome, returned unchanged. Wrapped in a
+			// message about reading a variable it would still print, but
+			// errors.Is could no longer see it — and a caller that cannot tell
+			// its own cancellation from a broken credential source will report
+			// the wrong thing and may retry what it just stopped.
+			return Credential{}, err
+		}
 		if err != nil {
 			// The value is scrubbed out of the error even though the lookup
 			// failed: a source that reports what it found alongside why it
