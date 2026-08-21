@@ -131,6 +131,8 @@ func deepseekPortReturning(t *testing.T, status int, body string) ai.Port {
 	return p
 }
 
+// roundTripperFunc and transportFunc adapt a function to the two shapes the two
+// providers ask for: one takes an http.RoundTripper, the other its own Do.
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

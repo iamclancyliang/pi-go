@@ -272,6 +272,22 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Age
 		fail(statusErr)
 		return
 	}
+	// Checked before the reply is completed: the accumulator has one ending, and
+	// a reply already declared finished cannot then be reported as a failure.
+	if f := p.overflow(reason, usageFrom(final)); f != nil {
+		ev, accErr := acc.Fail(ai.StopError, f)
+		if accErr != nil {
+			return
+		}
+		if ev.Final != nil {
+			ev.Final.Usage = usageFrom(final)
+			if final.Model != "" {
+				ev.Final.Model = final.Model
+			}
+		}
+		sendTerminal(ev)
+		return
+	}
 	done, err := acc.Done(reason, usageFrom(final))
 	if err != nil {
 		fail(err)

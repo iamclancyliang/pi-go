@@ -71,8 +71,12 @@ func oneAgentic(m ai.Message) (*schema.AgenticMessage, error) {
 		return msg, nil
 
 	case ai.RoleTool:
+		// A tool result travels as INPUT to the model, so it rides on a user
+		// message carrying a result block. There is no tool role here: the
+		// adapter accepts user, assistant and system, and a result is something
+		// the caller is telling the model rather than something the model said.
 		return &schema.AgenticMessage{
-			Role: schema.AgenticRoleType(schema.Tool),
+			Role: schema.AgenticRoleType(schema.User),
 			ContentBlocks: []*schema.ContentBlock{{
 				Type: schema.ContentBlockTypeFunctionToolResult,
 				FunctionToolResult: &schema.FunctionToolResult{

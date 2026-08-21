@@ -962,3 +962,68 @@ func TestAPortServesOnlyTheModelItWasBuiltFor(t *testing.T) {
 		t.Fatalf("sent %d requests for a model this port does not serve", tr.requests)
 	}
 }
+
+// TestCountBasedOverflowDetection covers the two checks that infer an overflow
+// from reported counts. Both read typed numbers; neither reads any text.
+func TestCountBasedOverflowDetection(t *testing.T) {
+	windowed := func(t *testing.T, tr http.RoundTripper, window int) *openai.Port {
+		t.Helper()
+		p, err := openai.New(openai.Config{
+			Model: "gpt-test", Transport: tr, Credentials: fixedKey,
+			MaxOutputTokens: 16, ContextWindow: window,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p
+	}
+	completed := func(usage string) *recordedTransport {
+		return &recordedTransport{responses: []*http.Response{recorded(
+			`{"type":"response.created","response":{"id":"r","model":"gpt-served","status":"in_progress"}}`,
+			`{"type":"response.completed","response":{"id":"r","model":"gpt-served","status":"completed"`+
+				usage+`}}`,
+		)}}
+	}
+	ask := func(p *openai.Port) error {
+		_, err := p.Generate(context.Background(), ai.Request{
+			Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		})
+		return err
+	}
+
+	t.Run("accepted input beyond the window is an overflow", func(t *testing.T) {
+		tr := completed(`,"usage":{"input_tokens":1100001,"output_tokens":1}`)
+		if err := ask(windowed(t, tr, 1_100_000)); !errors.Is(err, ai.ErrContextOverflow) {
+			t.Fatalf("input past the window produced %v, so the shortening path never runs", err)
+		}
+	})
+
+	t.Run("cached input still occupies the window", func(t *testing.T) {
+		// Cheaper, not smaller: counting only the uncached part would miss an
+		// overflow on exactly the requests a cache makes common.
+		tr := completed(`,"usage":{"input_tokens":1200000,"output_tokens":1,"input_tokens_details":{"cached_tokens":600000}}`)
+		if err := ask(windowed(t, tr, 1_100_000)); !errors.Is(err, ai.ErrContextOverflow) {
+			t.Fatalf("a 1.2M prompt (600k of it cached) against a 1.1M window produced %v", err)
+		}
+	})
+
+	t.Run("an ordinary reply is not an overflow", func(t *testing.T) {
+		tr := completed(`,"usage":{"input_tokens":10,"output_tokens":1}`)
+		if err := ask(windowed(t, tr, 1_100_000)); err != nil {
+			t.Fatalf("an ordinary reply was rejected: %v", err)
+		}
+	})
+
+	t.Run("unreported usage disables the checks", func(t *testing.T) {
+		if err := ask(windowed(t, completed(``), 1_100_000)); err != nil {
+			t.Fatalf("silence about usage was read as zero and became an overflow: %v", err)
+		}
+	})
+
+	t.Run("no window leaves them off", func(t *testing.T) {
+		tr := completed(`,"usage":{"input_tokens":9999999,"output_tokens":1}`)
+		if err := ask(newPort(t, tr)); err != nil {
+			t.Fatalf("a port with no measured window invented an overflow: %v", err)
+		}
+	})
+}

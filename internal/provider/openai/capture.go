@@ -16,10 +16,13 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // terminal is what the provider itself said, before anything reinterpreted it.
@@ -210,7 +213,18 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// Classified here, where the status and the provider's own error code
 		// both exist. After this the adapter turns it into prose, and a
 		// classification rebuilt from prose is one a change of wording breaks.
-		t.capture.observeFailure(failureFrom(resp.StatusCode, raw, t.key))
+		// A refused request may still report what it read. Recording it here
+		// keeps a failed call from being accounted for as free.
+		refused := failureFrom(resp.StatusCode, raw, t.key)
+		if used, ok := usageFromBody(raw); ok {
+			var classified *ai.ProviderError
+			if errors.As(refused, &classified) {
+				classified.Used = append(classified.Used, used)
+			} else {
+				refused = ai.WithUsage(refused, used)
+			}
+		}
+		t.capture.observeFailure(refused)
 		return resp, nil
 	}
 	if found, ok := terminalFromResponse(raw); ok {
@@ -427,4 +441,13 @@ func contentIndexFromEvent(payload []byte) (item, content int, ok bool) {
 		return 0, 0, false
 	}
 	return *event.OutputIndex, *event.ContentIndex, true
+}
+
+// usageFromBody reads usage a refused request reported, when it reported any.
+func usageFromBody(raw []byte) (ai.Usage, bool) {
+	var body wireResponse
+	if err := json.Unmarshal(raw, &body); err != nil || body.Usage == nil {
+		return ai.Usage{}, false
+	}
+	return usageFrom(body.toTerminal()), true
 }

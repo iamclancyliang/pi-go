@@ -57,6 +57,17 @@ type Config struct {
 
 	// BaseURL defaults to DefaultBaseURL.
 	BaseURL string
+
+	// ContextWindow enables the count-based overflow checks. Zero leaves them
+	// off, which is the safe direction: failing to detect an overflow reports a
+	// refusal a caller already handles, while inventing one buys a shortened
+	// retry of a request that was fine.
+	//
+	// It must be a measured or authoritatively given value. A figure taken from
+	// documentation is not evidence: a published context length is often
+	// rounded, and a threshold below the real limit turns accepted replies into
+	// overflows.
+	ContextWindow int
 }
 
 // Port reaches OpenAI's Responses API.
@@ -93,6 +104,8 @@ func New(cfg Config) (*Port, error) {
 		return nil, fmt.Errorf("openai: a credential source is required; there is no default")
 	case cfg.MaxOutputTokens <= 0:
 		return nil, fmt.Errorf("openai: MaxOutputTokens must be positive, got %d", cfg.MaxOutputTokens)
+	case cfg.ContextWindow < 0:
+		return nil, fmt.Errorf("openai: ContextWindow %d is negative", cfg.ContextWindow)
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
@@ -212,4 +225,36 @@ func failureFromCode(code string) (Failure, bool) {
 		return FailureRefused, true
 	}
 	return "", false
+}
+
+// overflow reports a context overflow inferred from reported counts.
+//
+// Absent usage disables the checks rather than reading as zero: treating
+// silence as zero would make the second check fire on every reply.
+func (p *Port) overflow(reason ai.StopReason, used ai.Usage) error {
+	window := p.cfg.ContextWindow
+	if window <= 0 || !used.Reported {
+		return nil
+	}
+	input := used.InputTokens
+	if used.CacheReadTokens != nil {
+		// Cached prompt tokens are cheaper, not smaller: they occupy the same
+		// room, and counting only the uncached part would miss an overflow on
+		// exactly the requests a cache makes common.
+		input += *used.CacheReadTokens
+	}
+
+	// A reply that ended normally while its input exceeded the window: the
+	// provider accepted more than fits and silently dropped the rest.
+	if reason == ai.StopEnd && input > window {
+		return fmt.Errorf("%w: %d input tokens against a %d window",
+			ai.ErrContextOverflow, input, window)
+	}
+	// A length stop that produced nothing, with the window full: the input
+	// consumed the whole context and left no room to answer in.
+	if reason == ai.StopLength && used.OutputTokens == 0 && input >= window*99/100 {
+		return fmt.Errorf("%w: %d input tokens filled a %d window, leaving no output",
+			ai.ErrContextOverflow, input, window)
+	}
+	return nil
 }
