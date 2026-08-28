@@ -123,37 +123,17 @@ func scrub(text, key string) string { return ai.ScrubSecret(text, key) }
 
 // usageFrom turns a captured terminal into this repository's usage.
 //
-// Every field stays absent unless the provider reported it. The adapter's own
-// conversion cannot do this, which is the whole reason the terminal is captured
-// before it runs.
+// Only the mapping from this provider's fields is local; what presence means,
+// and how a cached prompt is counted, is the shared rule. The adapter's own
+// conversion cannot do either, which is the whole reason the terminal is
+// captured before it runs.
 func usageFrom(t terminal) ai.Usage {
-	used := ai.Usage{}
-	if t.InputTokens == nil && t.OutputTokens == nil &&
-		t.CachedTokens == nil && t.ReasoningTokens == nil {
-		return used
-	}
-	used.Reported = true
-	if t.InputTokens != nil {
-		used.InputTokens = *t.InputTokens
-	}
-	if t.OutputTokens != nil {
-		used.OutputTokens = *t.OutputTokens
-	}
-	if t.CachedTokens != nil {
-		v := *t.CachedTokens
-		used.CacheReadTokens = &v
-		// Input is the uncached remainder, as it is elsewhere in this
-		// repository: the provider reports the whole prompt.
-		used.InputTokens -= v
-		if used.InputTokens < 0 {
-			used.InputTokens = 0
-		}
-	}
-	if t.ReasoningTokens != nil {
-		v := *t.ReasoningTokens
-		used.ReasoningTokens = &v
-	}
-	return used
+	return ai.ReportedCounts{
+		InputTokens:     t.InputTokens,
+		OutputTokens:    t.OutputTokens,
+		CachedTokens:    t.CachedTokens,
+		ReasoningTokens: t.ReasoningTokens,
+	}.Usage()
 }
 
 // failureFromStatus maps a provider status onto this repository's outcomes.

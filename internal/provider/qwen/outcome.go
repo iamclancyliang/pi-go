@@ -1,17 +1,11 @@
 package qwen
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"strings"
-
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"net/http"
+	"strings"
 )
 
 // The failure vocabulary is shared, not this package's own: a caller of the
@@ -49,47 +43,18 @@ const contextOverflowCode = "context_length_exceeded"
 
 // stopped reports an error that says the call was stopped rather than failed.
 //
-// Read from the chain rather than from the caller's context: a transport can
-// report a stop it was told about before that context is observably done, and a
-// call that was stopped is over either way.
-func stopped(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-// transient reports an error that a later attempt might survive.
-func transient(err error) bool {
-	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-		return true
-	}
-	// *url.Error is what an HTTP client wraps every failure in, and it reports
-	// itself as a net.Error whatever it holds. Matching it would classify a
-	// request that will fail identically on every attempt as one worth
-	// repeating, so the wrapper is stepped over and its cause judged instead.
-	var wrapper *url.Error
-	if errors.As(err, &wrapper) {
-		return transient(wrapper.Err)
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr)
-}
+// The judgement is shared: what a stop is does not vary by provider, only where
+// one can appear does.
+func stopped(err error) bool { return ai.Stopped(err) }
 
 // wireFailure types an error that came from the wire rather than from a
 // response this package could classify.
 //
-// The outcome set is closed: a caller branches on a classification, and an
-// error that carries none can only be read as prose. What is not recognised
-// becomes FailureUnknown rather than something retryable, since guessing that
-// an unrecognised failure would survive a repeat buys another billed request on
-// no evidence.
+// Shared, because none of what it decides is this provider's to decide
+// differently: a stop is the caller's outcome, an incomplete exchange may
+// survive a repeat, and the key this call was made with belongs in no report.
 func wireFailure(stage, key string, err error) error {
-	if stopped(err) {
-		return err
-	}
-	failure := FailureUnknown
-	if transient(err) {
-		failure = FailureTransient
-	}
-	return fail(failure, 0, stage+": "+scrub(err.Error(), key))
+	return ai.WireFailure(providerName, stage, key, err)
 }
 
 // retryAdvice reads this provider's own instruction about trying again.

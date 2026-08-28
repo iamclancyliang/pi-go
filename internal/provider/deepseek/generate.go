@@ -2,7 +2,6 @@ package deepseek
 
 import (
 	"context"
-	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
@@ -12,65 +11,16 @@ import (
 // It is the stream collected, not a second implementation. Pi has exactly one
 // production path — its non-streaming call is its streaming call awaited — and
 // the same holds here. Two request-building paths drift, and only one of them
-// ends up covered by the tests that matter.
+// ends up covered by the tests that matter. The draining is shared too, because
+// what a finished reply is made of does not depend on which provider produced
+// it — including that a failed final attempt is still an attempt, and is
+// reported as one even when the provider said nothing about what it used.
 func (p *Port) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
 	events, err := p.Stream(ctx, req)
 	if err != nil {
 		return ai.Response{}, err
 	}
-
-	var final *ai.AssistantMessage
-	for ev := range events {
-		if ev.Final != nil {
-			final = ev.Final
-		}
-	}
-	if final == nil {
-		// The channel closed without a terminal event. Nothing here may report
-		// a reply it never received.
-		return ai.Response{}, &Error{
-			Failure: FailureUnknown,
-			Detail:  "the stream ended without a terminal event",
-		}
-	}
-	if final.Cause != nil {
-		// The counts travel with the failure: on this path there is no response
-		// to carry them, and a failed call that read the request is not free.
-		consumed := append([]ai.Usage(nil), final.EarlierAttempts...)
-		if final.Usage.Reported {
-			consumed = append(consumed, final.Usage)
-		}
-		// Every failure carries its counts, not only the classified ones: an
-		// overflow is a wrapped sentinel rather than this package's error type,
-		// and it is exactly the failure the runtime recovers from — so losing
-		// its usage means paying for the refused attempt and reporting nothing.
-		return ai.Response{}, ai.WithUsage(final.Cause, consumed...)
-	}
-
-	var text, reasoning strings.Builder
-	var calls []ai.ToolCall
-	for _, b := range final.Blocks {
-		switch b.Kind {
-		case ai.BlockText:
-			text.WriteString(b.Text)
-		case ai.BlockThinking:
-			// Kept apart from Content — it is what the model worked through,
-			// not what it said — but kept, because this provider requires it
-			// back on the next request.
-			reasoning.WriteString(b.Text)
-		case ai.BlockToolCall:
-			calls = append(calls, b.Call)
-		}
-	}
-	return ai.Response{
-		EarlierAttempts: final.EarlierAttempts,
-		Content:         text.String(),
-		Reasoning:       reasoning.String(),
-		ToolCalls:       calls,
-		Model:           final.Model,
-		Usage:           final.Usage,
-		Truncated:       final.StopReason == ai.StopLength,
-	}, nil
+	return ai.Collect(providerName, events)
 }
 
 // Compile-time proof that this satisfies both boundaries.

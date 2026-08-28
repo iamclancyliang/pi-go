@@ -27,36 +27,36 @@ type wireUsage struct {
 }
 
 // toUsage keeps "not reported" distinct from "reported zero".
+//
+// Only the mapping from this provider's fields is local. What presence means,
+// and the rule that the cached prompt is subtracted rather than counted beside
+// the whole one, are shared — a provider does not get to answer those
+// differently without the ledger disagreeing with itself.
 func (w *wireUsage) toUsage() ai.Usage {
-	// prompt_tokens is the whole prompt, cached part included. InputTokens is
-	// the uncached remainder, matching how Pi reports it: keeping the total
-	// here and then adding the cache count anywhere downstream counts the same
-	// tokens twice.
-	cached := 0
+	// The cached prompt has two spellings on this wire. The detailed one wins:
+	// prompt_cache_hit_tokens is the older field, and a response carrying both
+	// is reporting one number twice, not two numbers.
+	var cached *int
 	if w.PromptTokensDetails != nil && w.PromptTokensDetails.CachedTokens != nil {
-		cached = *w.PromptTokensDetails.CachedTokens
+		cached = w.PromptTokensDetails.CachedTokens
 	} else if w.PromptCacheHit != nil {
-		cached = *w.PromptCacheHit
+		cached = w.PromptCacheHit
 	}
-	input := w.PromptTokens - cached
-	if input < 0 {
-		input = 0
+	var reasoning *int
+	if w.CompletionTokensDetails != nil {
+		reasoning = w.CompletionTokensDetails.ReasoningTokens
 	}
-	u := ai.Usage{
-		InputTokens:  input,
-		OutputTokens: w.CompletionTokens,
-		Reported:     true,
-	}
-	if w.PromptTokensDetails != nil && w.PromptTokensDetails.CachedTokens != nil ||
-		w.PromptCacheHit != nil {
-		v := cached
-		u.CacheReadTokens = &v
-	}
-	if w.CompletionTokensDetails != nil && w.CompletionTokensDetails.ReasoningTokens != nil {
-		v := *w.CompletionTokensDetails.ReasoningTokens
-		u.ReasoningTokens = &v
-	}
-	return u
+	// The prompt and completion counts are plain fields rather than optional
+	// ones, so their presence is the usage object's own: this is reached only
+	// when the provider sent that object. Taking their addresses says exactly
+	// that, and nothing here escapes — the shared conversion copies what it
+	// keeps.
+	return ai.ReportedCounts{
+		InputTokens:     &w.PromptTokens,
+		OutputTokens:    &w.CompletionTokens,
+		CachedTokens:    cached,
+		ReasoningTokens: reasoning,
+	}.Usage()
 }
 
 type wireChunk struct {

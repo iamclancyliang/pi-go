@@ -1,9 +1,7 @@
 package deepseek
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -39,12 +37,11 @@ func fail(f Failure, status int, detail string) *Error {
 
 // stopped reports an error that says the call was stopped rather than failed.
 //
-// Read from the chain rather than from the caller's context: a body can report
-// a stop it was told about before that context is observably done, and a call
-// that was stopped is over either way.
-func stopped(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
+// The judgement is shared: what a stop is does not vary by provider, only where
+// one can appear does. Here that is a body which can report a stop it was told
+// about before the caller's context is observably done — which is why the error
+// chain is asked rather than the context.
+func stopped(err error) bool { return ai.Stopped(err) }
 
 // classifyStatus maps an HTTP status onto a failure.
 //

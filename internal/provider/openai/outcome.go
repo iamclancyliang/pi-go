@@ -1,17 +1,11 @@
 package openai
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"strings"
-
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"net/http"
+	"strings"
 )
 
 // The failure vocabulary is shared, not this package's own: a caller of the
@@ -45,59 +39,18 @@ func fail(f Failure, status int, detail string) *Error {
 // wireFailure types an error that came from the wire rather than from a
 // response this package could classify.
 //
-// It leaves typed because the outcome set is closed: a caller branches on a
-// classification, and an error that carries none can only be read as prose.
-// What is not recognised becomes FailureUnknown rather than something
-// retryable, since guessing that an unrecognised failure would survive a repeat
-// buys another billed request on no evidence.
+// Shared, because none of what it decides is this provider's to decide
+// differently: a stop is the caller's outcome, an incomplete exchange may
+// survive a repeat, and the key this call was made with belongs in no report.
 func wireFailure(stage, key string, err error) error {
-	// A cancellation or a deadline is returned as it arrived, whoever noticed
-	// it. Asking the caller's own context is not enough: a transport can report
-	// one it was told about before that context is observably done, and
-	// classifying it would tell a caller to retry what was just stopped —
-	// worse, a deadline would leave as retryable.
-	if stopped(err) {
-		return err
-	}
-	failure := FailureUnknown
-	if transient(err) {
-		failure = FailureTransient
-	}
-	// The configured key is removed by identity, not left to the shape pass: a
-	// transport error names the request it failed on, headers and all, and a
-	// key that does not look like one would otherwise survive into it.
-	return fail(failure, 0, stage+": "+scrub(err.Error(), key))
+	return ai.WireFailure(providerName, stage, key, err)
 }
 
 // stopped reports an error that says the call was stopped rather than failed.
 //
-// Read from the chain rather than from the caller's context: a transport can
-// report a cancellation it was told about before that context is observably
-// done, and a call that was stopped is over either way.
-func stopped(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-// transient reports an error that a later attempt might survive.
-//
-// A truncated body and a refused connection are the same kind of thing here:
-// the exchange did not complete, and nothing was learned about whether the
-// request itself is acceptable.
-func transient(err error) bool {
-	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-		return true
-	}
-	// *url.Error is what an HTTP client wraps every failure in, and it reports
-	// itself as a net.Error whatever it holds. Matching it would classify a
-	// request that will fail identically on every attempt as one worth
-	// repeating, so the wrapper is stepped over and its cause judged instead.
-	var wrapper *url.Error
-	if errors.As(err, &wrapper) {
-		return transient(wrapper.Err)
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr)
-}
+// The judgement is shared: what a stop is does not vary by provider, only where
+// one can appear does.
+func stopped(err error) bool { return ai.Stopped(err) }
 
 // classifyStatus maps an HTTP status onto a failure.
 func classifyStatus(status int) Failure {
