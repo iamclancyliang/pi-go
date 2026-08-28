@@ -61,9 +61,11 @@ var AllowAll Policy = PolicyFunc(func(context.Context, PolicyCall) Decision {
 
 // DenyWrites denies any tool that does not declare itself read-only.
 //
-// v0 registers only read-only tools, so this denies nothing today. It exists to
-// prove the seam has teeth: a policy that can never fire is not evidence that
-// denial works.
+// It has real work to do now that the built-in set includes tools that change
+// files: read, ls, find and grep pass, and write, edit and bash do not. The
+// declaration is the tool's, so a policy cannot be fooled by a name — a tool
+// that mutates and says otherwise is the tool's own defect, and one test per
+// mutating tool pins what it declares.
 var DenyWrites Policy = PolicyFunc(func(_ context.Context, c PolicyCall) Decision {
 	if c.Execution.ReadOnly {
 		return Decision{}

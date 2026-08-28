@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -76,9 +75,9 @@ func (r *Read) Call(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
-	path, err := r.resolve(in.Path)
+	path, err := resolvePath(r.Root, in.Path)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("read: %s: %w", in.Path, err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -160,25 +159,4 @@ func (r *Read) render(path string, lines []string, firstLine, limited int, cut T
 	}
 
 	return cut.Content
-}
-
-// resolve turns the model's path into one on this machine.
-//
-// A leading ~ is expanded because a model writes paths the way a person does.
-// The macOS filename fallbacks Pi tries when a path does not exist — the
-// narrow no-break space before AM/PM, the decomposed and curly-quote variants
-// of screenshot names — are NOT ported here, so a path that needs one fails as
-// a missing file rather than silently resolving to a different one.
-func (r *Read) resolve(path string) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("read: cannot expand %q: %w", path, err)
-		}
-		return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/")), nil
-	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path), nil
-	}
-	return filepath.Join(r.Root, path), nil
 }
