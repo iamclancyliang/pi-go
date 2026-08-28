@@ -187,3 +187,14 @@ func TestBashRegisters(t *testing.T) {
 		t.Fatalf("bash did not register: %v", err)
 	}
 }
+
+// TestTheCommandPrefixRunsBeforeEveryCommand, on its own line: joined onto the
+// command's line it would change the command's first word instead of preceding
+// it.
+func TestTheCommandPrefixRunsBeforeEveryCommand(t *testing.T) {
+	tool := &tools.Bash{Dir: t.TempDir(), CommandPrefix: "GREETING=prefixed"}
+	got := call(t, tool, `{"command":"echo $GREETING"}`)
+	if got != "prefixed\n" {
+		t.Fatalf("the prefix did not reach the command: %q", got)
+	}
+}

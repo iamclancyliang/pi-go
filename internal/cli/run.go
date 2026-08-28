@@ -58,6 +58,10 @@ type Runtime struct {
 	// Transport is how a newly opened provider reaches the network, so a model
 	// switched to mid-session goes through the same one this run was given.
 	Transport http.RoundTripper
+
+	// Config is what this run resolved: effective settings, and how the
+	// project's trust question was answered. /settings and /trust read it.
+	Config Config
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -132,6 +136,9 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	// while the agent still pointed at the old would write the next turn into
 	// the conversation the user just left.
 	current := rt.Conversation
+	// Copied so the commands may update it — /reload re-resolves — without
+	// reaching back into the caller's value.
+	config := rt.Config
 	// The model can change mid-session, so what answers is held here rather
 	// than read from the configuration each time.
 	port, provider, modelName := rt.Model, rt.Provider, rt.ModelName
@@ -165,6 +172,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		errOut:       streams.Err,
 		args:         rt.Args,
 		workingDir:   rt.WorkingDir,
+		config:       &config,
 
 		modelProvider: func() string { return provider },
 		modelName:     func() string { return modelName },
@@ -182,11 +190,30 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		// the outward-facing thing undone, which is the safe way to be wrong.
 		return answer == "y" || answer == "yes"
 	}
+	// What the port and the tool set were BUILT from, frozen at startup. The
+	// live config moves — /settings edits it — so comparing a reload against
+	// the live view would report "nothing changed" for exactly the changes
+	// that only a new run can pick up.
+	builtFrom := rt.Config.Effective
+	ctxt.reloadConfig = func() (bool, error) {
+		resolved, err := ResolveConfig(rt.Args, rt.WorkingDir, nil)
+		if err != nil {
+			return false, err
+		}
+		changed := resolved.Effective.DefaultProvider != builtFrom.DefaultProvider ||
+			resolved.Effective.DefaultModel != builtFrom.DefaultModel ||
+			resolved.Effective.ShellPath != builtFrom.ShellPath ||
+			resolved.Effective.ShellCommandPrefix != builtFrom.ShellCommandPrefix ||
+			resolved.Effective.SessionDir != builtFrom.SessionDir
+		config = resolved
+		return changed, nil
+	}
 	ctxt.compact = func(instructions string) error {
 		// Summarised with whatever model is answering now, so a conversation
 		// switched to a cheaper model is compacted by it too.
 		c := &compaction.Compactor{
 			Model: port, ModelName: modelName, Instructions: instructions,
+			KeepRecentTokens: config.Effective.Compaction.KeepRecentTokens,
 		}
 		summary, kept, err := c.Summarize(ctx, current.Session.Truth())
 		if err != nil {
@@ -237,8 +264,10 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	}
 	defer func() { _ = current.Close() }()
 
-	fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · /help for commands\n",
-		provider, modelName, len(rt.Tools.All()))
+	if !config.Effective.QuietStartup {
+		fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · /help for commands\n",
+			provider, modelName, len(rt.Tools.All()))
+	}
 	// Said aloud, because continuing silently cannot be told from starting
 	// fresh until the model answers something it should not have known.
 	switch {

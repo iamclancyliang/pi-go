@@ -37,11 +37,8 @@ type Command struct {
 // tells them they mistyped it when they did not — the same failure the flag
 // parser refuses to have.
 var notImplemented = map[string]string{
-	"settings":      "there is no settings store yet",
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
-	"trust":         "there is no project trust yet",
-	"reload":        "there is nothing reloadable yet",
 	"scoped-models": "there is no model catalogue to scope",
 }
 
@@ -87,6 +84,14 @@ type commandContext struct {
 	// compact shortens the conversation. Held as a function because it makes a
 	// billed model call and needs the port this run opened.
 	compact func(instructions string) error
+
+	// config is what this run resolved, and what /settings and /trust read.
+	// A pointer so /reload's re-resolution is what later commands see.
+	config *Config
+
+	// reloadConfig re-reads the settings files, reporting whether anything
+	// changed that only a new run can pick up.
+	reloadConfig func() (changed bool, err error)
 }
 
 var commands = map[string]Command{}
@@ -111,6 +116,9 @@ func init() {
 		{Name: "login", Summary: "save a credential for a provider: /login <provider>", run: runLogin},
 		{Name: "logout", Summary: "forget a saved credential: /logout [provider]", run: runLogout},
 		{Name: "share", Summary: "upload this conversation as a secret GitHub gist", run: runShare},
+		{Name: "settings", Summary: "show the effective settings, or set one: /settings [key value]", run: runSettings},
+		{Name: "trust", Summary: "whether this project may configure the tool: /trust [yes|no|forget]", run: runTrust},
+		{Name: "reload", Summary: "re-read the settings files", run: runReload},
 	} {
 		commands[c.Name] = c
 	}

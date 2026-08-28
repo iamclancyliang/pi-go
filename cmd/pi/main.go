@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/iamclancyliang/pi-go/internal/cli"
@@ -62,20 +63,41 @@ func run(argv []string) int {
 		return 2
 	}
 
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+
+	// Settings before anything they shape. The trust question is asked only in
+	// interactive mode: print mode has no prompt, and a project must not become
+	// trusted because nobody could object.
+	var askTrust func(string) bool
+	if mode == cli.AppInteractive {
+		askTrust = func(prompt string) bool {
+			fmt.Fprintf(streams.Out, "%s [y/N]: ", prompt)
+			var answer string
+			fmt.Fscanln(streams.In, &answer)
+			answer = strings.ToLower(strings.TrimSpace(answer))
+			return answer == "y" || answer == "yes"
+		}
+	}
+	cfg, err := cli.ResolveConfig(args, root, askTrust)
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+	args = cli.ApplyDefaults(args, cfg.Effective)
+
 	port, providerName, model, err := cli.Open(args, http.DefaultTransport)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
 
-	root, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(streams.Err, "pi: %v\n", err)
-		return 1
-	}
 	registry := tools.NewRegistry()
 	if !args.NoTools {
-		if registry, err = tools.NewBuiltInRegistry(root); err != nil {
+		if registry, err = cli.BuildTools(root, cfg.Effective); err != nil {
 			fmt.Fprintf(streams.Err, "pi: %v\n", err)
 			return 1
 		}
@@ -102,6 +124,7 @@ func run(argv []string) int {
 		Args:         args,
 		WorkingDir:   root,
 		Transport:    http.DefaultTransport,
+		Config:       cfg,
 	}
 
 	// One interrupt cancels the run in progress. A second is left to the
@@ -159,6 +182,10 @@ In a session, /help lists the commands — and says which of Pi's are not here.
 /tree shows the shape of a conversation and goes back to any point in it;
 /fork and /clone copy one into a new conversation, leaving the original alone.
 /compact summarises the older part before the context fills up.
+
+Settings live in <agent-dir>/settings.json, and a project may carry its own in
+.pi-go/settings.json — read only once you trust the project (/trust), because
+settings include the shell every command runs in.
 
 Credentials come from --api-key, then from what /login saved, then from the
 environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or DASHSCOPE_API_KEY. With no

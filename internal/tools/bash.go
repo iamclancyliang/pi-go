@@ -33,6 +33,11 @@ type Bash struct {
 	// Shell overrides the interpreter. Empty means bash.
 	Shell string
 
+	// CommandPrefix is prepended to every command, on its own line. It is how
+	// a user gets aliases or a required environment into every command the
+	// model runs — the model never sees it and cannot drop it.
+	CommandPrefix string
+
 	// Limits bound one call's output. The zero value uses the defaults.
 	Limits Limits
 }
@@ -104,7 +109,13 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 	if shell == "" {
 		shell = "bash"
 	}
-	cmd := exec.CommandContext(runCtx, shell, "-c", in.Command)
+	command := in.Command
+	if b.CommandPrefix != "" {
+		// Its own line, as Pi runs it: joined onto the command's line it would
+		// change the command's first word instead of preceding it.
+		command = b.CommandPrefix + "\n" + command
+	}
+	cmd := exec.CommandContext(runCtx, shell, "-c", command)
 	cmd.Dir = b.Dir
 
 	// Its own process group, so stopping the command stops what it started. A

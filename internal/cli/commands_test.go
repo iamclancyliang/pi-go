@@ -10,6 +10,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/settings"
 )
 
 // session drives the interactive loop over a script of typed lines.
@@ -69,7 +70,7 @@ func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 			t.Fatalf("help does not mention %s:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/settings") {
+	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/hotkeys") {
 		t.Fatalf("help does not say what is missing:\n%s", out)
 	}
 }
@@ -77,7 +78,7 @@ func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 // TestAPiCommandThisBuildLacksSaysWhy, rather than reporting it as a typo the
 // user did not make.
 func TestAPiCommandThisBuildLacksSaysWhy(t *testing.T) {
-	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/settings")
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/hotkeys")
 
 	if !strings.Contains(errOut, "does not have") {
 		t.Fatalf("a known Pi command was not recognised: %q", errOut)
@@ -579,5 +580,123 @@ func TestAnythingOtherThanYesIsNo(t *testing.T) {
 		if strings.Contains(out, "shared: ") {
 			t.Fatalf("answering %q uploaded the conversation:\n%s", answer, out)
 		}
+	}
+}
+
+// settingsSession drives the loop with a resolved config, which the settings
+// and trust commands read.
+func settingsSession(t *testing.T, agentDir, work string, typed ...string) (string, string) {
+	t.Helper()
+	args := cli.Args{NoSession: true, SessionDir: agentDir}
+	cfg, err := cli.ResolveConfig(args, work, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	conversation, err := cli.OpenConversation(args, work, cli.DefaultSystemPrompt)
+	if err != nil {
+		t.Fatalf("opening: %v", err)
+	}
+	rt := runtimeFor(t, scripted("an answer"))
+	rt.Conversation = conversation
+	rt.Args = args
+	rt.WorkingDir = work
+	rt.Config = cfg
+
+	var out, errOut bytes.Buffer
+	cli.RunInteractive(context.Background(), rt, cli.Streams{
+		In:  strings.NewReader(strings.Join(typed, "\n") + "\n"),
+		Out: &out, Err: &errOut,
+	})
+	return out.String(), errOut.String()
+}
+
+// TestSettingsListsEveryKeyAndSetsOne, and the change lands in the global file
+// so the next run reads it.
+func TestSettingsListsEveryKeyAndSetsOne(t *testing.T) {
+	agentDir, work := t.TempDir(), t.TempDir()
+	out, errOut := settingsSession(t, agentDir, work,
+		"/settings", "/settings defaultModel deepseek-reasoner", "/settings")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("settings failed: %q", errOut)
+	}
+	for _, key := range []string{"defaultModel", "shellPath", "defaultProjectTrust", "compaction.keepRecentTokens"} {
+		if !strings.Contains(out, key) {
+			t.Fatalf("the listing does not show %s:\n%s", key, out)
+		}
+	}
+	if !strings.Contains(out, "deepseek-reasoner") {
+		t.Fatalf("the set value did not show:\n%s", out)
+	}
+
+	saved, err := settings.Load(settings.GlobalPath(agentDir))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if saved.DefaultModel != "deepseek-reasoner" {
+		t.Fatalf("the change did not reach the file: %+v", saved)
+	}
+}
+
+// TestSettingAnUnknownKeyIsRefusedByName.
+func TestSettingAnUnknownKeyIsRefusedByName(t *testing.T) {
+	_, errOut := settingsSession(t, t.TempDir(), t.TempDir(), "/settings modle x")
+	if !strings.Contains(errOut, `no setting called "modle"`) {
+		t.Fatalf("a misspelt key said %q", errOut)
+	}
+}
+
+// TestSettingAnInvalidValueIsRefusedWithTheChoices.
+func TestSettingAnInvalidValueIsRefusedWithTheChoices(t *testing.T) {
+	agentDir := t.TempDir()
+	_, errOut := settingsSession(t, agentDir, t.TempDir(), "/settings defaultProjectTrust maybe")
+	if !strings.Contains(errOut, "ask, always or never") {
+		t.Fatalf("an invalid value said %q", errOut)
+	}
+	if saved, _ := settings.Load(settings.GlobalPath(agentDir)); saved.DefaultProjectTrust != "" {
+		t.Fatalf("a refused value was saved: %+v", saved)
+	}
+}
+
+// TestTrustReportsAndRecords, and /reload applies the change to the session.
+func TestTrustReportsAndRecords(t *testing.T) {
+	agentDir, work := t.TempDir(), t.TempDir()
+	writeProjectSettings(t, work, `{"defaultModel":"from-the-project"}`)
+
+	out, errOut := settingsSession(t, agentDir, work,
+		"/trust", "/trust yes", "/reload", "/settings")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("trust failed: %q", errOut)
+	}
+	if !strings.Contains(out, "NOT in effect") {
+		t.Fatalf("/trust did not say the settings are not loaded:\n%s", out)
+	}
+	if !strings.Contains(out, "trusted") {
+		t.Fatalf("/trust yes did not confirm:\n%s", out)
+	}
+	// After /reload, the project's model shows in the effective view.
+	if !strings.Contains(out, "from-the-project") {
+		t.Fatalf("/reload did not apply the newly trusted project:\n%s", out)
+	}
+}
+
+// TestTrustOnAProjectWithNothingToTrustSaysSo.
+func TestTrustOnAProjectWithNothingToTrustSaysSo(t *testing.T) {
+	out, _ := settingsSession(t, t.TempDir(), t.TempDir(), "/trust")
+	if !strings.Contains(out, "nothing to trust") {
+		t.Fatalf("/trust said:\n%s", out)
+	}
+}
+
+// TestReloadSaysWhatOnlyANewRunPicksUp. "Reloaded" covering half the truth is
+// how a user comes to believe a change is live.
+func TestReloadSaysWhatOnlyANewRunPicksUp(t *testing.T) {
+	agentDir, work := t.TempDir(), t.TempDir()
+	out, errOut := settingsSession(t, agentDir, work,
+		"/settings shellPath /bin/zsh", "/reload")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("reload failed: %q", errOut)
+	}
+	if !strings.Contains(out, "a new run picks those up") {
+		t.Fatalf("/reload did not say what needs a new run:\n%s", out)
 	}
 }
