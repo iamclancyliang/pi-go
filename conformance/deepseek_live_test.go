@@ -239,3 +239,118 @@ func TestLiveDeepSeekCallsTheReadToolFromItsDeclaredSchema(t *testing.T) {
 	t.Logf("requests sent: %d", transport.count())
 	t.Logf("session usage: %+v", sess.Usage())
 }
+
+// TestLiveDeepSeekUsesTheBuiltInSetToChangeAFile is the end the whole tool set
+// exists for, and it cannot be established offline.
+//
+// Offline tests prove each tool does what it says and that its schema reaches
+// the framework. What they cannot prove is that a real model, given these seven
+// declarations and nothing else, chooses among them and produces calls this
+// repository can execute — which is exactly where the argument schema was found
+// to be dropped. The task needs more than one tool, so a model that can only
+// read still fails it.
+func TestLiveDeepSeekUsesTheBuiltInSetToChangeAFile(t *testing.T) {
+	liveOrSkip(t)
+
+	dir := t.TempDir()
+	const before = "package main\n\nfunc greet() string {\n\treturn \"hello\"\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "greet.go"), []byte(before), 0o600); err != nil {
+		t.Fatalf("writing the fixture: %v", err)
+	}
+
+	built, err := tools.NewBuiltInRegistry(dir)
+	if err != nil {
+		t.Fatalf("building the tool set: %v", err)
+	}
+	registry, used := recordUses(t, built)
+
+	transport := &countingTransport{inner: http.Client{Timeout: 60 * time.Second}}
+	port := livePort(t, transport, 1024)
+	sess := session.New("You are pi-go, a coding agent. Use the tools available to you.")
+
+	agent, err := runtime.New(runtime.Config{
+		Model:     port,
+		ModelName: "deepseek-chat",
+		Tools:     registry,
+		Session:   sess,
+		// AllowAll rather than DenyWrites: this task changes a file, and the
+		// point is to watch the mutating tools work.
+		Policy: runtime.AllowAll,
+	})
+	if err != nil {
+		t.Fatalf("building the agent: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	err = agent.Run(ctx, "In greet.go, change the returned string from \"hello\" to \"goodbye\". "+
+		"Find the file first, then make the change.")
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+
+	// The file is the evidence. What the model said it did is not.
+	raw, err := os.ReadFile(filepath.Join(dir, "greet.go"))
+	if err != nil {
+		t.Fatalf("reading back: %v", err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `"goodbye"`) {
+		t.Fatalf("the change was not made:\n%s\ntools used: %v", got, used())
+	}
+	if strings.Contains(got, `"hello"`) {
+		t.Fatalf("the old string is still there:\n%s", got)
+	}
+	if !strings.Contains(got, "func greet() string {") {
+		t.Fatalf("the rest of the file did not survive:\n%s", got)
+	}
+
+	names := used()
+	if len(names) < 2 {
+		t.Fatalf("the task needed more than one tool; the model used %v", names)
+	}
+	t.Logf("tools used, in order: %v", names)
+	t.Logf("requests sent: %d", transport.count())
+	t.Logf("session usage: %+v", sess.Usage())
+}
+
+// recordUses wraps every registered tool so the test can report which ones the
+// model reached for, without changing what any of them does.
+func recordUses(t *testing.T, r *tools.Registry) (*tools.Registry, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var order []string
+
+	wrapped := tools.NewRegistry()
+	for _, inner := range r.All() {
+		rec := &usageRecorder{inner: inner, note: func(name string) {
+			mu.Lock()
+			order = append(order, name)
+			mu.Unlock()
+		}}
+		if err := wrapped.Register(rec); err != nil {
+			t.Fatalf("wrapping %s: %v", inner.Name(), err)
+		}
+	}
+	return wrapped, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), order...)
+	}
+}
+
+type usageRecorder struct {
+	inner tools.Tool
+	note  func(string)
+}
+
+func (u *usageRecorder) Name() string               { return u.inner.Name() }
+func (u *usageRecorder) Description() string        { return u.inner.Description() }
+func (u *usageRecorder) Execution() tools.Execution { return u.inner.Execution() }
+func (u *usageRecorder) Parameters() *tools.Schema  { return u.inner.Parameters() }
+
+func (u *usageRecorder) Call(ctx context.Context, args string) (tools.Result, error) {
+	u.note(u.inner.Name())
+	return u.inner.Call(ctx, args)
+}

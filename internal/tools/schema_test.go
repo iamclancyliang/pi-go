@@ -199,3 +199,63 @@ func TestAUsableSchemaRegisters(t *testing.T) {
 		t.Fatal("the tool did not register")
 	}
 }
+
+// TestTheBuiltInSetIsTheSevenPiShips guards the roster itself. A composition
+// root that offered six of them would look like a working agent and quietly
+// lack a capability the model was told about in its prompt.
+func TestTheBuiltInSetIsTheSevenPiShips(t *testing.T) {
+	r, err := tools.NewBuiltInRegistry(t.TempDir())
+	if err != nil {
+		t.Fatalf("the built-in set did not register: %v", err)
+	}
+	var got []string
+	for _, tool := range r.All() {
+		got = append(got, tool.Name())
+	}
+	want := []string{"bash", "edit", "find", "grep", "ls", "read", "write"}
+	if len(got) != len(want) {
+		t.Fatalf("the built-in set is %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("the built-in set is %v, want %v", got, want)
+		}
+	}
+}
+
+// TestEveryBuiltInDeclaresWhatItAccepts. A tool offered without an argument
+// shape is one the model invents arguments for, and the call then fails as a
+// malformed payload rather than as a missing declaration.
+func TestEveryBuiltInDeclaresWhatItAccepts(t *testing.T) {
+	for _, tool := range tools.BuiltIn(t.TempDir()) {
+		params := tool.Parameters()
+		if params == nil || len(params.Parameters) == 0 {
+			t.Fatalf("%s declares no arguments, and every built-in takes some", tool.Name())
+		}
+		if _, err := params.JSON(); err != nil {
+			t.Fatalf("%s declares a schema that cannot be rendered: %v", tool.Name(), err)
+		}
+		if tool.Description() == "" {
+			t.Fatalf("%s has no description, and the model chooses tools by them", tool.Name())
+		}
+	}
+}
+
+// TestOnlyTheReadingToolsSayTheyAreSafe pins what the policy seam and the crash
+// recovery branch on, for the whole set at once. Getting one wrong is silent:
+// a mutation passes a read-only gate, or a lost call is repeated over the
+// user's files.
+func TestOnlyTheReadingToolsSayTheyAreSafe(t *testing.T) {
+	readOnly := map[string]bool{"find": true, "grep": true, "ls": true, "read": true}
+	for _, tool := range tools.BuiltIn(t.TempDir()) {
+		got := tool.Execution()
+		if got.ReadOnly != readOnly[tool.Name()] {
+			t.Fatalf("%s declares ReadOnly=%v", tool.Name(), got.ReadOnly)
+		}
+		// Repeatable exactly when reading: nothing that changes a file may be
+		// run again on the strength of a lost outcome.
+		if wantReplay := readOnly[tool.Name()]; (got.Replay == tools.ReplaySafe) != wantReplay {
+			t.Fatalf("%s declares Replay=%v", tool.Name(), got.Replay)
+		}
+	}
+}
