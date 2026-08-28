@@ -462,3 +462,9 @@ func TestA8ACutBeforeAnnouncementSaysNothingAboutTheCall(t *testing.T) {
 		}
 	}
 }
+
+// These doubles exist to exercise scheduling, settlement and failure paths
+// rather than argument handling, so they declare no arguments. Nil says that;
+// an empty schema would instead tell a model there is a shape to fill in.
+
+func (s *stubbornTool) Parameters() *tools.Schema { return nil }

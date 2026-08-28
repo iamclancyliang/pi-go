@@ -379,3 +379,9 @@ func countKind(rec *runtime.Recorder, k events.Kind) int {
 	}
 	return n
 }
+
+// These doubles exist to exercise scheduling, settlement and failure paths
+// rather than argument handling, so they declare no arguments. Nil says that;
+// an empty schema would instead tell a model there is a shape to fill in.
+
+func (g *gatedTool) Parameters() *tools.Schema { return nil }

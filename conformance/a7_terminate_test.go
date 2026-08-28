@@ -126,3 +126,9 @@ func (t *terminatingTool) Execution() tools.Execution {
 func (t *terminatingTool) Call(context.Context, string) (tools.Result, error) {
 	return tools.Result{Content: t.name + " done", Terminate: t.terminate}, nil
 }
+
+// These doubles exist to exercise scheduling, settlement and failure paths
+// rather than argument handling, so they declare no arguments. Nil says that;
+// an empty schema would instead tell a model there is a shape to fill in.
+
+func (t *terminatingTool) Parameters() *tools.Schema { return nil }

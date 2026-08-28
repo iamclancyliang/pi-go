@@ -50,6 +50,18 @@ func (f *FileRead) Description() string {
 }
 
 // Execution implements Tool. Parallel-safe and read-only.
+// Parameters describes the one path this fixture reads.
+func (f *FileRead) Parameters() *Schema {
+	return &Schema{Parameters: []Parameter{
+		{
+			Name:        "path",
+			Kind:        KindString,
+			Description: "Path of the file to read.",
+			Required:    true,
+		},
+	}}
+}
+
 func (f *FileRead) Execution() Execution {
 	return Execution{Sequential: false, ReadOnly: true}
 }
@@ -119,6 +131,17 @@ func (l *ListFiles) Description() string {
 // Declared Sequential so a batch containing it cannot overlap. Nothing about
 // listing files inherently requires that — it is declared so the scheduling
 // contract has a tool that exercises it.
+// Parameters describes the optional prefix this fixture filters on.
+func (l *ListFiles) Parameters() *Schema {
+	return &Schema{Parameters: []Parameter{
+		{
+			Name:        "prefix",
+			Kind:        KindString,
+			Description: "Only list paths starting with this prefix. Omit to list every known path.",
+		},
+	}}
+}
+
 func (l *ListFiles) Execution() Execution {
 	return Execution{Sequential: true, ReadOnly: true}
 }

@@ -94,6 +94,15 @@ type Tool interface {
 	// Description is shown to the model.
 	Description() string
 
+	// Parameters describes the arguments this tool accepts, or nil when it
+	// accepts none.
+	//
+	// Part of the interface rather than an optional one a tool may also
+	// implement, because the failure of forgetting it is silent: the model is
+	// handed a tool with no argument shape, invents one, and the call fails as
+	// a bad payload rather than as a missing declaration.
+	Parameters() *Schema
+
 	// Execution reports this tool's scheduling metadata.
 	Execution() Execution
 
@@ -129,6 +138,12 @@ func (r *Registry) Register(t Tool) error {
 	name := t.Name()
 	if name == "" {
 		return errors.New("tools: cannot register a tool with an empty name")
+	}
+	// Checked here because this is the last moment a malformed schema is still
+	// only a program's problem. Past it, the schema is something a model was
+	// told it could use.
+	if err := t.Parameters().Validate(); err != nil {
+		return fmt.Errorf("tools: %q: %w", name, err)
 	}
 
 	r.mu.Lock()

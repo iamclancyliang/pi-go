@@ -121,3 +121,9 @@ func (deniedTool) Call(context.Context, string) (tools.Result, error) {
 	deniedRuns++
 	return tools.Result{Content: "wrote"}, nil
 }
+
+// These doubles exist to exercise scheduling, settlement and failure paths
+// rather than argument handling, so they declare no arguments. Nil says that;
+// an empty schema would instead tell a model there is a shape to fill in.
+
+func (deniedTool) Parameters() *tools.Schema { return nil }

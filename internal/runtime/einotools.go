@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+
+	"github.com/eino-contrib/jsonschema"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -47,11 +50,31 @@ type observedTool struct {
 }
 
 // Info implements tool.BaseTool.
+//
+// The argument schema crosses here as the JSON Schema document the tool built,
+// not as a framework type the tool constructed: a tool that named eino's schema
+// types would put the framework in every tool author's imports, which is the
+// dependency this boundary exists to prevent.
 func (t *observedTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
+	info := &schema.ToolInfo{
 		Name: t.inner.Name(),
 		Desc: t.inner.Description(),
-	}, nil
+	}
+	doc, err := t.inner.Parameters().JSON()
+	if err != nil {
+		return nil, fmt.Errorf("runtime: tool %q has an unusable parameter schema: %w", t.inner.Name(), err)
+	}
+	if doc == nil {
+		// A tool that takes no arguments says so by carrying no schema. An
+		// empty object would instead tell the model there is a shape to fill.
+		return info, nil
+	}
+	parsed := &jsonschema.Schema{}
+	if err := json.Unmarshal(doc, parsed); err != nil {
+		return nil, fmt.Errorf("runtime: tool %q produced a schema that is not JSON Schema: %w", t.inner.Name(), err)
+	}
+	info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(parsed)
+	return info, nil
 }
 
 // InvokableRun implements tool.InvokableTool.

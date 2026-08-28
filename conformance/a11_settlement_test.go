@@ -1111,3 +1111,19 @@ func (unreadableStore) Append(context.Context, ...session.Entry) error { return 
 func (unreadableStore) Load(context.Context) ([]session.Entry, error) {
 	return nil, errors.New("store unavailable")
 }
+
+// These doubles exist to exercise scheduling, settlement and failure paths
+// rather than argument handling, so they declare no arguments. Nil says that;
+// an empty schema would instead tell a model there is a shape to fill in.
+
+func (i *idempotentWriteTool) Parameters() *tools.Schema { return nil }
+
+func (t *recordReadingTool) Parameters() *tools.Schema { return nil }
+
+func (w *writingTool) Parameters() *tools.Schema { return nil }
+
+func (s *silentTool) Parameters() *tools.Schema { return nil }
+
+func (c *repeatableTool) Parameters() *tools.Schema { return nil }
+
+func (f *failingTool) Parameters() *tools.Schema { return nil }
