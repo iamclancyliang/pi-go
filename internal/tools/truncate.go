@@ -163,3 +163,23 @@ func FormatSize(bytes int) string {
 		return fmt.Sprintf("%.1fMB", float64(bytes)/(1024*1024))
 	}
 }
+
+// GrepMaxLineLength bounds one matched line.
+//
+// Separate from the output budget because it solves a different problem: one
+// minified bundle line can be the whole budget on its own, and a search that
+// spends its output on a single unreadable line has reported nothing useful
+// about the other matches.
+const GrepMaxLineLength = 500
+
+// TruncateLine shortens one line, saying so in the line itself.
+//
+// The marker is part of the text rather than a flag beside it, because the line
+// is going to the model as text: a caller that quotes a shortened line without
+// the marker is presenting a fragment as though it were the whole line.
+func TruncateLine(line string) (string, bool) {
+	if len(line) <= GrepMaxLineLength {
+		return line, false
+	}
+	return line[:GrepMaxLineLength] + "... [truncated]", true
+}
