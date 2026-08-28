@@ -27,6 +27,15 @@ type Conversation struct {
 	// the user, because an id they cannot see is one they cannot ask for.
 	ID string
 
+	// Store is the durable record, when there is one. Held so the commands
+	// that work on the shape of a conversation — moving within it, copying it
+	// — have something to work on; nil for a run that keeps nothing.
+	Store *session.FileStore
+
+	// Dir is the session directory this conversation belongs to, so a fork
+	// lands beside it rather than wherever the default points.
+	Dir string
+
 	close func() error
 }
 
@@ -47,6 +56,9 @@ func (c *Conversation) Close() error {
 // resumed, because the asking happens after the conversation worth keeping.
 func OpenConversation(args Args, workingDir, system string) (*Conversation, error) {
 	if args.NoSession {
+		// No store: a conversation that keeps nothing has no shape to navigate
+		// and nothing to copy, which the commands check for rather than
+		// discovering through a nil.
 		return &Conversation{Session: session.New(system)}, nil
 	}
 
@@ -90,6 +102,14 @@ func OpenConversation(args Args, workingDir, system string) (*Conversation, erro
 	return reopen(path, workingDir, system, id, false)
 }
 
+// agentDirOf recovers the agent directory a session path sits under, so a fork
+// lands beside the conversation it came from rather than wherever the default
+// points — which matters when a run was given --session-dir.
+func agentDirOf(path string) string {
+	// <agentDir>/sessions/<encoded working dir>/<file>
+	return filepath.Dir(filepath.Dir(filepath.Dir(path)))
+}
+
 func reopen(path, workingDir, system, id string, resumed bool) (*Conversation, error) {
 	if id == "" {
 		// Reopening: the file already carries an identity, and the store keeps
@@ -110,6 +130,8 @@ func reopen(path, workingDir, system, id string, resumed bool) (*Conversation, e
 		Resumed: resumed,
 		Path:    path,
 		ID:      store.ID(),
+		Store:   store,
+		Dir:     agentDirOf(path),
 		close:   store.Close,
 	}, nil
 }

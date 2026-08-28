@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -40,9 +41,6 @@ var notImplemented = map[string]string{
 	"name":          "a session has no durable display name yet",
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
-	"fork":          "a session is a line here, not yet a tree",
-	"clone":         "a session is a line here, not yet a tree",
-	"tree":          "a session is a line here, not yet a tree",
 	"trust":         "there is no project trust yet",
 	"login":         "credentials come from the environment",
 	"logout":        "credentials come from the environment",
@@ -66,6 +64,15 @@ type commandContext struct {
 	// args is the command line this session started with, so a command that
 	// opens another conversation inherits the same session directory.
 	args Args
+
+	// workingDir is what the conversation belongs to, and where a fork lands.
+	workingDir string
+
+	// reload rebuilds the session from the store without changing which store
+	// it is. Moving within a conversation changes what the store says the
+	// conversation IS, and a session left holding the old path would send the
+	// branch the user just left.
+	reload func() error
 }
 
 var commands = map[string]Command{}
@@ -79,6 +86,9 @@ func init() {
 		{Name: "new", Summary: "start a fresh conversation", run: runNew},
 		{Name: "resume", Summary: "reopen another conversation: /resume [id]", run: runResume},
 		{Name: "export", Summary: "write this conversation to a file: /export <path>", run: runExport},
+		{Name: "tree", Summary: "show the shape of this conversation, or go back to a point: /tree [id]", run: runTree},
+		{Name: "fork", Summary: "copy this conversation up to a point into a new one: /fork <id>", run: runFork},
+		{Name: "clone", Summary: "copy this conversation as it stands into a new one", run: runClone},
 	} {
 		commands[c.Name] = c
 	}
@@ -208,4 +218,170 @@ func runExport(c *commandContext, arg string) bool {
 	}
 	fmt.Fprintf(c.out, "exported to %s\n", path)
 	return false
+}
+
+// runTree shows the shape of the conversation, or moves within it.
+//
+// With no argument it lists; with an id it stands there. Both from one command
+// because they are one act: a person looks in order to choose, and separating
+// them would mean naming an id from a listing they had to ask for separately.
+func runTree(c *commandContext, arg string) bool {
+	if c.conversation.Store == nil {
+		fmt.Fprintln(c.errOut, "this conversation is not recorded, so it has no shape to show")
+		return false
+	}
+	if arg != "" {
+		return moveTo(c, arg)
+	}
+
+	nodes, err := c.conversation.Store.Tree(context.Background())
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not read the conversation: %v\n", err)
+		return false
+	}
+	if len(nodes) == 0 {
+		fmt.Fprintln(c.out, "  nothing recorded yet")
+		return false
+	}
+	for _, n := range nodes {
+		// The marker says where the conversation stands, and the tip marker
+		// says where a branch can be picked up again. Without both, a listing
+		// of a branched conversation cannot be acted on.
+		here := " "
+		if n.OnPath {
+			here = "*"
+		}
+		tip := " "
+		if n.IsLeaf {
+			tip = "+"
+		}
+		fmt.Fprintf(c.out, " %s%s %s  %s\n", here, tip, shortID(n.ID), n.Summary)
+	}
+	fmt.Fprintln(c.out, "\n  * on the current path   + a branch tip   /tree <id> to go back to one")
+	return false
+}
+
+func moveTo(c *commandContext, id string) bool {
+	full, err := resolveEntry(c, id)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "%v\n", err)
+		return false
+	}
+	if err := c.conversation.Store.MoveTo(context.Background(), full); err != nil {
+		fmt.Fprintf(c.errOut, "could not go back: %v\n", err)
+		return false
+	}
+	// The session is rebuilt from the store, because the conversation the model
+	// is shown must be the one the store now says it is — a session left
+	// holding the old path would send the branch the user just left.
+	if err := c.reload(); err != nil {
+		fmt.Fprintf(c.errOut, "could not reopen at that point: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "at %s · %d messages\n",
+		shortID(full), len(c.session.Snapshot().Messages))
+	return false
+}
+
+func runFork(c *commandContext, arg string) bool {
+	if arg == "" {
+		fmt.Fprintln(c.errOut, "/fork needs the id of the point to fork at; /tree lists them")
+		return false
+	}
+	full, err := resolveEntry(c, arg)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "%v\n", err)
+		return false
+	}
+	return branch(c, full)
+}
+
+func runClone(c *commandContext, _ string) bool {
+	if c.conversation.Store == nil {
+		fmt.Fprintln(c.errOut, "this conversation is not recorded, so there is nothing to copy")
+		return false
+	}
+	return branch(c, c.conversation.Store.Leaf())
+}
+
+// branch copies the conversation up to an entry into a new one and moves there.
+func branch(c *commandContext, leaf string) bool {
+	if c.conversation.Store == nil {
+		fmt.Fprintln(c.errOut, "this conversation is not recorded, so there is nothing to copy")
+		return false
+	}
+	now := time.Now()
+	id := session.NewSessionID(now)
+	path := filepath.Join(
+		session.DirFor(c.conversation.Dir, c.workingDir), session.FileName(id, now))
+
+	forked, err := c.conversation.Store.BranchInto(
+		context.Background(), path, c.workingDir, id, leaf)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not fork: %v\n", err)
+		return false
+	}
+	forked.Close()
+
+	// Reached through the ordinary resume path, so a fork lands in the same
+	// state a resumed conversation does rather than in one assembled here.
+	next := c.args
+	next.Continue, next.Resume = false, path
+	if err := c.reopen(next); err != nil {
+		fmt.Fprintf(c.errOut, "forked to %s but could not open it: %v\n", path, err)
+		return false
+	}
+	fmt.Fprintf(c.out, "forked to %s · %d messages\n",
+		c.conversation.ID, len(c.session.Snapshot().Messages))
+	return false
+}
+
+// resolveEntry turns what a person typed into an entry id.
+//
+// By prefix, because /tree shows shortened ids and typing a full one is not
+// something to ask of anybody. An ambiguous prefix is refused: standing at the
+// wrong point is not something to discover from the conversation afterwards.
+func resolveEntry(c *commandContext, prefix string) (string, error) {
+	if c.conversation.Store == nil {
+		return "", fmt.Errorf("this conversation is not recorded, so it has no entries")
+	}
+	nodes, err := c.conversation.Store.Tree(context.Background())
+	if err != nil {
+		return "", err
+	}
+	var matched []string
+	for _, n := range nodes {
+		if strings.HasPrefix(n.ID, prefix) {
+			matched = append(matched, n.ID)
+		}
+	}
+	switch len(matched) {
+	case 0:
+		return "", fmt.Errorf("no entry here starts with %q; /tree lists them", prefix)
+	case 1:
+		return matched[0], nil
+	default:
+		short := make([]string, 0, len(matched))
+		for _, id := range matched {
+			short = append(short, shortID(id))
+		}
+		return "", fmt.Errorf("%q matches %s", prefix, strings.Join(short, ", "))
+	}
+}
+
+// shortID is how an id appears in a listing: long enough to be unambiguous in
+// one conversation, short enough to retype.
+//
+// It must reach PAST the time an id starts with. An id is a millisecond
+// followed by randomness, so a prefix that stops inside the millisecond is the
+// same for every entry written in that millisecond — which two turns of one
+// conversation routinely are. Cutting there produced a listing whose ids the
+// command that reads them could never resolve.
+const shortIDLength = 20
+
+func shortID(id string) string {
+	if len(id) <= shortIDLength {
+		return id
+	}
+	return id[:shortIDLength]
 }

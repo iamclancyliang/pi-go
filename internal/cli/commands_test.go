@@ -63,12 +63,12 @@ func TestACommandIsNotSentToTheModel(t *testing.T) {
 func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/help")
 
-	for _, want := range []string{"/help", "/quit", "/session", "/new", "/resume", "/export"} {
+	for _, want := range []string{"/help", "/quit", "/session", "/new", "/resume", "/export", "/tree", "/fork", "/clone"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help does not mention %s:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/fork") {
+	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/settings") {
 		t.Fatalf("help does not say what is missing:\n%s", out)
 	}
 }
@@ -76,7 +76,7 @@ func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 // TestAPiCommandThisBuildLacksSaysWhy, rather than reporting it as a typo the
 // user did not make.
 func TestAPiCommandThisBuildLacksSaysWhy(t *testing.T) {
-	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/fork")
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/settings")
 
 	if !strings.Contains(errOut, "does not have") {
 		t.Fatalf("a known Pi command was not recognised: %q", errOut)
@@ -189,5 +189,148 @@ func TestQuitEndsTheSessionWithoutReadingOn(t *testing.T) {
 	})
 	if n := len(model.Requests()); n != 0 {
 		t.Fatalf("input after /quit was still sent: %d requests", n)
+	}
+}
+
+// TestTreeShowsWhereTheConversationStandsAndWhereItCouldGo.
+func TestTreeShowsWhereTheConversationStandsAndWhereItCouldGo(t *testing.T) {
+	out, errOut := interactive(t, cli.Args{SessionDir: t.TempDir()}, t.TempDir(),
+		"a question", "/tree")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("/tree failed: %q", errOut)
+	}
+	if !strings.Contains(out, "user: a question") {
+		t.Fatalf("/tree does not show the conversation:\n%s", out)
+	}
+	// Both markers are needed: one says where you are, the other where a branch
+	// can be picked up again.
+	if !strings.Contains(out, "on the current path") || !strings.Contains(out, "branch tip") {
+		t.Fatalf("/tree does not explain its markers:\n%s", out)
+	}
+}
+
+// TestTreeOnAnUnrecordedConversationSaysSo rather than showing nothing, which
+// reads as a conversation with no history.
+func TestTreeOnAnUnrecordedConversationSaysSo(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/tree")
+	if !strings.Contains(errOut, "not recorded") {
+		t.Fatalf("/tree on a --no-session run said %q", errOut)
+	}
+}
+
+// TestGoingBackChangesWhatTheNextTurnFollowsFrom, which is the point of being
+// able to go back at all.
+func TestGoingBackChangesWhatTheNextTurnFollowsFrom(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	out, errOut := interactive(t, cli.Args{SessionDir: dir}, work,
+		"first question", "/tree")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("setting up: %q", errOut)
+	}
+	// The prompt and the first listing line share a line, so the id cannot be
+	// taken by position. It is the field shaped like a shortened id.
+	var first string
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "user: first question") {
+			continue
+		}
+		for _, field := range strings.Fields(line) {
+			if len(field) == 20 && strings.IndexFunc(field, func(r rune) bool {
+				return !strings.ContainsRune("0123456789abcdef-", r)
+			}) < 0 {
+				first = field
+				break
+			}
+		}
+		break
+	}
+	if first == "" {
+		t.Fatalf("could not find an entry id in the listing:\n%s", out)
+	}
+
+	out, errOut = interactive(t, cli.Args{SessionDir: dir, Continue: true}, work,
+		"/tree "+first, "/session")
+	// Nothing at all on stderr: a command that quietly failed would otherwise
+	// look like one that did nothing, which is what this test nearly missed.
+	if strings.TrimSpace(errOut) != "" {
+		t.Fatalf("going back reported: %q", errOut)
+	}
+	if !strings.Contains(out, "at "+first) {
+		t.Fatalf("going back did not report where it landed:\n%s", out)
+	}
+	// One message on the path: the opening question, and nothing after it.
+	if !strings.Contains(out, "messages   1") {
+		t.Fatalf("going back did not shorten the conversation:\n%s", out)
+	}
+}
+
+// TestCloneCopiesTheConversationAndLeavesTheOriginal.
+func TestCloneCopiesTheConversationAndLeavesTheOriginal(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	out, errOut := interactive(t, cli.Args{SessionDir: dir}, work,
+		"a question worth branching", "/clone", "/session")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("/clone failed: %q", errOut)
+	}
+	if !strings.Contains(out, "forked to") {
+		t.Fatalf("/clone did not report the copy:\n%s", out)
+	}
+
+	all, err := listSessions(dir, work)
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("/clone left %d conversations, want 2", len(all))
+	}
+}
+
+// TestCloningAnUnrecordedConversationSaysSo.
+func TestCloningAnUnrecordedConversationSaysSo(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/clone")
+	if !strings.Contains(errOut, "nothing to copy") {
+		t.Fatalf("/clone on a --no-session run said %q", errOut)
+	}
+}
+
+// TestForkWithNoIdSaysWhereToFindOne.
+func TestForkWithNoIdSaysWhereToFindOne(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{SessionDir: t.TempDir()}, t.TempDir(), "/fork")
+	if !strings.Contains(errOut, "/tree lists them") {
+		t.Fatalf("/fork with no id said %q", errOut)
+	}
+}
+
+// TestListedIdsCanBeTypedBack pins the bug that made /tree unusable: ids are a
+// millisecond followed by randomness, and a shortening that stopped inside the
+// millisecond was identical for every entry written in it — which two turns of
+// one conversation routinely are. The listing then showed ids that the command
+// reading them could never resolve.
+func TestListedIdsCanBeTypedBack(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	out, _ := interactive(t, cli.Args{SessionDir: dir}, work,
+		"first", "second", "third", "/tree")
+
+	var ids []string
+	for _, line := range strings.Split(out, "\n") {
+		for _, field := range strings.Fields(line) {
+			if len(field) == 20 && strings.IndexFunc(field, func(r rune) bool {
+				return !strings.ContainsRune("0123456789abcdef-", r)
+			}) < 0 {
+				ids = append(ids, field)
+			}
+		}
+	}
+	if len(ids) < 4 {
+		t.Fatalf("the listing showed %d ids for three exchanges:\n%s", len(ids), out)
+	}
+
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("two entries were listed under the same id %q; /tree could not tell them apart:\n%s",
+				id, out)
+		}
+		seen[id] = true
 	}
 }

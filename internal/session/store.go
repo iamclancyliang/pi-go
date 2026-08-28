@@ -27,7 +27,13 @@ type Store interface {
 	// read back after a restart is not the conversation that ran.
 	Append(ctx context.Context, entries ...Entry) error
 
-	// Load returns every recorded entry, in the order they were appended.
+	// Load returns the conversation as it now stands, oldest first.
+	//
+	// Not necessarily everything recorded. A store that can branch holds more
+	// than one line of conversation, and the one a session is IN is the path to
+	// its current position — the others happened, and are kept, but they are
+	// not what the next turn follows from. A store that cannot branch has one
+	// path, and for it this is everything.
 	Load(ctx context.Context) ([]Entry, error)
 }
 

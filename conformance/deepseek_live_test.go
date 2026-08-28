@@ -517,3 +517,78 @@ func TestLiveDeepSeekRemembersAcrossTwoRuns(t *testing.T) {
 	t.Logf("second run said: %s", strings.TrimSpace(said))
 	t.Logf("requests across both runs: %d", transport.count())
 }
+
+// TestLiveDeepSeekDoesNotSeeAnAbandonedBranch is the only external proof that
+// branching means anything.
+//
+// Everything else about the tree is checked against the file. What a branch
+// actually IS, though, is what the model is shown — so the check is whether a
+// real provider, sent the conversation as it now stands, has any knowledge of
+// the turn that was left on the other branch. It cannot know unless the branch
+// leaked into the request.
+func TestLiveDeepSeekDoesNotSeeAnAbandonedBranch(t *testing.T) {
+	liveOrSkip(t)
+
+	agentDir := t.TempDir()
+	work := t.TempDir()
+	const onTheBranch = "pangolin-60413"
+
+	transport := &countingRoundTripper{inner: http.DefaultTransport}
+	port, provider, model, err := cli.Open(cli.Args{}, transport)
+	if err != nil {
+		t.Fatalf("opening the provider: %v", err)
+	}
+
+	conversation, err := cli.OpenConversation(
+		cli.Args{SessionDir: agentDir}, work, cli.DefaultSystemPrompt)
+	if err != nil {
+		t.Fatalf("opening the conversation: %v", err)
+	}
+	defer conversation.Close()
+
+	ask := func(prompt string) string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		code := cli.RunPrint(context.Background(), cli.Runtime{
+			Model: port, ModelName: model, Tools: tools.NewRegistry(),
+			System: cli.DefaultSystemPrompt, Provider: provider,
+			Conversation: conversation,
+		}, cli.Streams{In: strings.NewReader(""), Out: &out, Err: &errOut}, []string{prompt})
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errOut.String())
+		}
+		return out.String()
+	}
+
+	ask("My favourite colour is teal. Just acknowledge.")
+	// Where the conversation will be taken back to.
+	fork := conversation.Store.Leaf()
+
+	ask("My secret word is " + onTheBranch + ". Just acknowledge.")
+	if said := ask("What is my secret word?"); !strings.Contains(said, onTheBranch) {
+		t.Fatalf("the model did not have the word on the branch it was told it on: %q", said)
+	}
+
+	// Back to before the secret was ever mentioned.
+	if err := conversation.Store.MoveTo(context.Background(), fork); err != nil {
+		t.Fatalf("moving back: %v", err)
+	}
+	restored, err := session.Restore(context.Background(), cli.DefaultSystemPrompt, conversation.Store)
+	if err != nil {
+		t.Fatalf("rebuilding: %v", err)
+	}
+	conversation.Session = restored
+
+	said := ask("What is my secret word? If you were never told one, say NONE.")
+	if strings.Contains(said, onTheBranch) {
+		t.Fatalf("the abandoned branch reached the provider: %q", said)
+	}
+	// The shared part of the conversation must still be there, or this proves
+	// only that the whole history was dropped.
+	if colour := ask("What is my favourite colour?"); !strings.Contains(strings.ToLower(colour), "teal") {
+		t.Fatalf("going back lost the conversation before the fork point: %q", colour)
+	}
+
+	t.Logf("after branching, the model said: %s", strings.TrimSpace(said))
+	t.Logf("requests: %d", transport.count())
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,8 +41,16 @@ type FileStore struct {
 	mu     sync.Mutex
 	file   *os.File
 	header fileHeader
-	last   string
 	now    func() time.Time
+
+	// leaf is where the conversation currently stands. New entries hang from
+	// it, and the conversation is the path from the root down to it.
+	//
+	// Moving it is what makes a branch: continuing from an earlier entry leaves
+	// the entries that followed the original one in the file, unreachable from
+	// here but not lost — which is the difference between changing your mind
+	// and destroying the evidence.
+	leaf string
 }
 
 // fileHeader is the first line of a session file.
@@ -54,6 +63,14 @@ type fileHeader struct {
 	// Dir is where the session was working. Discovery reads it to offer only
 	// the sessions belonging to the directory a user is standing in.
 	Dir string `json:"dir"`
+
+	// ParentSession is the file this one was branched from, when it was.
+	//
+	// A fork copies a conversation up to a point into a new file rather than
+	// branching inside the old one, so that the conversation being forked FROM
+	// is left exactly as it was. This is the only thing that then says where
+	// the copy came from.
+	ParentSession string `json:"parent_session,omitempty"`
 }
 
 // fileRecord is one entry as it appears on disk.
@@ -110,6 +127,16 @@ const (
 // continues one conversation rather than starting a second inside the same
 // file.
 func OpenFileStore(path, dir, id string) (*FileStore, error) {
+	return openFileStore(path, dir, id, "")
+}
+
+// openFileStore is OpenFileStore with the branch origin, which only a fork has.
+//
+// Taken here rather than set afterwards: the header is written when the file is
+// created, so a value assigned to the struct after that never reaches the file
+// — and the link back to the conversation this one came from would be lost
+// exactly when it is needed.
+func openFileStore(path, dir, id, parentSession string) (*FileStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("session: %w", err)
 	}
@@ -123,14 +150,15 @@ func OpenFileStore(path, dir, id string) (*FileStore, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
-		store.header, store.last = header, last
+		store.header, store.leaf = header, last
 	case os.IsNotExist(err):
 		store.header = fileHeader{
-			Kind:      kindHeader,
-			Version:   FileFormatVersion,
-			ID:        id,
-			Timestamp: store.now().UTC().Format(time.RFC3339Nano),
-			Dir:       dir,
+			Kind:          kindHeader,
+			Version:       FileFormatVersion,
+			ID:            id,
+			Timestamp:     store.now().UTC().Format(time.RFC3339Nano),
+			Dir:           dir,
+			ParentSession: parentSession,
 		}
 	default:
 		return nil, fmt.Errorf("session: %w", err)
@@ -204,7 +232,7 @@ func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
 		return fmt.Errorf("session: the store is closed")
 	}
 
-	parent := s.last
+	parent := s.leaf
 	var buf []byte
 	ids := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -234,15 +262,48 @@ func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
 		}
 		return fmt.Errorf("session: %w", err)
 	}
-	s.last = ids[len(ids)-1]
+	s.leaf = ids[len(ids)-1]
 	return nil
 }
 
-// Load returns every entry, in the order they were appended.
+// Load returns the conversation as it now stands: the path from the root down
+// to the current position, oldest first.
+//
+// Not the whole file. Entries on branches that were left behind are still
+// recorded, and are still reachable through Tree, but they are not what the
+// next turn follows from.
 func (s *FileStore) Load(ctx context.Context) ([]Entry, error) {
+	s.mu.Lock()
+	leaf := s.leaf
+	s.mu.Unlock()
+	return s.branch(ctx, leaf)
+}
+
+func (s *FileStore) branch(ctx context.Context, leaf string) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	records, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	path, err := pathTo(records, leaf)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, 0, len(path))
+	for _, r := range path {
+		entry, err := r.decode()
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+// records reads every record in the file, in the order they were written.
+func (s *FileStore) records() ([]fileRecord, error) {
 	f, err := os.Open(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -251,8 +312,232 @@ func (s *FileStore) Load(ctx context.Context) ([]Entry, error) {
 		return nil, fmt.Errorf("session: %w", err)
 	}
 	defer f.Close()
-	_, entries, err := readAll(f)
-	return entries, err
+	_, records, err := readAll(f)
+	return records, err
+}
+
+// pathTo walks from a leaf up to the root and returns the result oldest first.
+//
+// An unknown leaf is an error rather than a silent fall back to the last entry:
+// asking to stand at an entry that is not there means something upstream is
+// wrong, and answering with a different conversation hides it.
+func pathTo(records []fileRecord, leaf string) ([]fileRecord, error) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+	byID := make(map[string]fileRecord, len(records))
+	for _, r := range records {
+		byID[r.ID] = r
+	}
+	if leaf == "" {
+		leaf = records[len(records)-1].ID
+	}
+	current, found := byID[leaf]
+	if !found {
+		return nil, fmt.Errorf("session: no entry %q in this conversation", leaf)
+	}
+
+	var reversed []fileRecord
+	// Bounded by the number of records: a parent chain that pointed back into
+	// itself would otherwise walk forever, and a corrupt file must fail rather
+	// than hang.
+	for range records {
+		reversed = append(reversed, current)
+		if current.ParentID == "" {
+			break
+		}
+		next, found := byID[current.ParentID]
+		if !found {
+			// A parent that is not in the file. The chain ends here rather than
+			// failing: the entries above it are gone, and what remains is still
+			// a conversation, which is more use than none.
+			break
+		}
+		current = next
+	}
+	path := make([]fileRecord, len(reversed))
+	for i, r := range reversed {
+		path[len(reversed)-1-i] = r
+	}
+	return path, nil
+}
+
+// Leaf is where the conversation currently stands.
+func (s *FileStore) Leaf() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.leaf
+}
+
+// MoveTo puts the conversation back at an earlier entry.
+//
+// What followed that entry stays in the file. Continuing from here writes a new
+// line of conversation beside the old one rather than over it, which is what
+// makes changing your mind recoverable.
+func (s *FileStore) MoveTo(ctx context.Context, id string) error {
+	records, err := s.records()
+	if err != nil {
+		return err
+	}
+	if _, err := pathTo(records, id); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.leaf = id
+	s.mu.Unlock()
+	return nil
+}
+
+// Node is one entry in the shape of the conversation.
+type Node struct {
+	ID       string
+	ParentID string
+	Kind     string
+	At       time.Time
+
+	// Summary is a short description of what this entry is, for a person
+	// choosing among them.
+	Summary string
+
+	// OnPath says this entry is part of the conversation as it now stands.
+	OnPath bool
+
+	// IsLeaf says nothing follows this entry, which is where a branch can be
+	// picked up again.
+	IsLeaf bool
+}
+
+// Tree describes the whole conversation, branches included.
+//
+// Returned as a flat list in the order the entries were written rather than as
+// a nested structure: the caller showing it needs to say which entries are on
+// the current path and which are not, and a flat list with parents named does
+// that without anyone having to walk a tree to render one.
+func (s *FileStore) Tree(ctx context.Context) ([]Node, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	records, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	path, err := pathTo(records, s.Leaf())
+	if err != nil {
+		return nil, err
+	}
+	onPath := make(map[string]bool, len(path))
+	for _, r := range path {
+		onPath[r.ID] = true
+	}
+	hasChild := make(map[string]bool, len(records))
+	for _, r := range records {
+		if r.ParentID != "" {
+			hasChild[r.ParentID] = true
+		}
+	}
+
+	nodes := make([]Node, 0, len(records))
+	for _, r := range records {
+		at, _ := time.Parse(time.RFC3339Nano, r.Timestamp)
+		nodes = append(nodes, Node{
+			ID:       r.ID,
+			ParentID: r.ParentID,
+			Kind:     r.Kind,
+			At:       at,
+			Summary:  r.summary(),
+			OnPath:   onPath[r.ID],
+			IsLeaf:   !hasChild[r.ID],
+		})
+	}
+	return nodes, nil
+}
+
+// summary is how one entry reads in a listing.
+func (r fileRecord) summary() string {
+	switch {
+	case r.Message != nil:
+		text := strings.TrimSpace(r.Message.Content)
+		if text == "" && len(r.Message.ToolCalls) > 0 {
+			return string(r.Message.Role) + ": calling " + r.Message.ToolCalls[0].Name
+		}
+		return string(r.Message.Role) + ": " + firstLine(text)
+	case r.Checkpoint != nil:
+		return "compacted: " + firstLine(r.Checkpoint.Summary)
+	case r.Intent != nil:
+		return "tool: " + r.Intent.Tool
+	case r.Settlement != nil:
+		return "tool result"
+	case r.Failure != nil:
+		return "failed: " + r.Failure.Code
+	case r.Overflow != nil:
+		return "overflow"
+	default:
+		return r.Kind
+	}
+}
+
+func firstLine(s string) string {
+	if at := strings.IndexByte(s, '\n'); at >= 0 {
+		s = s[:at]
+	}
+	if len(s) > 60 {
+		return s[:57] + "..."
+	}
+	return s
+}
+
+// BranchInto copies this conversation, up to the given entry, into a new file.
+//
+// A copy rather than a branch in place, so the conversation being left is
+// untouched — someone who forks to try something else must be able to go back
+// to a session that looks exactly as they left it. The new file records where
+// it came from, which is the only thing that then connects the two.
+//
+// The copied entries are re-chained as one line. They came from a single path
+// already, but their recorded parents point at ids that will not all be in the
+// new file, and a parent that is not there is a chain that ends early.
+func (s *FileStore) BranchInto(ctx context.Context, path, dir, id, leaf string) (*FileStore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	records, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	kept, err := pathTo(records, leaf)
+	if err != nil {
+		return nil, err
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("session: there is nothing recorded to branch from yet")
+	}
+
+	branched, err := openFileStore(path, dir, id, s.path)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]Entry, 0, len(kept))
+	for _, r := range kept {
+		entry, err := r.decode()
+		if err != nil {
+			branched.Close()
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := branched.Append(ctx, entries...); err != nil {
+		branched.Close()
+		return nil, err
+	}
+	return branched, nil
+}
+
+// ParentSession is the file this conversation was branched from, if any.
+func (s *FileStore) ParentSession() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.header.ParentSession
 }
 
 func (s *FileStore) encode(e Entry, parent string) (fileRecord, error) {
@@ -329,9 +614,9 @@ func (r fileRecord) decode() (Entry, error) {
 	}
 }
 
-func readAll(f *os.File) (fileHeader, []Entry, error) {
+func readAll(f *os.File) (fileHeader, []fileRecord, error) {
 	var header fileHeader
-	var entries []Entry
+	var records []fileRecord
 
 	lines := bufio.NewScanner(f)
 	lines.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -360,11 +645,13 @@ func readAll(f *os.File) (fileHeader, []Entry, error) {
 		if err := json.Unmarshal(raw, &record); err != nil {
 			return header, nil, fmt.Errorf("session: unreadable record: %w", err)
 		}
-		entry, err := record.decode()
-		if err != nil {
+		// Decoded here as well as by the caller, so a record this build cannot
+		// read fails when the file is read rather than when something later
+		// happens to look at that entry.
+		if _, err := record.decode(); err != nil {
 			return header, nil, err
 		}
-		entries = append(entries, entry)
+		records = append(records, record)
 	}
 	if err := lines.Err(); err != nil {
 		return header, nil, fmt.Errorf("session: %w", err)
@@ -372,7 +659,7 @@ func readAll(f *os.File) (fileHeader, []Entry, error) {
 	if first {
 		return header, nil, fmt.Errorf("session: the file is empty")
 	}
-	return header, entries, nil
+	return header, records, nil
 }
 
 func readHeaderAndLast(f *os.File) (fileHeader, string, error) {

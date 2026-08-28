@@ -148,6 +148,19 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		out:          streams.Out,
 		errOut:       streams.Err,
 		args:         rt.Args,
+		workingDir:   rt.WorkingDir,
+	}
+	ctxt.reload = func() error {
+		// Rebuilt from the store the conversation already has, rather than
+		// reopened from its path: reopening would read the leaf back off disk
+		// and undo the move that was just made in memory.
+		restored, err := session.Restore(context.Background(), rt.System, current.Store)
+		if err != nil {
+			return err
+		}
+		current.Session = restored
+		ctxt.session = restored
+		return build()
 	}
 	ctxt.reopen = func(args Args) error {
 		opened, err := OpenConversation(args, rt.WorkingDir, rt.System)

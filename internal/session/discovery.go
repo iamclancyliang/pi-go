@@ -63,9 +63,9 @@ type Info struct {
 	Started  time.Time
 	Modified time.Time
 
-	// Entries is how much was recorded. A session holding nothing is offered
-	// last: resuming one is indistinguishable from starting fresh, and it is
-	// almost always the empty file a previous run left behind.
+	// Entries is how much was recorded, across every branch. A session holding
+	// nothing is passed over: resuming one is indistinguishable from starting
+	// fresh, and it is almost always the empty file a previous run left behind.
 	Entries int
 
 	// Opening is the first thing the user asked, which is how a person
@@ -118,7 +118,7 @@ func Describe(path string) (Info, error) {
 	}
 	defer f.Close()
 
-	header, entries, err := readAll(f)
+	header, records, err := readAll(f)
 	if err != nil {
 		return Info{}, err
 	}
@@ -132,14 +132,17 @@ func Describe(path string) (Info, error) {
 		ID:       header.ID,
 		Dir:      header.Dir,
 		Modified: stat.ModTime(),
-		Entries:  len(entries),
+		// Everything recorded, not just the current branch. A listing answers
+		// "is there anything here", and a conversation the user branched away
+		// from is still something they may want back.
+		Entries: len(records),
 	}
 	if started, err := time.Parse(time.RFC3339Nano, header.Timestamp); err == nil {
 		info.Started = started
 	}
-	for _, e := range entries {
-		if e.Message != nil && e.Message.Role == "user" && strings.TrimSpace(e.Message.Content) != "" {
-			info.Opening = strings.TrimSpace(e.Message.Content)
+	for _, r := range records {
+		if r.Message != nil && r.Message.Role == "user" && strings.TrimSpace(r.Message.Content) != "" {
+			info.Opening = strings.TrimSpace(r.Message.Content)
 			break
 		}
 	}
