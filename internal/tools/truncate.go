@@ -36,6 +36,11 @@ type Truncation struct {
 	OutputLines int
 	OutputBytes int
 
+	// LastLinePartial says the tail truncation had to cut inside a line,
+	// because the last line alone was over the budget and keeping nothing would
+	// have discarded the only thing the command said.
+	LastLinePartial bool
+
 	// FirstLineExceedsLimit says the first line alone is over the byte budget,
 	// so no whole line could be shown at all. A caller must say something other
 	// than "here is the start of the file", because none of it is here.
@@ -150,6 +155,81 @@ func TruncateHead(content string, limits Limits) Truncation {
 	result.OutputLines = len(kept)
 	result.OutputBytes = len(result.Content)
 	return result
+}
+
+// TruncateTail keeps the END of content, within both limits.
+//
+// The opposite end from TruncateHead, and for a different job: a file is read
+// from the top, but a command's useful part is where it stopped — the error,
+// the summary, the failing assertion. Keeping the first two thousand lines of a
+// build log and discarding the failure is the wrong half.
+//
+// Whole lines, with one exception. If the LAST line alone is over the budget
+// there is no whole line to keep, and an empty result would throw away the only
+// thing the command said; the end of that line is returned instead, cut on a
+// character boundary, and LastLinePartial says so.
+func TruncateTail(content string, limits Limits) Truncation {
+	maxLines, maxBytes := limits.resolve()
+	lines := countableLines(content)
+	result := Truncation{
+		TotalLines: len(lines),
+		TotalBytes: len(content),
+		MaxLines:   maxLines,
+		MaxBytes:   maxBytes,
+	}
+
+	if result.TotalLines <= maxLines && result.TotalBytes <= maxBytes {
+		result.Content = content
+		result.OutputLines = result.TotalLines
+		result.OutputBytes = result.TotalBytes
+		return result
+	}
+
+	var kept []string
+	bytesKept := 0
+	by := TruncatedByLines
+	for i := len(lines) - 1; i >= 0 && len(kept) < maxLines; i-- {
+		line := lines[i]
+		cost := len(line)
+		if len(kept) > 0 {
+			cost++
+		}
+		if bytesKept+cost > maxBytes {
+			by = TruncatedByBytes
+			if len(kept) == 0 {
+				kept = []string{tailBytes(line, maxBytes)}
+				bytesKept = len(kept[0])
+				result.LastLinePartial = true
+			}
+			break
+		}
+		kept = append([]string{line}, kept...)
+		bytesKept += cost
+	}
+	if len(kept) >= maxLines && bytesKept <= maxBytes {
+		by = TruncatedByLines
+	}
+
+	result.Content = strings.Join(kept, "\n")
+	result.Truncated = true
+	result.By = by
+	result.OutputLines = len(kept)
+	result.OutputBytes = len(result.Content)
+	return result
+}
+
+// tailBytes returns the last budget bytes of s, moved forward to a character
+// boundary. Cutting mid-character would hand the model a replacement glyph
+// where a real one was.
+func tailBytes(s string, budget int) string {
+	if len(s) <= budget {
+		return s
+	}
+	start := len(s) - budget
+	for start < len(s) && s[start]&0xC0 == 0x80 {
+		start++
+	}
+	return s[start:]
 }
 
 // FormatSize renders a byte count the way the notices quote it back.
