@@ -1,14 +1,16 @@
 # pi-go parity matrix
 
-**Status:** implementation hold · complete feature-level inventory required before work resumes
+**Status:** implementation active · this matrix is the parity audit, not a precondition for it
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
 
-**Inventory authority:** @qy-liang decided on 2026-08-17 that the top-level denominator is not
-enough to continue implementation. Product implementation remains paused until the raw census,
-normalized matrix and source-coverage ledger satisfy every check in
-`docs/product/feature-inventory-schema.md`, followed by explicit owner approval.
+**Inventory authority:** @qy-liang decided on 2026-08-17 that the top-level denominator was not
+enough to continue implementation, and lifted that hold on 2026-08-28. Implementation now proceeds
+against axes whose semantics are already recorded, while the raw census, this matrix and the
+source-coverage ledger continue toward every check in
+`docs/product/feature-inventory-schema.md`. Satisfying those checks is still what lets pi-go claim
+parity; it is no longer what lets it write feature code.
 
 ## How to use this matrix
 

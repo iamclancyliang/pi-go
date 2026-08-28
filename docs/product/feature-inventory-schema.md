@@ -1,8 +1,8 @@
 # Pi feature inventory schema and completeness gate
 
-**Authority:** @qy-liang, 2026-08-17. Product implementation is paused until the feature-level
-inventory for `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` is complete and the
-owner explicitly reopens implementation.
+**Authority:** @qy-liang, 2026-08-17, amended 2026-08-28. The 2026-08-17 hold on product
+implementation was lifted on 2026-08-28. This gate now governs when pi-go may *claim* parity with
+`earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116`, not when implementation may begin.
 
 This document defines what “complete” means. A long list is not proof of completeness: the
 inventory must show which authoritative source surfaces were examined, which feature records they
@@ -188,8 +188,18 @@ An independent reviewer reruns the counts and registry extraction, samples citat
 unclassified files and searches for exported unions/registries/docs headings not represented by a
 feature ID. The audit records its exact baseline and result.
 
-## 7. Reopening implementation
+## 7. What an incomplete gate now blocks
 
-Implementation remains paused while any coverage axis is not complete or any C0–C8 check fails.
-Finishing the inventory does not itself reopen implementation: the owner reviews the completed
-artifacts and explicitly lifts the hold.
+An incomplete coverage axis or a failing C0–C8 check no longer pauses implementation. It blocks two
+narrower things, which is what the checks were always measuring:
+
+- **A parity claim.** No feature may reach a `compatible`, `compatible-via-adapter` or
+  `accepted-deviation` disposition in `parity-matrix.md` while the axis it belongs to is
+  incomplete — an unaudited feature is unaccounted for, however well it works.
+- **Building that feature at all, if its own semantics are missing.** An axis marked
+  `semantics-needed`, `schema-needed` or `source-gap` has not recorded the behaviour a port would
+  have to reproduce, so implementing from it means implementing from a guess. Close the axis from
+  the pinned tree first; this is per-axis, not repository-wide.
+
+Completing every check remains the condition for declaring baseline parity, and that declaration is
+still the owner's, reviewed against the finished artifacts.

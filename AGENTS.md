@@ -68,17 +68,33 @@ and verification without agent attribution, task routing, review dialogue, or in
 document references. Formal documents under `docs/` may cite and cross-reference ADRs, the PRD and
 their sections because those references are part of the documents' purpose.
 
-## Implementation hold
+## Implementation priority
 
-**Product implementation is paused by the repository owner as of 2026-08-17.** The approved Pi
-baseline has a top-level parity denominator, but not yet a complete feature-level inventory. Work
-may continue on the pinned-source census, feature schema, parity/traceability documents, omission
-audits, read-only review, and repository maintenance required for that inventory. Preserve existing
-product-code WIP without extending or publishing it.
+**The implementation hold of 2026-08-17 was lifted by the repository owner on 2026-08-28.** Feature
+parity with the approved Pi baseline is the current priority, and implementation no longer waits on
+the feature-level inventory.
 
-Before inventory work or any request to resume implementation, read
-`docs/product/feature-inventory-schema.md`. Implementation resumes only after its C0-C8 checks pass
-for the whole baseline and the repository owner explicitly lifts this hold.
+What changed is the inventory's job, not its standard. It was a precondition: no feature code until
+the C0-C8 checks passed for the whole baseline. It is now the parity *audit* — it records what Pi
+has and what pi-go has yet to answer for, and it runs alongside implementation instead of ahead of
+it. The reason is measured rather than impatient: closing C0-C8 is tens of hours of census work,
+including a source-coverage ledger that does not yet exist, and none of it puts a working feature in
+front of a user. Counting the denominator and building against it are separable, and only the first
+was ever the blocking one.
+
+Two obligations survive the lift, because they are what the hold was actually protecting:
+
+- **Build against recorded evidence, not against a memory of Pi.** A feature whose semantics are
+  `semantics-needed`, `schema-needed` or `source-gap` in the coverage ledger of
+  `docs/product/pi-feature-inventory.md` is not ready to implement. Close that axis first, from the
+  pinned tree.
+- **Do not claim parity from an implementation.** A `compatible` disposition in
+  `docs/product/parity-matrix.md` still requires the acceptance evidence that file defines. Shipping
+  a tool is not the same as accounting for it.
+
+Work order is by user-visible value, coarsest first: the built-in tool set, then a real CLI and its
+turn loop, then session persistence and slash commands, then the TUI, then the RPC/server/client and
+extension surfaces.
 
 The current `main` includes pre-hold A1-A3 tracer work with open NO-GO review findings. Its presence
 is not evidence that a contract, module boundary or release gate is accepted.
