@@ -27,12 +27,20 @@ func runtimeFor(t *testing.T, model ai.Port) cli.Runtime {
 	if err != nil {
 		t.Fatalf("building tools: %v", err)
 	}
+	conversation, err := cli.OpenConversation(
+		cli.Args{NoSession: true}, t.TempDir(), cli.DefaultSystemPrompt)
+	if err != nil {
+		t.Fatalf("opening a conversation: %v", err)
+	}
+	t.Cleanup(func() { conversation.Close() })
+
 	return cli.Runtime{
-		Model:     model,
-		ModelName: "scripted-1",
-		Tools:     registry,
-		System:    cli.DefaultSystemPrompt,
-		Provider:  "scripted",
+		Model:        model,
+		ModelName:    "scripted-1",
+		Tools:        registry,
+		System:       cli.DefaultSystemPrompt,
+		Provider:     "scripted",
+		Conversation: conversation,
 	}
 }
 

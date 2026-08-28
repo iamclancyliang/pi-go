@@ -47,6 +47,20 @@ type Args struct {
 	Version bool
 	NoTools bool
 
+	// Continue resumes the most recent conversation in this directory.
+	Continue bool
+
+	// Resume names one to reopen: a session id, or a path to its file.
+	Resume string
+
+	// NoSession keeps the conversation in memory only. It is what a scripted
+	// caller wants — a run that leaves nothing behind — and what a user wants
+	// when the question is throwaway.
+	NoSession bool
+
+	// SessionDir overrides where sessions are kept.
+	SessionDir string
+
 	// Messages are the prompts to send, in order.
 	Messages []string
 
@@ -68,8 +82,7 @@ type Args struct {
 // letting them fall through to Unknown would leave a user believing a flag took
 // effect — the failure mode a parser must never have.
 var notPorted = map[string]bool{
-	"continue": true, "resume": true, "name": true, "no-session": true,
-	"session": true, "session-id": true, "fork": true, "session-dir": true,
+	"name": true, "session": true, "session-id": true, "fork": true,
 	"append-system-prompt": true, "thinking": true, "models": true,
 	"tools": true, "exclude-tools": true, "no-builtin-tools": true,
 	"extensions": true, "no-extensions": true, "export": true,
@@ -89,6 +102,7 @@ func ParseArgs(argv []string) Args {
 		"--model":         &parsed.Model,
 		"--api-key":       &parsed.APIKey,
 		"--system-prompt": &parsed.SystemPrompt,
+		"--session-dir":   &parsed.SessionDir,
 	}
 
 	for i := 0; i < len(argv); i++ {
@@ -111,6 +125,26 @@ func ParseArgs(argv []string) Args {
 			continue
 		case "--no-tools":
 			parsed.NoTools = true
+			continue
+		case "--no-session":
+			parsed.NoSession = true
+			continue
+		case "--continue", "-c":
+			parsed.Continue = true
+			continue
+		case "--resume", "-r":
+			// The name is optional: bare --resume means "the most recent",
+			// which is the same thing --continue asks for. A following flag or
+			// @path is not a session name.
+			if i+1 < len(argv) {
+				next := argv[i+1]
+				if !strings.HasPrefix(next, "-") && !strings.HasPrefix(next, "@") {
+					parsed.Resume = next
+					i++
+					continue
+				}
+			}
+			parsed.Continue = true
 			continue
 		case "--print", "-p":
 			parsed.Print = true

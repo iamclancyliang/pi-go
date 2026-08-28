@@ -90,14 +90,14 @@ func TestTheAcceptedModeValues(t *testing.T) {
 // would leave a user believing the flag took effect, which is the one thing a
 // parser must never do.
 func TestAPiFlagThisBuildLacksIsSaidAloud(t *testing.T) {
-	got := cli.ParseArgs([]string{"--continue"})
+	got := cli.ParseArgs([]string{"--fork"})
 	if len(got.Diagnostics) != 1 || !got.Diagnostics[0].Warning {
-		t.Fatalf("--continue produced %v", got.Diagnostics)
+		t.Fatalf("--fork produced %v", got.Diagnostics)
 	}
 	if !strings.Contains(got.Diagnostics[0].Message, "does not implement") {
 		t.Fatalf("the diagnostic does not say why: %q", got.Diagnostics[0].Message)
 	}
-	if _, kept := got.Unknown["continue"]; kept {
+	if _, kept := got.Unknown["fork"]; kept {
 		t.Fatal("a known-but-unimplemented flag was also kept as unknown")
 	}
 	if got.Failed() {
@@ -144,5 +144,34 @@ func TestTheFlagsThisBuildActsOn(t *testing.T) {
 	}
 	if len(got.Messages) != 1 || got.Messages[0] != "hello" {
 		t.Fatalf("messages came back as %v", got.Messages)
+	}
+}
+
+// TestResumeTakesAnOptionalName. Bare --resume asks for the same thing
+// --continue does; a following flag is a flag, not a session name.
+func TestResumeTakesAnOptionalName(t *testing.T) {
+	named := cli.ParseArgs([]string{"--resume", "0198-abc"})
+	if named.Resume != "0198-abc" || named.Continue {
+		t.Fatalf("a named resume parsed as %+v", named)
+	}
+
+	bare := cli.ParseArgs([]string{"--resume"})
+	if bare.Resume != "" || !bare.Continue {
+		t.Fatalf("a bare resume parsed as %+v", bare)
+	}
+
+	followed := cli.ParseArgs([]string{"-r", "--no-tools"})
+	if followed.Resume != "" || !followed.Continue || !followed.NoTools {
+		t.Fatalf("--resume swallowed the flag after it: %+v", followed)
+	}
+}
+
+func TestTheSessionFlags(t *testing.T) {
+	got := cli.ParseArgs([]string{"-c", "--no-session", "--session-dir", "/tmp/s"})
+	if !got.Continue || !got.NoSession || got.SessionDir != "/tmp/s" {
+		t.Fatalf("parsed as %+v", got)
+	}
+	if len(got.Diagnostics) != 0 {
+		t.Fatalf("implemented flags warned: %v", got.Diagnostics)
 	}
 }

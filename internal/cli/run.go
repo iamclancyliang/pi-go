@@ -41,6 +41,11 @@ type Runtime struct {
 	// session is spending belongs on screen: two providers can serve
 	// similarly-named models, and the bill goes to only one of them.
 	Provider string
+
+	// Conversation is where this run's history lives. Required: a run with no
+	// session has one that keeps nothing, which is a decision made where the
+	// flags are read rather than assumed here.
+	Conversation *Conversation
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -54,7 +59,14 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		return 1
 	}
 
-	sess := session.New(rt.System)
+	if rt.Conversation == nil || rt.Conversation.Session == nil {
+		// A composition root's mistake rather than a user's, but reported
+		// rather than dereferenced: a crash here names a line in this file and
+		// says nothing about what went wrong.
+		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
+		return 1
+	}
+	sess := rt.Conversation.Session
 	agent, err := runtime.New(runtime.Config{
 		Model:     rt.Model,
 		ModelName: rt.ModelName,
@@ -93,7 +105,14 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 // has not been ported. Said plainly rather than approximated, because a
 // half-drawn interface is worse than an honest prompt.
 func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
-	sess := session.New(rt.System)
+	if rt.Conversation == nil || rt.Conversation.Session == nil {
+		// A composition root's mistake rather than a user's, but reported
+		// rather than dereferenced: a crash here names a line in this file and
+		// says nothing about what went wrong.
+		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
+		return 1
+	}
+	sess := rt.Conversation.Session
 	agent, err := runtime.New(runtime.Config{
 		Model:     rt.Model,
 		ModelName: rt.ModelName,
@@ -107,6 +126,18 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 
 	fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · Ctrl-D to exit\n",
 		rt.Provider, rt.ModelName, len(rt.Tools.All()))
+	// Said aloud, because continuing silently cannot be told from starting
+	// fresh until the model answers something it should not have known.
+	switch {
+	case rt.Conversation.Resumed:
+		fmt.Fprintf(streams.Out, "resumed %d messages · %s\n",
+			len(sess.Snapshot().Messages), rt.Conversation.ID)
+	case rt.Conversation.Path != "":
+		// The id is shown at the start rather than the end: a session ended by
+		// closing the terminal never reaches an ending, and an id the user
+		// never saw is one they cannot resume.
+		fmt.Fprintf(streams.Out, "session %s · -c to continue it later\n", rt.Conversation.ID)
+	}
 
 	lines := bufio.NewScanner(streams.In)
 	// A prompt can be long; the default limit would cut one mid-sentence and

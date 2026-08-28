@@ -399,13 +399,23 @@ func TestLiveDeepSeekThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("building the tool set: %v", err)
 	}
 
+	// A run that records nothing: this test is about the command line's
+	// composition, and leaving a session behind would make it depend on the
+	// state of whatever ran before it.
+	conversation, err := cli.OpenConversation(cli.Args{NoSession: true}, dir, cli.DefaultSystemPrompt)
+	if err != nil {
+		t.Fatalf("opening the conversation: %v", err)
+	}
+	defer conversation.Close()
+
 	var out, errOut bytes.Buffer
 	code := cli.RunPrint(context.Background(), cli.Runtime{
-		Model:     port,
-		ModelName: model,
-		Tools:     registry,
-		System:    cli.DefaultSystemPrompt,
-		Provider:  provider,
+		Model:        port,
+		ModelName:    model,
+		Tools:        registry,
+		System:       cli.DefaultSystemPrompt,
+		Provider:     provider,
+		Conversation: conversation,
 	}, cli.Streams{In: strings.NewReader(""), Out: &out, Err: &errOut}, args.Messages)
 
 	if code != 0 {
@@ -444,4 +454,66 @@ func (c *countingRoundTripper) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.sent
+}
+
+// TestLiveDeepSeekRemembersAcrossTwoRuns is what session persistence is for,
+// and the only check that can prove it: two runs, each with its own session
+// object, connected by nothing but the file on disk.
+//
+// The codeword cannot be guessed and is not in either prompt's own context, so
+// the second run answering it means the first run's conversation was read back
+// and sent to the provider.
+func TestLiveDeepSeekRemembersAcrossTwoRuns(t *testing.T) {
+	liveOrSkip(t)
+
+	agentDir := t.TempDir()
+	work := t.TempDir()
+	const codeword = "axolotl-51772-tundra"
+
+	transport := &countingRoundTripper{inner: http.DefaultTransport}
+	port, provider, model, err := cli.Open(cli.Args{}, transport)
+	if err != nil {
+		t.Fatalf("opening the provider: %v", err)
+	}
+
+	answer := func(args cli.Args, prompt string) (string, *cli.Conversation) {
+		t.Helper()
+		conversation, err := cli.OpenConversation(args, work, cli.DefaultSystemPrompt)
+		if err != nil {
+			t.Fatalf("opening the conversation: %v", err)
+		}
+		var out, errOut bytes.Buffer
+		code := cli.RunPrint(context.Background(), cli.Runtime{
+			Model: port, ModelName: model, Tools: tools.NewRegistry(),
+			System: cli.DefaultSystemPrompt, Provider: provider,
+			Conversation: conversation,
+		}, cli.Streams{In: strings.NewReader(""), Out: &out, Err: &errOut}, []string{prompt})
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errOut.String())
+		}
+		return out.String(), conversation
+	}
+
+	_, first := answer(cli.Args{SessionDir: agentDir},
+		"Remember this codeword: "+codeword+". Just acknowledge it.")
+	if first.Path == "" {
+		t.Fatal("the first run recorded nothing, so there is nothing to continue")
+	}
+	first.Close()
+
+	// A second run, connected to the first by the file alone.
+	said, second := answer(cli.Args{SessionDir: agentDir, Continue: true},
+		"What was the codeword I gave you? Reply with just the codeword.")
+	defer second.Close()
+
+	if !second.Resumed {
+		t.Fatal("the second run did not report itself as resumed")
+	}
+	if !strings.Contains(said, codeword) {
+		t.Fatalf("the second run did not remember the codeword: %q", said)
+	}
+
+	t.Logf("session %s at %s", second.ID, second.Path)
+	t.Logf("second run said: %s", strings.TrimSpace(said))
+	t.Logf("requests across both runs: %d", transport.count())
 }

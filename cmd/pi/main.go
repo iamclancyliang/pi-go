@@ -85,12 +85,20 @@ func run(argv []string) int {
 	if system == "" {
 		system = cli.DefaultSystemPrompt
 	}
+	conversation, err := cli.OpenConversation(args, root, system)
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+	defer conversation.Close()
+
 	rt := cli.Runtime{
-		Model:     port,
-		ModelName: model,
-		Tools:     registry,
-		System:    system,
-		Provider:  providerName,
+		Model:        port,
+		ModelName:    model,
+		Tools:        registry,
+		System:       system,
+		Provider:     providerName,
+		Conversation: conversation,
 	}
 
 	// One interrupt cancels the run in progress. A second is left to the
@@ -124,6 +132,10 @@ Usage:
 
 Flags:
   -p, --print [prompt]     answer once and exit, rather than starting a session
+  -c, --continue           carry on the most recent conversation here
+  -r, --resume [id]        reopen a conversation by id; bare means the most recent
+      --no-session         keep the conversation in memory only
+      --session-dir DIR    where conversations are kept
       --mode text|json|rpc how to run; text lets the terminal decide
       --provider NAME      deepseek, openai or qwen
       --model NAME         the model to ask for
@@ -136,6 +148,9 @@ Flags:
 Without --print, pi starts a session when both input and output are terminals,
 and answers once otherwise — so a redirected run is a one-shot even without the
 flag.
+
+Conversations are recorded under ~/.pi-go/agent/sessions, grouped by the
+directory they ran in, so --continue offers the work you were just doing here.
 
 Credentials come from the environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or
 DASHSCOPE_API_KEY. With no --provider, the first one that is set is used.
