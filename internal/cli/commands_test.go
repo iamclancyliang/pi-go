@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/cli"
 )
 
@@ -450,5 +451,91 @@ func TestNamingAProviderWithNoModelIsRefused(t *testing.T) {
 	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/model deepseek/")
 	if !strings.Contains(errOut, "no model") {
 		t.Fatalf("a provider with no model said %q", errOut)
+	}
+}
+
+// TestLogoutListsWhatIsSavedRatherThanRemovingEverything. A bare command that
+// destroys all credentials is one somebody runs once by accident.
+func TestLogoutListsWhatIsSavedRatherThanRemovingEverything(t *testing.T) {
+	dir := t.TempDir()
+	store := auth.Open(dir)
+	if err := store.Set("deepseek", auth.APIKey("sk-one")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	out, errOut := interactive(t, cli.Args{NoSession: true, SessionDir: dir}, t.TempDir(), "/logout")
+	if !strings.Contains(out, "deepseek") {
+		t.Fatalf("/logout did not list what is saved:\n%s", out)
+	}
+	if !strings.Contains(errOut, "usage: /logout") {
+		t.Fatalf("/logout did not say how to remove one: %q", errOut)
+	}
+	if names, _ := store.Providers(); len(names) != 1 {
+		t.Fatalf("a bare /logout removed credentials: %v", names)
+	}
+}
+
+// TestLogoutForgetsOneProvider.
+func TestLogoutForgetsOneProvider(t *testing.T) {
+	dir := t.TempDir()
+	store := auth.Open(dir)
+	store.Set("deepseek", auth.APIKey("sk-one"))
+	store.Set("openai", auth.APIKey("sk-two"))
+
+	out, _ := interactive(t, cli.Args{NoSession: true, SessionDir: dir}, t.TempDir(), "/logout deepseek")
+	if !strings.Contains(out, "forgot") {
+		t.Fatalf("/logout did not confirm:\n%s", out)
+	}
+	names, _ := store.Providers()
+	if len(names) != 1 || names[0] != "openai" {
+		t.Fatalf("after logging out of deepseek the store holds %v", names)
+	}
+}
+
+// TestLogoutSaysWhenTheEnvironmentStillCarriesOne. A user told they are logged
+// out while requests keep succeeding has been told something false.
+func TestLogoutSaysWhenTheEnvironmentStillCarriesOne(t *testing.T) {
+	dir := t.TempDir()
+	auth.Open(dir).Set("deepseek", auth.APIKey("sk-one"))
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-the-environment")
+
+	out, _ := interactive(t, cli.Args{NoSession: true, SessionDir: dir}, t.TempDir(), "/logout deepseek")
+	if !strings.Contains(out, "DEEPSEEK_API_KEY is still set") {
+		t.Fatalf("/logout did not mention the environment:\n%s", out)
+	}
+}
+
+// TestLoginRefusesAProviderThisBuildDoesNotHave, rather than saving a
+// credential nothing will ever read.
+func TestLoginRefusesAProviderThisBuildDoesNotHave(t *testing.T) {
+	dir := t.TempDir()
+	_, errOut := interactive(t, cli.Args{NoSession: true, SessionDir: dir}, t.TempDir(), "/login nowhere")
+	if !strings.Contains(errOut, "unknown provider") {
+		t.Fatalf("/login of an unknown provider said %q", errOut)
+	}
+	if names, _ := auth.Open(dir).Providers(); len(names) != 0 {
+		t.Fatalf("a refused login saved %v", names)
+	}
+	_, errOut = interactive(t, cli.Args{NoSession: true, SessionDir: dir}, t.TempDir(), "/login")
+	if !strings.Contains(errOut, "usage: /login") {
+		t.Fatalf("/login with no provider said %q", errOut)
+	}
+}
+
+// TestAStoredCredentialIsUsedWithoutTheEnvironment, which is the point of
+// saving one.
+func TestAStoredCredentialIsUsedWithoutTheEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	auth.Open(dir).Set("deepseek", auth.APIKey("sk-stored"))
+	for _, v := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"} {
+		t.Setenv(v, "")
+	}
+
+	chosen, err := cli.SelectProvider(cli.Args{SessionDir: dir})
+	if err != nil {
+		t.Fatalf("with a stored credential and no environment: %v", err)
+	}
+	if chosen.Name != "deepseek" {
+		t.Fatalf("the stored credential selected %q", chosen.Name)
 	}
 }

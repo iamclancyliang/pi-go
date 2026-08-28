@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
 	"github.com/iamclancyliang/pi-go/internal/provider/qwen"
+	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
 // DefaultMaxOutputTokens caps a reply when nothing else does.
@@ -128,12 +130,45 @@ func ProviderNames() []string {
 	return out
 }
 
+// AuthStore is where stored credentials live for a run.
+//
+// Resolved from the same directory sessions use, so a --session-dir aimed
+// somewhere else keeps its credentials with it.
+func AuthStore(args Args) (*auth.Store, error) {
+	dir := args.SessionDir
+	if dir == "" {
+		resolved, err := session.AgentDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = resolved
+	}
+	return auth.Open(dir), nil
+}
+
+// storedKey is the credential kept for a provider, if any.
+//
+// A failure to read the file is not fatal here: the environment may still carry
+// a usable key, and refusing to start because a stored credential is unreadable
+// would lock a user out over a file they can simply delete.
+func storedKey(args Args, provider string) string {
+	store, err := AuthStore(args)
+	if err != nil {
+		return ""
+	}
+	credential, found, err := store.Get(provider)
+	if err != nil || !found {
+		return ""
+	}
+	return credential.Key()
+}
+
 // SelectProvider decides which provider to use.
 //
-// An explicit --provider wins. Otherwise the first one whose credential is
-// present in the environment is chosen, in the order ProviderNames gives, so
-// the choice is the same on two machines configured the same way. Guessing
-// differently each run would make a bill depend on map iteration order.
+// An explicit --provider wins. Otherwise the first one with a credential is
+// chosen, in the order ProviderNames gives, so the choice is the same on two
+// machines configured the same way. Guessing differently each run would make a
+// bill depend on map iteration order.
 func SelectProvider(args Args) (Provider, error) {
 	if args.Provider != "" {
 		p, known := Providers[args.Provider]
@@ -145,13 +180,20 @@ func SelectProvider(args Args) (Provider, error) {
 	}
 	for _, name := range ProviderNames() {
 		p := Providers[name]
+		// A stored credential counts as much as one in the environment: a user
+		// who ran /login expects the next run to use it without also exporting
+		// the variable.
+		if storedKey(args, name) != "" {
+			return p, nil
+		}
 		for _, v := range p.EnvVars {
 			if strings.TrimSpace(os.Getenv(v)) != "" {
 				return p, nil
 			}
 		}
 	}
-	return Provider{}, fmt.Errorf("no provider credential found; set one of %s, or pass --provider",
+	return Provider{}, fmt.Errorf(
+		"no provider credential found; run /login, set one of %s, or pass --provider",
 		strings.Join(credentialVars(), ", "))
 }
 
@@ -177,7 +219,14 @@ func Open(args Args, transport http.RoundTripper) (ai.Port, string, string, erro
 	if model == "" {
 		model = p.DefaultModel
 	}
-	port, err := p.build(model, args.APIKey, transport)
+	// Order: the flag, then what /login stored, then the environment — which is
+	// the provider's own last resort. Most explicit first, so a key given for
+	// one run is not silently overridden by one saved earlier.
+	key := args.APIKey
+	if key == "" {
+		key = storedKey(args, p.Name)
+	}
+	port, err := p.build(model, key, transport)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("%s: %w", p.Name, err)
 	}

@@ -159,6 +159,7 @@ In a session, /help lists the commands — and says which of Pi's are not here.
 /tree shows the shape of a conversation and goes back to any point in it;
 /fork and /clone copy one into a new conversation, leaving the original alone.
 
-Credentials come from the environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or
-DASHSCOPE_API_KEY. With no --provider, the first one that is set is used.
+Credentials come from --api-key, then from what /login saved, then from the
+environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or DASHSCOPE_API_KEY. With no
+--provider, the first one with a credential is used.
 `

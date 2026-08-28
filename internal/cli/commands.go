@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
@@ -40,8 +41,6 @@ var notImplemented = map[string]string{
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
 	"trust":         "there is no project trust yet",
-	"login":         "credentials come from the environment",
-	"logout":        "credentials come from the environment",
 	"reload":        "there is nothing reloadable yet",
 	"scoped-models": "there is no model catalogue to scope",
 }
@@ -105,6 +104,8 @@ func init() {
 		{Name: "copy", Summary: "copy the last answer to the clipboard", run: runCopy},
 		{Name: "model", Summary: "switch model: /model [provider/]<model>", run: runModel},
 		{Name: "compact", Summary: "summarise the older part of this conversation: /compact [focus]", run: runCompact},
+		{Name: "login", Summary: "save a credential for a provider: /login <provider>", run: runLogin},
+		{Name: "logout", Summary: "forget a saved credential: /logout [provider]", run: runLogout},
 	} {
 		commands[c.Name] = c
 	}
@@ -529,5 +530,94 @@ func runCompact(c *commandContext, arg string) bool {
 	// Truth is unchanged — compaction shortens what the MODEL sees, not what
 	// happened — so the count that moved is the projection's.
 	fmt.Fprintf(c.out, "compacted · a summary now stands in for the older part of %d messages\n", before)
+	return false
+}
+
+// runLogin saves a credential so it does not have to be given again.
+//
+// The key is read from the terminal with echo off rather than taken as an
+// argument. A key on the command line lands in shell history and in the
+// scrollback of the session it was typed into, and both outlive the terminal.
+func runLogin(c *commandContext, arg string) bool {
+	if arg == "" {
+		fmt.Fprintf(c.errOut, "usage: /login <provider> — one of %s\n",
+			strings.Join(ProviderNames(), ", "))
+		return false
+	}
+	if _, known := Providers[arg]; !known {
+		fmt.Fprintf(c.errOut, "unknown provider %q; this build has %s\n",
+			arg, strings.Join(ProviderNames(), ", "))
+		return false
+	}
+
+	store, err := AuthStore(c.args)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not open the credential store: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "key for %s (not shown): ", arg)
+	key, err := readSecret()
+	fmt.Fprintln(c.out)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not read the key: %v\n", err)
+		return false
+	}
+	if strings.TrimSpace(key) == "" {
+		// Storing an empty key would look like being logged in while every
+		// request fails as an authentication error.
+		fmt.Fprintln(c.errOut, "nothing entered; no credential was saved")
+		return false
+	}
+	if err := store.Set(arg, auth.APIKey(key)); err != nil {
+		fmt.Fprintf(c.errOut, "could not save: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "saved a credential for %s in %s\n", arg, store.Path())
+	return false
+}
+
+// runLogout forgets a saved credential.
+//
+// With no argument it lists what is saved rather than removing everything: a
+// bare command that destroys all credentials is one somebody runs once by
+// accident.
+func runLogout(c *commandContext, arg string) bool {
+	store, err := AuthStore(c.args)
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not open the credential store: %v\n", err)
+		return false
+	}
+	saved, err := store.Providers()
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not read the credential store: %v\n", err)
+		return false
+	}
+
+	if arg == "" {
+		if len(saved) == 0 {
+			fmt.Fprintln(c.out, "  no saved credentials")
+			return false
+		}
+		for _, name := range saved {
+			fmt.Fprintf(c.out, "  %s\n", name)
+		}
+		fmt.Fprintln(c.errOut, "usage: /logout <provider>")
+		return false
+	}
+	if err := store.Remove(arg); err != nil {
+		fmt.Fprintf(c.errOut, "could not remove: %v\n", err)
+		return false
+	}
+	// The environment may still carry one, and a user told they are logged out
+	// while requests keep succeeding has been told something false.
+	if p, known := Providers[arg]; known {
+		for _, v := range p.EnvVars {
+			if strings.TrimSpace(os.Getenv(v)) != "" {
+				fmt.Fprintf(c.out, "forgot the saved credential for %s, but %s is still set\n", arg, v)
+				return false
+			}
+		}
+	}
+	fmt.Fprintf(c.out, "forgot the credential for %s\n", arg)
 	return false
 }
