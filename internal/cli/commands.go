@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,7 +38,6 @@ type Command struct {
 // parser refuses to have.
 var notImplemented = map[string]string{
 	"settings":      "there is no settings store yet",
-	"share":         "there is no gist integration",
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
 	"trust":         "there is no project trust yet",
@@ -80,6 +80,10 @@ type commandContext struct {
 	modelProvider func() string
 	modelName     func() string
 
+	// confirm asks the user a yes-or-no question, reading from the same input
+	// the conversation comes from.
+	confirm func() bool
+
 	// compact shortens the conversation. Held as a function because it makes a
 	// billed model call and needs the port this run opened.
 	compact func(instructions string) error
@@ -106,6 +110,7 @@ func init() {
 		{Name: "compact", Summary: "summarise the older part of this conversation: /compact [focus]", run: runCompact},
 		{Name: "login", Summary: "save a credential for a provider: /login <provider>", run: runLogin},
 		{Name: "logout", Summary: "forget a saved credential: /logout [provider]", run: runLogout},
+		{Name: "share", Summary: "upload this conversation as a secret GitHub gist", run: runShare},
 	} {
 		commands[c.Name] = c
 	}
@@ -216,20 +221,8 @@ func runExport(c *commandContext, arg string) bool {
 		return false
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "# pi-go session %s\n# exported %s\n\n",
-		c.conversation.ID, time.Now().Format(time.RFC3339))
-	for _, m := range c.session.Snapshot().Messages {
-		if strings.TrimSpace(m.Content) == "" {
-			continue
-		}
-		who := string(m.Role)
-		if m.Role == ai.RoleAssistant {
-			who = "assistant"
-		}
-		fmt.Fprintf(&b, "## %s\n\n%s\n\n", who, m.Content)
-	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	body := renderConversation(c.conversation.ID, c.session.Snapshot().Messages)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		fmt.Fprintf(c.errOut, "could not export: %v\n", err)
 		return false
 	}
@@ -620,4 +613,87 @@ func runLogout(c *commandContext, arg string) bool {
 	}
 	fmt.Fprintf(c.out, "forgot the credential for %s\n", arg)
 	return false
+}
+
+// runShare uploads the conversation as a secret gist, through the GitHub CLI.
+//
+// Through gh rather than the API directly, as Pi does: it already holds the
+// user's GitHub authentication, and asking for a token of our own would be a
+// second credential to store and revoke for something the machine can already
+// do.
+//
+// It asks first, which Pi does not. The difference is deliberate: a coding
+// conversation carries source code, and tool output can carry things that were
+// never meant to leave the machine — a key printed by a command, a line from a
+// config file. "Secret" gist means unlisted, not private, and an upload cannot
+// be recalled from whatever has already fetched it. The user typing /share is
+// asking to publish; being told what is about to be published is the difference
+// between that and finding out afterwards.
+func runShare(c *commandContext, _ string) bool {
+	messages := c.session.Snapshot().Messages
+	if len(messages) == 0 {
+		fmt.Fprintln(c.errOut, "there is no conversation to share yet")
+		return false
+	}
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		if _, missing := exec.LookPath("gh"); missing != nil {
+			fmt.Fprintln(c.errOut, "the GitHub CLI (gh) is not installed: https://cli.github.com/")
+			return false
+		}
+		fmt.Fprintln(c.errOut, "the GitHub CLI is not logged in; run 'gh auth login' first")
+		return false
+	}
+
+	fmt.Fprintf(c.out,
+		"upload %d messages to a secret gist? it is unlisted, not private, and cannot be recalled [y/N]: ",
+		len(messages))
+	if !c.confirm() {
+		fmt.Fprintln(c.out, "not shared")
+		return false
+	}
+
+	// Markdown rather than Pi's HTML: there is no renderer here, and sharing
+	// something this build cannot produce would be worse than sharing the
+	// content in a form GitHub already displays.
+	file, err := os.CreateTemp("", "pi-go-session-*.md")
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not prepare the upload: %v\n", err)
+		return false
+	}
+	// Removed whatever happens: it holds the whole conversation, and leaving it
+	// in a shared temporary directory is the disclosure this command asked
+	// about.
+	defer os.Remove(file.Name())
+	if _, err := file.WriteString(renderConversation(c.conversation.ID, messages)); err != nil {
+		file.Close()
+		fmt.Fprintf(c.errOut, "could not prepare the upload: %v\n", err)
+		return false
+	}
+	file.Close()
+
+	out, err := exec.Command("gh", "gist", "create", "--public=false", file.Name()).Output()
+	if err != nil {
+		fmt.Fprintf(c.errOut, "could not create the gist: %v\n", err)
+		return false
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		fmt.Fprintln(c.errOut, "the gist was created but gh reported no URL")
+		return false
+	}
+	fmt.Fprintf(c.out, "shared: %s\n", url)
+	return false
+}
+
+// renderConversation is the readable form used by /export and /share.
+func renderConversation(id string, messages []ai.Message) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# pi-go session %s\n# exported %s\n\n", id, time.Now().Format(time.RFC3339))
+	for _, m := range messages {
+		if strings.TrimSpace(m.Content) == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n", string(m.Role), m.Content)
+	}
+	return b.String()
 }

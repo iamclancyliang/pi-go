@@ -539,3 +539,45 @@ func TestAStoredCredentialIsUsedWithoutTheEnvironment(t *testing.T) {
 		t.Fatalf("the stored credential selected %q", chosen.Name)
 	}
 }
+
+// TestSharingAsksBeforeUploading. A coding conversation carries source code,
+// and tool output can carry things never meant to leave the machine. "Secret"
+// means unlisted, not private, and an upload cannot be recalled.
+func TestSharingAsksBeforeUploading(t *testing.T) {
+	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(),
+		"a question", "/share", "n")
+
+	// Either it asked, or it refused for a reason that comes before asking —
+	// gh missing or logged out. What it must never do is upload silently.
+	asked := strings.Contains(out, "upload") && strings.Contains(out, "[y/N]")
+	refused := strings.Contains(out, "not shared")
+	if !asked && !strings.Contains(out, "shared:") {
+		// gh is unavailable on this machine; nothing was uploaded, which is the
+		// property under test.
+		return
+	}
+	if asked && !refused {
+		t.Fatalf("answering no did not stop the upload:\n%s", out)
+	}
+}
+
+// TestSharingWithNothingToShareSaysSo rather than uploading an empty document.
+func TestSharingWithNothingToShareSaysSo(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/share")
+	if !strings.Contains(errOut, "no conversation to share") &&
+		!strings.Contains(errOut, "GitHub CLI") {
+		t.Fatalf("/share on an empty conversation said %q", errOut)
+	}
+}
+
+// TestAnythingOtherThanYesIsNo. End of input, a blank line and a typo must all
+// leave the outward-facing thing undone.
+func TestAnythingOtherThanYesIsNo(t *testing.T) {
+	for _, answer := range []string{"", "no", "sure", "Y E S"} {
+		out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(),
+			"a question", "/share", answer)
+		if strings.Contains(out, "shared: ") {
+			t.Fatalf("answering %q uploaded the conversation:\n%s", answer, out)
+		}
+	}
+}

@@ -169,6 +169,19 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		modelProvider: func() string { return provider },
 		modelName:     func() string { return modelName },
 	}
+	// The scanner is shared with the prompt loop, so a confirmation reads the
+	// next line the user types rather than opening a second reader that would
+	// race the first for the same input.
+	var lines *bufio.Scanner
+	ctxt.confirm = func() bool {
+		if lines == nil || !lines.Scan() {
+			return false
+		}
+		answer := strings.ToLower(strings.TrimSpace(lines.Text()))
+		// Only an explicit yes. Anything else — including end of input — leaves
+		// the outward-facing thing undone, which is the safe way to be wrong.
+		return answer == "y" || answer == "yes"
+	}
 	ctxt.compact = func(instructions string) error {
 		// Summarised with whatever model is answering now, so a conversation
 		// switched to a cheaper model is compacted by it too.
@@ -239,7 +252,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		fmt.Fprintf(streams.Out, "session %s · -c to continue it later\n", current.ID)
 	}
 
-	lines := bufio.NewScanner(streams.In)
+	lines = bufio.NewScanner(streams.In)
 	// A prompt can be long; the default limit would cut one mid-sentence and
 	// send the fragment.
 	lines.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
