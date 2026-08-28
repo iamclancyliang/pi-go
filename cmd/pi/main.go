@@ -99,6 +99,8 @@ func run(argv []string) int {
 		System:       system,
 		Provider:     providerName,
 		Conversation: conversation,
+		Args:         args,
+		WorkingDir:   root,
 	}
 
 	// One interrupt cancels the run in progress. A second is left to the
@@ -151,6 +153,8 @@ flag.
 
 Conversations are recorded under ~/.pi-go/agent/sessions, grouped by the
 directory they ran in, so --continue offers the work you were just doing here.
+
+In a session, /help lists the commands — and says which of Pi's are not here.
 
 Credentials come from the environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or
 DASHSCOPE_API_KEY. With no --provider, the first one that is set is used.

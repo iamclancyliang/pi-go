@@ -46,6 +46,12 @@ type Runtime struct {
 	// session has one that keeps nothing, which is a decision made where the
 	// flags are read rather than assumed here.
 	Conversation *Conversation
+
+	// Args and WorkingDir are what a command needs to open ANOTHER
+	// conversation — /new and /resume must land in the same session directory
+	// this run was told to use, not in whatever the default happens to be.
+	Args       Args
+	WorkingDir string
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -112,31 +118,64 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
 		return 1
 	}
-	sess := rt.Conversation.Session
-	agent, err := runtime.New(runtime.Config{
-		Model:     rt.Model,
-		ModelName: rt.ModelName,
-		Tools:     rt.Tools,
-		Session:   sess,
-	})
-	if err != nil {
+	// The agent is rebuilt whenever the conversation changes, because a loop
+	// holds the session it was built with: a command that opened another one
+	// while the agent still pointed at the old would write the next turn into
+	// the conversation the user just left.
+	current := rt.Conversation
+	var agent *runtime.Agent
+	build := func() error {
+		next, err := runtime.New(runtime.Config{
+			Model:     rt.Model,
+			ModelName: rt.ModelName,
+			Tools:     rt.Tools,
+			Session:   current.Session,
+		})
+		if err != nil {
+			return err
+		}
+		agent = next
+		return nil
+	}
+	if err := build(); err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · Ctrl-D to exit\n",
+	ctxt := &commandContext{
+		session:      current.Session,
+		conversation: current,
+		out:          streams.Out,
+		errOut:       streams.Err,
+		args:         rt.Args,
+	}
+	ctxt.reopen = func(args Args) error {
+		opened, err := OpenConversation(args, rt.WorkingDir, rt.System)
+		if err != nil {
+			return err
+		}
+		// The old one is closed only once the new one is open, so a failure
+		// leaves the session the user was in rather than none at all.
+		_ = current.Close()
+		current = opened
+		ctxt.session, ctxt.conversation = opened.Session, opened
+		return build()
+	}
+	defer func() { _ = current.Close() }()
+
+	fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · /help for commands\n",
 		rt.Provider, rt.ModelName, len(rt.Tools.All()))
 	// Said aloud, because continuing silently cannot be told from starting
 	// fresh until the model answers something it should not have known.
 	switch {
-	case rt.Conversation.Resumed:
+	case current.Resumed:
 		fmt.Fprintf(streams.Out, "resumed %d messages · %s\n",
-			len(sess.Snapshot().Messages), rt.Conversation.ID)
-	case rt.Conversation.Path != "":
+			len(current.Session.Snapshot().Messages), current.ID)
+	case current.Path != "":
 		// The id is shown at the start rather than the end: a session ended by
 		// closing the terminal never reaches an ending, and an id the user
 		// never saw is one they cannot resume.
-		fmt.Fprintf(streams.Out, "session %s · -c to continue it later\n", rt.Conversation.ID)
+		fmt.Fprintf(streams.Out, "session %s · -c to continue it later\n", current.ID)
 	}
 
 	lines := bufio.NewScanner(streams.In)
@@ -153,8 +192,11 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		if prompt == "" {
 			continue
 		}
-		if prompt == "/exit" || prompt == "/quit" {
-			break
+		if handled, stop := dispatch(ctxt, prompt); handled {
+			if stop {
+				break
+			}
+			continue
 		}
 
 		// The session carries across turns, so this is one conversation rather
@@ -169,7 +211,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			fmt.Fprintf(streams.Err, "pi: %v\n", err)
 			continue
 		}
-		if answer, ok := lastAnswer(sess); ok {
+		if answer, ok := lastAnswer(current.Session); ok {
 			fmt.Fprintln(streams.Out, answer)
 		}
 	}

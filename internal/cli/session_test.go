@@ -8,6 +8,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
 // converse runs one print-mode exchange in workingDir and returns what the
@@ -154,4 +155,23 @@ func TestSessionsAreKeptApartByDirectory(t *testing.T) {
 		cli.Args{SessionDir: dir, Continue: true}, here, cli.DefaultSystemPrompt); err == nil {
 		t.Fatal("--continue reached into another directory's conversation")
 	}
+}
+
+// listSessions is the discovery a test asserts against, kept here so the
+// command tests do not import the session package directly.
+func listSessions(agentDir, workingDir string) ([]sessionInfo, error) {
+	all, err := session.List(agentDir, workingDir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sessionInfo, 0, len(all))
+	for _, info := range all {
+		out = append(out, sessionInfo{Entries: info.Entries, ID: info.ID})
+	}
+	return out, nil
+}
+
+type sessionInfo struct {
+	Entries int
+	ID      string
 }
