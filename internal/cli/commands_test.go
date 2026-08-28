@@ -711,3 +711,11 @@ func TestHotkeysListsTheBindingTable(t *testing.T) {
 		}
 	}
 }
+
+// TestChangelogShowsWhatChanged, from the embedded copy.
+func TestChangelogShowsWhatChanged(t *testing.T) {
+	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/changelog")
+	if !strings.Contains(out, "# Changelog") || !strings.Contains(out, "Seven built-in tools") {
+		t.Fatalf("/changelog showed:\n%s", out)
+	}
+}

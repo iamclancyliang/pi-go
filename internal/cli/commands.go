@@ -38,7 +38,6 @@ type Command struct {
 // tells them they mistyped it when they did not — the same failure the flag
 // parser refuses to have.
 var notImplemented = map[string]string{
-	"changelog":     "there is no changelog yet",
 	"scoped-models": "there is no model catalogue to scope",
 }
 
@@ -120,6 +119,7 @@ func init() {
 		{Name: "trust", Summary: "whether this project may configure the tool: /trust [yes|no|forget]", run: runTrust},
 		{Name: "reload", Summary: "re-read the settings files", run: runReload},
 		{Name: "hotkeys", Summary: "list the editor's keys", run: runHotkeys},
+		{Name: "changelog", Summary: "what has changed", run: runChangelog},
 	} {
 		commands[c.Name] = c
 	}
@@ -716,5 +716,15 @@ func runHotkeys(c *commandContext, _ string) bool {
 		fmt.Fprintf(c.out, "  %-24s %s\n", strings.Join(b.Keys, ", "), b.Description)
 	}
 	fmt.Fprintln(c.out, "\n  editing works when pi runs in a terminal; a piped run reads plain lines")
+	return false
+}
+
+// runChangelog shows what has changed.
+//
+// The changelog travels inside the binary rather than being read from a
+// checkout: the person asking is running the program, not sitting in its
+// repository.
+func runChangelog(c *commandContext, _ string) bool {
+	fmt.Fprintln(c.out, strings.TrimSpace(changelog))
 	return false
 }

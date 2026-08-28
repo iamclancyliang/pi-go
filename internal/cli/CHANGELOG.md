@@ -1,0 +1,43 @@
+# Changelog
+
+Notable, user-visible changes. The git history carries the full account; this
+file carries what a person upgrading would want to know.
+
+## Unreleased
+
+### The agent
+- A `pi` command: one-shot with `-p`, a session in a terminal, and the mode
+  resolved from the terminal itself — a redirected run prints, a terminal
+  converses.
+- Seven built-in tools, ported against the pinned Pi source: `read`, `ls`,
+  `find`, `grep`, `write`, `edit`, `bash`. Searches honour `.gitignore`; edits
+  match against the original file and refuse ambiguity; bash output keeps the
+  end, not the beginning.
+- Three providers: DeepSeek, OpenAI and Qwen. A provider is chosen by
+  credential when `--provider` is absent, and one call sends one billed
+  request.
+
+### Conversations
+- Sessions are recorded without being asked, grouped by the directory they ran
+  in. `--continue` carries on, `--resume` reopens by id prefix.
+- A conversation is a tree: `/tree` shows its shape and goes back to any point;
+  `/fork` and `/clone` copy into a new conversation, leaving the original
+  alone. What a branch left behind never reaches the model.
+- `/compact` summarises the older part into a structured checkpoint — goal,
+  decisions, next steps — and the same summariser recovers automatically when
+  a request overflows the model's context.
+
+### The session
+- Slash commands: `/help`, `/session`, `/name`, `/export`, `/import`, `/copy`,
+  `/share` (a secret gist, after asking), `/model` to switch mid-session,
+  `/login` and `/logout` for stored credentials, `/settings`, `/trust`,
+  `/reload`, `/hotkeys`, `/new`, `/resume`, `/quit`.
+- An editing prompt in the terminal: Pi's key assignments, a kill ring, undo,
+  and history that keeps the half-written line while you browse.
+
+### Configuration
+- Settings in two scopes — global and per-project `.pi-go/settings.json` —
+  with the project's read only once the project is trusted, because settings
+  include the shell every command runs in.
+- Credentials saved by `/login` live in `auth.json`, mode 0600, read on
+  demand, never printed.
