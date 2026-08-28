@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/cli"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
@@ -353,4 +355,93 @@ func (u *usageRecorder) Parameters() *tools.Schema  { return u.inner.Parameters(
 func (u *usageRecorder) Call(ctx context.Context, args string) (tools.Result, error) {
 	u.note(u.inner.Name())
 	return u.inner.Call(ctx, args)
+}
+
+// TestLiveDeepSeekThroughTheCommandLine drives the composition a user actually
+// gets: flags parsed, provider selected from the environment, the built-in
+// tools rooted at a directory, and print mode's stream discipline.
+//
+// The pieces are each covered offline against a scripted model. What this adds
+// is that they compose — a provider chosen by credential rather than by flag,
+// a real model deciding to use a tool, and the answer arriving on stdout with
+// nothing beside it.
+func TestLiveDeepSeekThroughTheCommandLine(t *testing.T) {
+	liveOrSkip(t)
+
+	dir := t.TempDir()
+	const token = "wombat-40219-saffron"
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"),
+		[]byte("marker: "+token+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the fixture: %v", err)
+	}
+
+	args := cli.ParseArgs([]string{"-p", "Read notes.txt and tell me the marker."})
+	if !args.Print || len(args.Messages) != 1 {
+		t.Fatalf("the command line parsed as %+v", args)
+	}
+	// stdin and stdout are not terminals under `go test`, so this would resolve
+	// to print even without the flag — which is the behaviour, not an accident.
+	if mode := cli.ResolveAppMode(args, false, false); mode != cli.AppPrint {
+		t.Fatalf("a redirected one-shot resolved to %q", mode)
+	}
+
+	transport := &countingRoundTripper{inner: http.DefaultTransport}
+	port, provider, model, err := cli.Open(args, transport)
+	if err != nil {
+		t.Fatalf("opening the provider: %v", err)
+	}
+	if provider != "deepseek" {
+		t.Fatalf("the credential in the environment selected %q", provider)
+	}
+
+	registry, err := tools.NewBuiltInRegistry(dir)
+	if err != nil {
+		t.Fatalf("building the tool set: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := cli.RunPrint(context.Background(), cli.Runtime{
+		Model:     port,
+		ModelName: model,
+		Tools:     registry,
+		System:    cli.DefaultSystemPrompt,
+		Provider:  provider,
+	}, cli.Streams{In: strings.NewReader(""), Out: &out, Err: &errOut}, args.Messages)
+
+	if code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), token) {
+		t.Fatalf("the answer does not carry what the file held:\n%s", out.String())
+	}
+	// Nothing but the answer: a caller piping this into another program must
+	// not receive a banner or a progress line.
+	if errOut.Len() != 0 {
+		t.Fatalf("a successful run wrote to stderr: %q", errOut.String())
+	}
+
+	t.Logf("provider=%s model=%s requests=%d", provider, model, transport.count())
+	t.Logf("stdout: %s", strings.TrimSpace(out.String()))
+}
+
+// countingRoundTripper counts requests at the layer cli.Open injects, which is
+// a RoundTripper rather than a client: the providers differ in which they take,
+// and the count has to be at the point every one of them passes through.
+type countingRoundTripper struct {
+	inner http.RoundTripper
+	mu    sync.Mutex
+	sent  int
+}
+
+func (c *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.sent++
+	c.mu.Unlock()
+	return c.inner.RoundTrip(req)
+}
+
+func (c *countingRoundTripper) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sent
 }

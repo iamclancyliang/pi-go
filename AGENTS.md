@@ -33,6 +33,8 @@ Every command below was run in this repository and passed before being documente
 a command to this list that has not actually been run.
 
 ```bash
+go run ./cmd/pi -p "read README.md and summarise it"   # one-shot
+go run ./cmd/pi                                        # a session, in a terminal
 gofmt -l .          # format check — empty output means clean
 go vet ./...        # static checks
 go build ./...      # build
@@ -131,7 +133,12 @@ internal/     product code — every module from architecture §1
                 returns one moves the dependency into every caller instead
   session/      conversational truth vs projection
   runtime/      agent loop on eino adk.TurnLoop (edge E2); owns events + seams
+  cli/          how a command line becomes a run: flags, mode resolution,
+                provider selection, and the modes themselves. Here rather than
+                in cmd/ so it is testable without building a binary
 cmd/          composition roots — assemble modules, no behaviour of their own
+  pi/            the agent
+  pi-tracer/     the v0 contract tracer bullet
 conformance/  acceptance-scenario tests (A1…); inside the module by necessity
 spikes/       isolated capability experiments only
 ```
