@@ -101,6 +101,7 @@ func run(argv []string) int {
 		Conversation: conversation,
 		Args:         args,
 		WorkingDir:   root,
+		Transport:    http.DefaultTransport,
 	}
 
 	// One interrupt cancels the run in progress. A second is left to the

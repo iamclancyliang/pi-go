@@ -418,3 +418,37 @@ func TestCopyingWithNothingToCopySaysSo(t *testing.T) {
 		t.Fatalf("/copy with nothing to copy said %q", errOut)
 	}
 }
+
+// TestModelReportsWhatIsAnsweringWhenAskedWithNoArgument, because "which model
+// am I spending on" is the question people ask before switching.
+func TestModelReportsWhatIsAnsweringWhenAskedWithNoArgument(t *testing.T) {
+	out, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/model")
+	if !strings.Contains(out, "scripted/scripted-1") {
+		t.Fatalf("/model did not report what is answering:\n%s", out)
+	}
+	if !strings.Contains(errOut, "usage: /model") {
+		t.Fatalf("/model did not say how to switch: %q", errOut)
+	}
+}
+
+// TestSwitchingToAnUnknownProviderIsRefused, and the conversation carries on
+// with what it had rather than being left pointing at a port that did not open.
+func TestSwitchingToAnUnknownProviderIsRefused(t *testing.T) {
+	out, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(),
+		"/model nowhere/some-model", "/model")
+	if !strings.Contains(errOut, "could not switch") {
+		t.Fatalf("an unknown provider was accepted: %q", errOut)
+	}
+	if !strings.Contains(out, "scripted/scripted-1") {
+		t.Fatalf("a refused switch changed what is answering:\n%s", out)
+	}
+}
+
+// TestNamingAProviderWithNoModelIsRefused rather than switching provider and
+// leaving the model empty, which reaches the wire as a request naming nothing.
+func TestNamingAProviderWithNoModelIsRefused(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/model deepseek/")
+	if !strings.Contains(errOut, "no model") {
+		t.Fatalf("a provider with no model said %q", errOut)
+	}
+}

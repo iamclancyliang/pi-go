@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
@@ -34,16 +36,14 @@ type Command struct {
 // parser refuses to have.
 var notImplemented = map[string]string{
 	"settings":      "there is no settings store yet",
-	"scoped-models": "there is no model cycling yet",
 	"share":         "there is no gist integration",
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
 	"trust":         "there is no project trust yet",
 	"login":         "credentials come from the environment",
 	"logout":        "credentials come from the environment",
-	"compact":       "no summariser is configured yet",
 	"reload":        "there is nothing reloadable yet",
-	"model":         "switching model mid-session is not wired up yet",
+	"scoped-models": "there is no model catalogue to scope",
 }
 
 // commandContext is what a command may act on.
@@ -70,6 +70,20 @@ type commandContext struct {
 	// conversation IS, and a session left holding the old path would send the
 	// branch the user just left.
 	reload func() error
+
+	// switchModel points the conversation at a different model, and at a
+	// different provider when one is named. Held as a function because opening
+	// a provider can fail, and a run left pointing at a port that did not open
+	// is worse than one that refused to switch.
+	switchModel func(provider, model string) error
+
+	// modelProvider and modelName report what is answering now.
+	modelProvider func() string
+	modelName     func() string
+
+	// compact shortens the conversation. Held as a function because it makes a
+	// billed model call and needs the port this run opened.
+	compact func(instructions string) error
 }
 
 var commands = map[string]Command{}
@@ -89,6 +103,8 @@ func init() {
 		{Name: "name", Summary: "what to call this conversation: /name [text]", run: runName},
 		{Name: "import", Summary: "open a conversation from a file: /import <path>", run: runImport},
 		{Name: "copy", Summary: "copy the last answer to the clipboard", run: runCopy},
+		{Name: "model", Summary: "switch model: /model [provider/]<model>", run: runModel},
+		{Name: "compact", Summary: "summarise the older part of this conversation: /compact [focus]", run: runCompact},
 	} {
 		commands[c.Name] = c
 	}
@@ -451,5 +467,67 @@ func runCopy(c *commandContext, _ string) bool {
 		return false
 	}
 	fmt.Fprintln(c.out, "copied the last answer")
+	return false
+}
+
+// runModel switches which model answers from here on.
+//
+// Pi takes a search term, matches it against a model catalogue, and opens a
+// selector when nothing matches exactly. There is no catalogue here — it is not
+// in the pinned source — so this takes the name directly. A provider may be
+// given with it, since two providers can offer similarly-named models and the
+// bill goes to only one of them.
+//
+// The change applies from the NEXT turn, which is also Pi's rule: a turn's model
+// is the one it was executed with, and changing that afterwards would describe
+// a conversation that did not happen.
+func runModel(c *commandContext, arg string) bool {
+	if arg == "" {
+		fmt.Fprintf(c.out, "  %s/%s\n", c.modelProvider(), c.modelName())
+		fmt.Fprintln(c.errOut, "usage: /model [provider/]<model>")
+		return false
+	}
+
+	provider, model := "", arg
+	if at := strings.Index(arg, "/"); at >= 0 {
+		provider, model = arg[:at], arg[at+1:]
+	}
+	if strings.TrimSpace(model) == "" {
+		fmt.Fprintln(c.errOut, "that names a provider but no model")
+		return false
+	}
+	if err := c.switchModel(provider, model); err != nil {
+		fmt.Fprintf(c.errOut, "could not switch: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "model %s/%s · from the next turn\n", c.modelProvider(), c.modelName())
+	return false
+}
+
+// runCompact replaces the older part of the conversation with a summary.
+//
+// The same thing the runtime does on its own when a request is refused for
+// exceeding the model's context — asked for early, before the refusal, which is
+// why it exists as a command at all.
+func runCompact(c *commandContext, arg string) bool {
+	if c.compact == nil {
+		fmt.Fprintln(c.errOut, "no summariser is configured for this run")
+		return false
+	}
+	before := len(c.session.Snapshot().Messages)
+	if err := c.compact(arg); err != nil {
+		var nothing *compaction.ErrNothingToCompact
+		if errors.As(err, &nothing) {
+			// Worth saying once, not worth retrying: a conversation short
+			// enough to leave alone is not a failure.
+			fmt.Fprintf(c.errOut, "%v\n", err)
+			return false
+		}
+		fmt.Fprintf(c.errOut, "could not compact: %v\n", err)
+		return false
+	}
+	// Truth is unchanged — compaction shortens what the MODEL sees, not what
+	// happened — so the count that moved is the projection's.
+	fmt.Fprintf(c.out, "compacted · a summary now stands in for the older part of %d messages\n", before)
 	return false
 }

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
@@ -52,6 +54,10 @@ type Runtime struct {
 	// this run was told to use, not in whatever the default happens to be.
 	Args       Args
 	WorkingDir string
+
+	// Transport is how a newly opened provider reaches the network, so a model
+	// switched to mid-session goes through the same one this run was given.
+	Transport http.RoundTripper
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -78,6 +84,9 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		ModelName: rt.ModelName,
 		Tools:     rt.Tools,
 		Session:   sess,
+		// A one-shot can overflow too, and a refusal with no recovery is a
+		// failed run where a shortened context would have answered.
+		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
 	})
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
@@ -123,13 +132,20 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	// while the agent still pointed at the old would write the next turn into
 	// the conversation the user just left.
 	current := rt.Conversation
+	// The model can change mid-session, so what answers is held here rather
+	// than read from the configuration each time.
+	port, provider, modelName := rt.Model, rt.Provider, rt.ModelName
 	var agent *runtime.Agent
 	build := func() error {
 		next, err := runtime.New(runtime.Config{
-			Model:     rt.Model,
-			ModelName: rt.ModelName,
+			Model:     port,
+			ModelName: modelName,
 			Tools:     rt.Tools,
 			Session:   current.Session,
+			// The same summariser /compact uses. Without it an overflow is
+			// terminal: the request is refused, and a conversation long enough
+			// to overflow once will do it again on every turn after.
+			Summarize: (&compaction.Compactor{Model: port, ModelName: modelName}).Summarize,
 		})
 		if err != nil {
 			return err
@@ -149,6 +165,38 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		errOut:       streams.Err,
 		args:         rt.Args,
 		workingDir:   rt.WorkingDir,
+
+		modelProvider: func() string { return provider },
+		modelName:     func() string { return modelName },
+	}
+	ctxt.compact = func(instructions string) error {
+		// Summarised with whatever model is answering now, so a conversation
+		// switched to a cheaper model is compacted by it too.
+		c := &compaction.Compactor{
+			Model: port, ModelName: modelName, Instructions: instructions,
+		}
+		summary, kept, err := c.Summarize(ctx, current.Session.Truth())
+		if err != nil {
+			return err
+		}
+		return current.Session.Compact(summary, kept)
+	}
+	ctxt.switchModel = func(toProvider, toModel string) error {
+		next := rt.Args
+		next.Model = toModel
+		if toProvider != "" {
+			next.Provider = toProvider
+		} else {
+			// No provider named means the one already answering, not whichever
+			// credential happens to be found first.
+			next.Provider = provider
+		}
+		opened, openedProvider, openedModel, err := Open(next, rt.Transport)
+		if err != nil {
+			return err
+		}
+		port, provider, modelName = opened, openedProvider, openedModel
+		return build()
 	}
 	ctxt.reload = func() error {
 		// Rebuilt from the store the conversation already has, rather than
@@ -177,7 +225,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	defer func() { _ = current.Close() }()
 
 	fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · /help for commands\n",
-		rt.Provider, rt.ModelName, len(rt.Tools.All()))
+		provider, modelName, len(rt.Tools.All()))
 	// Said aloud, because continuing silently cannot be told from starting
 	// fresh until the model answers something it should not have known.
 	switch {
