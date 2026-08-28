@@ -17,6 +17,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/cli"
 	"github.com/iamclancyliang/pi-go/internal/tools"
+	"github.com/iamclancyliang/pi-go/internal/tui"
 )
 
 // version is what --version reports. Set by the build; "dev" when it is not.
@@ -125,6 +126,16 @@ func run(argv []string) int {
 		WorkingDir:   root,
 		Transport:    http.DefaultTransport,
 		Config:       cfg,
+	}
+
+	if mode == cli.AppInteractive {
+		// The editing prompt exists only where there is a terminal to edit in.
+		// Failing to open one falls back to plain lines rather than failing
+		// the run: the conversation matters more than the editing.
+		if prompter, err := tui.NewPrompter(nil); err == nil {
+			defer prompter.Close()
+			rt.ReadLine = prompter.ReadLine
+		}
 	}
 
 	// One interrupt cancels the run in progress. A second is left to the

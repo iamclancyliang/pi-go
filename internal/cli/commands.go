@@ -16,6 +16,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/session"
+	"github.com/iamclancyliang/pi-go/internal/tui"
 )
 
 // Command is something typed into a session that acts on the session rather
@@ -38,7 +39,6 @@ type Command struct {
 // parser refuses to have.
 var notImplemented = map[string]string{
 	"changelog":     "there is no changelog yet",
-	"hotkeys":       "there are no keybindings yet",
 	"scoped-models": "there is no model catalogue to scope",
 }
 
@@ -119,6 +119,7 @@ func init() {
 		{Name: "settings", Summary: "show the effective settings, or set one: /settings [key value]", run: runSettings},
 		{Name: "trust", Summary: "whether this project may configure the tool: /trust [yes|no|forget]", run: runTrust},
 		{Name: "reload", Summary: "re-read the settings files", run: runReload},
+		{Name: "hotkeys", Summary: "list the editor's keys", run: runHotkeys},
 	} {
 		commands[c.Name] = c
 	}
@@ -704,4 +705,16 @@ func renderConversation(id string, messages []ai.Message) string {
 		fmt.Fprintf(&b, "## %s\n\n%s\n\n", string(m.Role), m.Content)
 	}
 	return b.String()
+}
+
+// runHotkeys lists what the prompt editor answers to.
+//
+// From the binding table itself rather than a hand-written list, so a future
+// rebinding shows here without anyone remembering to update the help.
+func runHotkeys(c *commandContext, _ string) bool {
+	for _, b := range tui.DefaultBindings {
+		fmt.Fprintf(c.out, "  %-24s %s\n", strings.Join(b.Keys, ", "), b.Description)
+	}
+	fmt.Fprintln(c.out, "\n  editing works when pi runs in a terminal; a piped run reads plain lines")
+	return false
 }

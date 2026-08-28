@@ -70,7 +70,7 @@ func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 			t.Fatalf("help does not mention %s:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/hotkeys") {
+	if !strings.Contains(out, "not here yet:") || !strings.Contains(out, "/scoped-models") {
 		t.Fatalf("help does not say what is missing:\n%s", out)
 	}
 }
@@ -78,7 +78,7 @@ func TestHelpListsWhatThereIsAndWhatThereIsNot(t *testing.T) {
 // TestAPiCommandThisBuildLacksSaysWhy, rather than reporting it as a typo the
 // user did not make.
 func TestAPiCommandThisBuildLacksSaysWhy(t *testing.T) {
-	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/hotkeys")
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/scoped-models")
 
 	if !strings.Contains(errOut, "does not have") {
 		t.Fatalf("a known Pi command was not recognised: %q", errOut)
@@ -698,5 +698,16 @@ func TestReloadSaysWhatOnlyANewRunPicksUp(t *testing.T) {
 	}
 	if !strings.Contains(out, "a new run picks those up") {
 		t.Fatalf("/reload did not say what needs a new run:\n%s", out)
+	}
+}
+
+// TestHotkeysListsTheBindingTable, from the table itself so a rebinding shows
+// here without anyone remembering the help.
+func TestHotkeysListsTheBindingTable(t *testing.T) {
+	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/hotkeys")
+	for _, want := range []string{"ctrl+w", "ctrl+y", "ctrl+j", "Delete word backward", "Send the prompt"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/hotkeys does not show %q:\n%s", want, out)
+		}
 	}
 }

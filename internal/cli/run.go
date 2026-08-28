@@ -62,6 +62,12 @@ type Runtime struct {
 	// Config is what this run resolved: effective settings, and how the
 	// project's trust question was answered. /settings and /trust read it.
 	Config Config
+
+	// ReadLine, when set, replaces the plain line scanner with an editing
+	// prompt — the terminal path. Nil reads lines from Streams.In, which is
+	// what tests and redirected input use. A seam rather than a TTY check
+	// here, so the decision lives where the terminal is actually known.
+	ReadLine func(prompt string) (string, bool, error)
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -286,12 +292,28 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	// send the fragment.
 	lines.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
-	for {
+	readLine := func() (string, bool) {
+		if rt.ReadLine != nil {
+			line, ok, err := rt.ReadLine("> ")
+			if err != nil {
+				fmt.Fprintf(streams.Err, "pi: %v\n", err)
+				return "", false
+			}
+			return line, ok
+		}
 		fmt.Fprint(streams.Out, "\n> ")
 		if !lines.Scan() {
+			return "", false
+		}
+		return lines.Text(), true
+	}
+
+	for {
+		line, more := readLine()
+		if !more {
 			break
 		}
-		prompt := strings.TrimSpace(lines.Text())
+		prompt := strings.TrimSpace(line)
 		if prompt == "" {
 			continue
 		}

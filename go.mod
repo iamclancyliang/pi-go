@@ -8,6 +8,7 @@ require (
 	github.com/cloudwego/eino-ext/components/model/agenticqwen v0.1.0
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
 	github.com/eino-contrib/jsonschema v1.0.3
+	golang.org/x/term v0.28.0
 )
 
 require (
