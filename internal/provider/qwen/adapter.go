@@ -1,7 +1,9 @@
 package qwen
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/eino-contrib/jsonschema"
 	"net/http"
 
 	"github.com/cloudwego/eino/schema"
@@ -71,10 +73,23 @@ func oneMessage(m ai.Message) (*schema.Message, error) {
 }
 
 // toolSpecs converts this repository's tool descriptions for the adapter.
+//
+// The argument schema travels as a JSON Schema document and is rebuilt into the
+// adapter's own parameter type here. A tool handed over without it reaches the
+// model as a name and a sentence, and the model answers with an argument shape
+// it invented — which fails as a malformed payload rather than as the missing
+// declaration it is.
 func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 	out := make([]*schema.ToolInfo, 0, len(specs))
 	for _, spec := range specs {
-		out = append(out, &schema.ToolInfo{Name: spec.Name, Desc: spec.Description})
+		info := &schema.ToolInfo{Name: spec.Name, Desc: spec.Description}
+		if len(spec.Parameters) > 0 {
+			parsed := &jsonschema.Schema{}
+			if err := json.Unmarshal(spec.Parameters, parsed); err == nil {
+				info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(parsed)
+			}
+		}
+		out = append(out, info)
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/cloudwego/eino/components/model"
@@ -246,7 +247,19 @@ func toolSpecsFromOptions(opts []model.Option) []ai.ToolSpec {
 		if t == nil {
 			continue
 		}
-		out = append(out, ai.ToolSpec{Name: t.Name, Description: t.Desc})
+		spec := ai.ToolSpec{Name: t.Name, Description: t.Desc}
+		// The argument shape leaves the framework here, as the document a
+		// provider puts on the wire. Dropping it is silent: the tool is still
+		// offered, the model still calls it, and the call arrives with
+		// arguments the model invented.
+		if t.ParamsOneOf != nil {
+			if parsed, err := t.ParamsOneOf.ToJSONSchema(); err == nil && parsed != nil {
+				if doc, err := json.Marshal(parsed); err == nil {
+					spec.Parameters = doc
+				}
+			}
+		}
+		out = append(out, spec)
 	}
 	return out
 }

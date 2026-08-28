@@ -10,6 +10,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -61,6 +62,16 @@ type Message struct {
 type ToolSpec struct {
 	Name        string
 	Description string
+
+	// Parameters is the JSON Schema document describing this tool's arguments,
+	// or nil when it takes none.
+	//
+	// Carried as the document rather than as a framework's parameter type: this
+	// package hides the framework, and a field naming one would put it back in
+	// every caller. Carried AT ALL because without it a tool reaches the
+	// provider as a name and a sentence, and the model invents an argument
+	// shape that this repository then fails to execute.
+	Parameters json.RawMessage
 }
 
 // Request is one model invocation.

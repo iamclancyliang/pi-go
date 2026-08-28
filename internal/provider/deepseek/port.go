@@ -180,6 +180,9 @@ type wireTool struct {
 	Function struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		// Omitted entirely when the tool takes no arguments. An empty object
+		// here would instead tell the model there is a shape to fill in.
+		Parameters json.RawMessage `json:"parameters,omitempty"`
 	} `json:"function"`
 }
 
@@ -220,6 +223,7 @@ func (p *Port) buildRequest(req ai.Request, stream bool, maxTokens int) wireRequ
 		wt := wireTool{Type: "function"}
 		wt.Function.Name = t.Name
 		wt.Function.Description = t.Description
+		wt.Function.Parameters = t.Parameters
 		out.Tools = append(out.Tools, wt)
 	}
 	return out

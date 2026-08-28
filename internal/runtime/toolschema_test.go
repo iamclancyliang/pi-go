@@ -2,7 +2,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
@@ -93,5 +97,68 @@ func TestAnUnusableSchemaFailsBeforeTheModelIsTold(t *testing.T) {
 	}}}
 	if _, err := adapted.Info(context.Background()); err == nil {
 		t.Fatal("an array that never says what it holds was described to the model")
+	}
+}
+
+// TestTheSchemaSurvivesTheReturnTripToTheModelPort covers the hop that a live
+// call found broken: a declared schema reached the framework and was dropped
+// again on the way back out to the model port, so providers serialised a name
+// and a sentence. Both directions have to be pinned, because holding the schema
+// at one boundary proves nothing about the next.
+func TestTheSchemaSurvivesTheReturnTripToTheModelPort(t *testing.T) {
+	adapted := &observedTool{inner: &schemaTool{params: &tools.Schema{
+		Parameters: []tools.Parameter{
+			{Name: "path", Kind: tools.KindString, Description: "Path to edit", Required: true},
+		},
+	}}}
+	info, err := adapted.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+
+	specs := toolSpecsFromOptions([]model.Option{model.WithTools([]*schema.ToolInfo{info})})
+	if len(specs) != 1 {
+		t.Fatalf("one tool went in, %d came out", len(specs))
+	}
+	if len(specs[0].Parameters) == 0 {
+		t.Fatal("the argument shape was dropped on the way to the model port, and a provider would send a name and a sentence")
+	}
+
+	var doc struct {
+		Type       string   `json:"type"`
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(specs[0].Parameters, &doc); err != nil {
+		t.Fatalf("what reached the model port is not JSON Schema: %v", err)
+	}
+	if doc.Type != "object" || doc.Properties["path"].Type != "string" {
+		t.Fatalf("the shape arrived as %+v", doc)
+	}
+	if doc.Properties["path"].Description != "Path to edit" {
+		t.Fatalf("path lost its description: %+v", doc)
+	}
+	if len(doc.Required) != 1 || doc.Required[0] != "path" {
+		t.Fatalf("required arrived as %v", doc.Required)
+	}
+}
+
+// TestAToolWithNoArgumentsCarriesNoShapeToTheModelPort keeps the distinction
+// alive across the same hop.
+func TestAToolWithNoArgumentsCarriesNoShapeToTheModelPort(t *testing.T) {
+	adapted := &observedTool{inner: &schemaTool{params: nil}}
+	info, err := adapted.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	specs := toolSpecsFromOptions([]model.Option{model.WithTools([]*schema.ToolInfo{info})})
+	if len(specs) != 1 {
+		t.Fatalf("one tool went in, %d came out", len(specs))
+	}
+	if len(specs[0].Parameters) != 0 {
+		t.Fatalf("a tool taking no arguments carried %s", specs[0].Parameters)
 	}
 }

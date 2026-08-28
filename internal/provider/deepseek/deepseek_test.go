@@ -2,6 +2,7 @@ package deepseek_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1366,5 +1367,93 @@ func TestABodyReadFailureDoesNotCarryTheCallsKey(t *testing.T) {
 	}
 	if strings.Contains(final.Cause.Error(), secret) || strings.Contains(final.ErrorMessage, secret) {
 		t.Fatalf("the key this call used reached the failure: %v", final.Cause)
+	}
+}
+
+// TestAToolsArgumentSchemaReachesTheWire pins the last hop of the tool
+// declaration, asserted against the bytes rather than against the struct.
+//
+// This gap was found by a live call, not by this suite: a tool with a declared
+// schema was serialised as a name and a description, and the model answered
+// with an argument object it had invented. Nothing failed loudly — the model
+// called the tool, and the call simply arrived without the argument the tool
+// requires. Only the bytes can show it, because every layer above them held a
+// schema that this one dropped.
+func TestAToolsArgumentSchemaReachesTheWire(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "m",
+		Tools: []ai.ToolSpec{{
+			Name:        "read",
+			Description: "Read a file",
+			Parameters: json.RawMessage(
+				`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(tr.bodies) == 0 {
+		t.Fatal("nothing was sent")
+	}
+
+	var sent struct {
+		Tools []struct {
+			Function struct {
+				Name       string `json:"name"`
+				Parameters *struct {
+					Type       string              `json:"type"`
+					Required   []string            `json:"required"`
+					Properties map[string]struct { // a property that lost its type is one the model cannot fill
+						Type string `json:"type"`
+					} `json:"properties"`
+				} `json:"parameters"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(tr.bodies[0]), &sent); err != nil {
+		t.Fatalf("the request is not JSON: %v", err)
+	}
+	if len(sent.Tools) != 1 {
+		t.Fatalf("one tool was offered, %d reached the wire", len(sent.Tools))
+	}
+
+	params := sent.Tools[0].Function.Parameters
+	if params == nil {
+		t.Fatalf("the tool reached the wire with no argument shape:\n%s", tr.bodies[0])
+	}
+	if params.Type != "object" {
+		t.Fatalf("the arguments arrived as %q", params.Type)
+	}
+	if got := params.Properties["path"].Type; got != "string" {
+		t.Fatalf("path arrived typed as %q", got)
+	}
+	if len(params.Required) != 1 || params.Required[0] != "path" {
+		t.Fatalf("required arrived as %v", params.Required)
+	}
+}
+
+// TestAToolTakingNoArgumentsSendsNoShape is the other half. An empty object on
+// the wire tells the model there is a shape to fill in, which is a different
+// claim from taking nothing.
+func TestAToolTakingNoArgumentsSendsNoShape(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "k"})
+
+	_, err := p.Generate(context.Background(), ai.Request{
+		Model: "m",
+		Tools: []ai.ToolSpec{{Name: "ping", Description: "no arguments"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(tr.bodies[0], "parameters") {
+		t.Fatalf("a tool taking no arguments sent an argument shape:\n%s", tr.bodies[0])
 	}
 }

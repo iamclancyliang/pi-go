@@ -45,6 +45,27 @@ go mod tidy         # must produce no diff to go.mod / go.sum
 `go mod tidy` producing a diff is a failure, not a fix: it means the committed module files did not
 match the source.
 
+### Live provider tests
+
+```bash
+# Off by default. Reaches a real provider, spends a real credential.
+PI_GO_LIVE_DEEPSEEK=1 DEEPSEEK_API_KEY=... go test ./conformance/ -run TestLive -count=1
+```
+
+The gate is a **separate variable from the credential**: having a key configured is not consent to
+spend it, so `go test ./...` and CI skip these whether or not `DEEPSEEK_API_KEY` is set. The
+credential enters only through the injected environment seam — never a literal, a file or a flag —
+and the types that hold it refuse to format it.
+
+Retry budgets are zero in these tests, so one model call is one billed request, and a counting
+transport asserts that rather than trusting the configuration. A live failure is reported, not
+retried: rerunning one in a loop is how a smoke test becomes a bill.
+
+They exist because some facts cannot be established offline. Whether a real model, given a tool's
+declared schema and nothing else, produces a call this repository can execute is a fact about the
+provider — and it was false until `2026-08-28`, when a live run found the argument schema being
+dropped between the framework and the model port. Every offline test passed throughout.
+
 ## Commit identity
 
 All commits use the repository owner's GitHub-linked identity:
