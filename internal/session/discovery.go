@@ -69,8 +69,13 @@ type Info struct {
 	Entries int
 
 	// Opening is the first thing the user asked, which is how a person
-	// recognises a session in a list.
+	// recognises a session in a list when it has no name.
 	Opening string
+
+	// Name is what the user called it, if they said. Preferred over the
+	// opening line in a listing: someone who named a conversation named it so
+	// they would recognise it.
+	Name string
 }
 
 // List returns the sessions for a working directory, most recently modified
@@ -141,9 +146,14 @@ func Describe(path string) (Info, error) {
 		info.Started = started
 	}
 	for _, r := range records {
-		if r.Message != nil && r.Message.Role == "user" && strings.TrimSpace(r.Message.Content) != "" {
+		if info.Opening == "" && r.Message != nil && r.Message.Role == "user" &&
+			strings.TrimSpace(r.Message.Content) != "" {
 			info.Opening = strings.TrimSpace(r.Message.Content)
-			break
+		}
+		// The LAST name wins, so the whole record is read rather than stopping
+		// at the first: a conversation renamed twice is called the second thing.
+		if r.Info != nil {
+			info.Name = strings.TrimSpace(r.Info.Name)
 		}
 	}
 	return info, nil

@@ -334,3 +334,87 @@ func TestListedIdsCanBeTypedBack(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// TestNamingAConversationOutlivesTheRun. A name only in memory disappears while
+// the user believes it was set.
+func TestNamingAConversationOutlivesTheRun(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	out, errOut := interactive(t, cli.Args{SessionDir: dir}, work,
+		"a question", "/name the refactor", "/name")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("/name failed: %q", errOut)
+	}
+	if !strings.Contains(out, `named "the refactor"`) {
+		t.Fatalf("/name did not confirm:\n%s", out)
+	}
+
+	out, _ = interactive(t, cli.Args{SessionDir: dir, Continue: true}, work, "/name")
+	if !strings.Contains(out, "the refactor") {
+		t.Fatalf("the name did not survive the run:\n%s", out)
+	}
+}
+
+// TestRenamingKeepsTheLatest, because a rename is an appended event and the last
+// one is what the conversation is called.
+func TestRenamingKeepsTheLatest(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	interactive(t, cli.Args{SessionDir: dir}, work,
+		"a question", "/name first name", "/name second name")
+
+	out, _ := interactive(t, cli.Args{SessionDir: dir, Continue: true}, work, "/name")
+	if !strings.Contains(out, "second name") || strings.Contains(out, "first name") {
+		t.Fatalf("renaming did not take:\n%s", out)
+	}
+}
+
+// TestAskingForTheNameOfSomethingUnnamedSaysHow.
+func TestAskingForTheNameOfSomethingUnnamedSaysHow(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/name")
+	if !strings.Contains(errOut, "usage: /name") {
+		t.Fatalf("/name on an unnamed conversation said %q", errOut)
+	}
+}
+
+// TestImportOpensAConversationFromElsewhere, and leaves the one being left on
+// disk — which is why, unlike Pi, it does not ask first.
+func TestImportOpensAConversationFromElsewhere(t *testing.T) {
+	dir, work := t.TempDir(), t.TempDir()
+	first, _, _ := converse(t, cli.Args{SessionDir: dir}, work, "the imported conversation")
+	path := first.Path
+	first.Close()
+
+	// A second, separate conversation, from which the first is imported.
+	out, errOut := interactive(t, cli.Args{SessionDir: t.TempDir()}, t.TempDir(),
+		"/import "+path, "/session")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("/import failed: %q", errOut)
+	}
+	if !strings.Contains(out, "imported") {
+		t.Fatalf("/import did not report:\n%s", out)
+	}
+	// The conversation it left is untouched.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the imported file is gone: %v", err)
+	}
+}
+
+// TestImportingSomethingThatIsNotThereSaysSo.
+func TestImportingSomethingThatIsNotThereSaysSo(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/import /no/such/file.jsonl")
+	if !strings.Contains(errOut, "no session file") {
+		t.Fatalf("/import of a missing file said %q", errOut)
+	}
+	_, errOut = interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/import")
+	if !strings.Contains(errOut, "usage: /import") {
+		t.Fatalf("/import with no path said %q", errOut)
+	}
+}
+
+// TestCopyingWithNothingToCopySaysSo rather than putting an empty string on the
+// clipboard, which silently replaces whatever was there.
+func TestCopyingWithNothingToCopySaysSo(t *testing.T) {
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/copy")
+	if !strings.Contains(errOut, "no answers to copy") {
+		t.Fatalf("/copy with nothing to copy said %q", errOut)
+	}
+}

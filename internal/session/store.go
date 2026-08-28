@@ -49,6 +49,18 @@ type Entry struct {
 	Intent     *ToolIntent
 	Settlement *ToolSettlement
 	Failure    *OperationFailure
+	Info       *SessionInfo
+}
+
+// SessionInfo records something about the conversation rather than something
+// that happened in it.
+//
+// Appended like everything else, so renaming is an event with a time on it and
+// not an edit to the file. The latest one wins, which is what makes a rename a
+// rename; an empty name clears the title rather than being ignored, because
+// "call it nothing" is a thing a person means.
+type SessionInfo struct {
+	Name string
 }
 
 // OperationFailure records that the operation ended and cannot be retried as it
@@ -168,6 +180,10 @@ func cloneEntry(e Entry) Entry {
 		failed := *e.Failure
 		return Entry{Failure: &failed}
 	}
+	if e.Info != nil {
+		info := *e.Info
+		return Entry{Info: &info}
+	}
 	return Entry{}
 }
 
@@ -215,6 +231,12 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			continue
 		case e.Settlement != nil:
 			s.settled[e.Settlement.ResultID] = *e.Settlement
+			continue
+		case e.Info != nil:
+			// The latest one wins, which is what makes a rename a rename. An
+			// empty name is not skipped: clearing a title is a thing a person
+			// asked for, and ignoring it would restore a name they removed.
+			s.name = e.Info.Name
 			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary

@@ -93,6 +93,7 @@ type fileRecord struct {
 	Intent     *wireIntent       `json:"intent,omitempty"`
 	Settlement *ToolSettlement   `json:"settlement,omitempty"`
 	Failure    *OperationFailure `json:"failure,omitempty"`
+	Info       *SessionInfo      `json:"info,omitempty"`
 }
 
 // wireIntent is a ToolIntent with its replay policy written as the word a
@@ -118,6 +119,7 @@ const (
 	kindIntent     = "tool_intent"
 	kindSettlement = "tool_settlement"
 	kindFailure    = "failure"
+	kindInfo       = "session_info"
 	kindHeader     = "session"
 )
 
@@ -469,6 +471,11 @@ func (r fileRecord) summary() string {
 		return "tool result"
 	case r.Failure != nil:
 		return "failed: " + r.Failure.Code
+	case r.Info != nil:
+		if r.Info.Name == "" {
+			return "named: (cleared)"
+		}
+		return "named: " + r.Info.Name
 	case r.Overflow != nil:
 		return "overflow"
 	default:
@@ -568,6 +575,8 @@ func (s *FileStore) encode(e Entry, parent string) (fileRecord, error) {
 		record.Kind, record.Settlement = kindSettlement, e.Settlement
 	case e.Failure != nil:
 		record.Kind, record.Failure = kindFailure, e.Failure
+	case e.Info != nil:
+		record.Kind, record.Info = kindInfo, e.Info
 	default:
 		// Exactly one field is set, by the type's own contract. An empty entry
 		// is a caller's mistake, and writing it would put a record in the file
@@ -606,6 +615,13 @@ func (r fileRecord) decode() (Entry, error) {
 		return Entry{Settlement: r.Settlement}, nil
 	case kindFailure:
 		return Entry{Failure: r.Failure}, nil
+	case kindInfo:
+		if r.Info == nil {
+			// An empty name is meaningful — it clears the title — so an absent
+			// payload is filled in rather than refused.
+			return Entry{Info: &SessionInfo{}}, nil
+		}
+		return Entry{Info: r.Info}, nil
 	default:
 		// Refused rather than skipped. A record this build does not understand
 		// may be the tool call that changed a file, and silently reading past

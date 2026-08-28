@@ -35,10 +35,7 @@ type Command struct {
 var notImplemented = map[string]string{
 	"settings":      "there is no settings store yet",
 	"scoped-models": "there is no model cycling yet",
-	"import":        "use --resume with a path instead",
 	"share":         "there is no gist integration",
-	"copy":          "there is no clipboard integration",
-	"name":          "a session has no durable display name yet",
 	"changelog":     "there is no changelog yet",
 	"hotkeys":       "there are no keybindings yet",
 	"trust":         "there is no project trust yet",
@@ -89,6 +86,9 @@ func init() {
 		{Name: "tree", Summary: "show the shape of this conversation, or go back to a point: /tree [id]", run: runTree},
 		{Name: "fork", Summary: "copy this conversation up to a point into a new one: /fork <id>", run: runFork},
 		{Name: "clone", Summary: "copy this conversation as it stands into a new one", run: runClone},
+		{Name: "name", Summary: "what to call this conversation: /name [text]", run: runName},
+		{Name: "import", Summary: "open a conversation from a file: /import <path>", run: runImport},
+		{Name: "copy", Summary: "copy the last answer to the clipboard", run: runCopy},
 	} {
 		commands[c.Name] = c
 	}
@@ -384,4 +384,72 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:shortIDLength]
+}
+
+// runName sets or shows what this conversation is called.
+//
+// With no argument it shows the current name, matching Pi: asking what
+// something is called is the other half of naming it, and making that a
+// separate command would be a command nobody would find.
+func runName(c *commandContext, arg string) bool {
+	if arg == "" {
+		if name := c.session.Name(); name != "" {
+			fmt.Fprintf(c.out, "  %s\n", name)
+			return false
+		}
+		fmt.Fprintln(c.errOut, "usage: /name <text>")
+		return false
+	}
+	if err := c.session.SetName(arg); err != nil {
+		fmt.Fprintf(c.errOut, "could not set the name: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "named %q\n", c.session.Name())
+	return false
+}
+
+// runImport opens a conversation stored somewhere other than the session
+// directory.
+//
+// No confirmation, unlike Pi, and the difference is real rather than an
+// omission: Pi replaces the running session, so it asks before discarding it.
+// Here the conversation being left is already on disk and can be resumed again,
+// so there is nothing to lose and nothing to ask about.
+//
+// It reads this repository's own session files. Pi's are a different format —
+// ADR-0006 gives each its own — so importing one fails as an unreadable file
+// rather than half-loading.
+func runImport(c *commandContext, arg string) bool {
+	if arg == "" {
+		fmt.Fprintln(c.errOut, "usage: /import <path.jsonl>")
+		return false
+	}
+	if _, err := os.Stat(arg); err != nil {
+		fmt.Fprintf(c.errOut, "no session file at %s\n", arg)
+		return false
+	}
+	next := c.args
+	next.Continue, next.Resume = false, arg
+	if err := c.reopen(next); err != nil {
+		fmt.Fprintf(c.errOut, "could not import: %v\n", err)
+		return false
+	}
+	fmt.Fprintf(c.out, "imported %s · %d messages\n",
+		c.conversation.ID, len(c.session.Snapshot().Messages))
+	return false
+}
+
+// runCopy puts the last thing the assistant said on the clipboard.
+func runCopy(c *commandContext, _ string) bool {
+	text, found := lastAnswer(c.session)
+	if !found {
+		fmt.Fprintln(c.errOut, "no answers to copy yet")
+		return false
+	}
+	if err := copyToClipboard(text); err != nil {
+		fmt.Fprintf(c.errOut, "could not copy: %v\n", err)
+		return false
+	}
+	fmt.Fprintln(c.out, "copied the last answer")
+	return false
 }

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
@@ -76,6 +77,12 @@ type Session struct {
 	// that drops everything else.
 	system   string
 	messages []ai.Message
+
+	// name is what a person calls this conversation, when they have said. Held
+	// here as well as recorded, because a listing asks for it constantly and
+	// walking the whole record each time would make listing sessions cost more
+	// the longer they are.
+	name string
 }
 
 // New returns a Session with the given system instruction.
@@ -568,4 +575,37 @@ func (s *Session) Usage() ai.Usage {
 		total = total.Add(a)
 	}
 	return total
+}
+
+// SetName records what to call this conversation.
+//
+// Appended rather than assigned, so a rename has a time on it and the record
+// still says what the conversation used to be called. An empty name clears the
+// title, which is a thing a person means and not a call to ignore.
+func (s *Session) SetName(name string) error {
+	info := SessionInfo{Name: strings.TrimSpace(name)}
+	s.mu.Lock()
+	s.name = info.Name
+	store := s.store
+	s.mu.Unlock()
+
+	if store == nil {
+		return nil
+	}
+	if err := store.Append(context.Background(), Entry{Info: &info}); err != nil {
+		// Put back what it was, because a name that is only in memory would
+		// disappear on the next run while the user believes it was set.
+		s.mu.Lock()
+		s.name = ""
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// Name is what this conversation is called, if anything.
+func (s *Session) Name() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.name
 }
