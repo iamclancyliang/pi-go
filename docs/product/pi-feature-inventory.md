@@ -29,7 +29,7 @@ always get distinct IDs.
 | Workspace packages | `enumerated` |
 | Modes | **closed** — 4 `AppMode` values, 3 `--mode` literals, and the runtime resolution including TTY detection (§2, §2.1) |
 | CLI flags | `enumerated` (40) · semantics per flag `semantics-needed` |
-| Slash commands | `enumerated` (22) · semantics from descriptions |
+| Slash commands | `enumerated` (22) · semantics from descriptions, plus handler semantics for 7 read at the pin (§27.1); the rest open selector UIs whose behaviour is TUI and unread |
 | Wire protocol (CBOR) | `enumerated` |
 | coding-agent RPC commands | discriminant set **closed** (§21); request top-level fields **enumerated** (§21.1); response payload schemas **`schema-needed`** (§21.3) |
 | coding-agent RPC events | `enumerated` (**24**, source union; 3 `source-only`; every `output(` call classified) |
@@ -37,7 +37,7 @@ always get distinct IDs.
 | Built-in tools ×2 sets | **closed** — coding-agent 7 (§15), harness 4 (§8.2), both with input schemas |
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
 | **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
-| Auth / OAuth | `enumerated` (files) · flows `semantics-needed` |
+| Auth / OAuth | `enumerated` (files) · storage shape read (§27.6); flows still `semantics-needed` |
 | Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
 | TUI | `enumerated` (components) · `semantics-needed` |
@@ -45,7 +45,11 @@ always get distinct IDs.
 | Evals | `enumerated` (files) · `semantics-needed` |
 | server / client / session-backends | `enumerated` (files) · `semantics-needed` |
 | Resources (skills/prompts/themes/keybindings/context files) | `enumerated` (modules) · `semantics-needed` |
-| Settings keys | `enumerated` (§16) |
+| Session file format and tree | **closed for the linear and branching cases** — header, entry union, path-to-leaf, fork copying, discovery and naming (§27.2). Labels, branch summaries and migration remain `semantics-needed` |
+| Project trust | **closed** — what it gates, the store, the nearest-ancestor rule and the option set (§27.3) |
+| Compaction | **closed** — token estimate, cut-point selection, split turns, preparation and both prompts (§25, §27.4) |
+| Keybindings | `enumerated` — default assignments and the action-name sets read verbatim (§27.7); parser, chords and per-action behaviour `semantics-needed` |
+| Settings keys | `enumerated` (§16) · storage, scopes and merge rule read (§27.5); per-key semantics still `semantics-needed` |
 | Environment variables | `enumerated` — source-derived and split BY ROLE into four emitted sets (input / exposed / self / cleared); see §22.7. The documentation list in §17 is what a user is told, not the membership authority |
 | Tool system-prompt contributions | `enumerated` (§15.1) |
 | SDK embedding surface | `enumerated` via examples (§18) · API `schema-needed` |
@@ -2523,6 +2527,152 @@ tracking and the shared output format. Recorded in §25.4a/§25.4b: the `prepara
 `branchEntries` payload types named in the session hooks (§23.3), and the `Usage` type referenced by
 both entries.
 
+## 27. Surfaces read at the pin while implementing them, 2026-08-28/29
+
+Semantics recorded here because they were read from the pinned tree to build
+against, and a semantics reading that lives only in the implementation is not
+census — the next reader would have to derive it again from the same source.
+
+This is not a claim that these axes are closed. Each row says what was read;
+what was not read is named beside it. The coverage ledger is updated only where
+that distinction supports it.
+
+### 27.1 Slash command handlers — `coding-agent.slash.*`
+
+The ledger said "semantics from descriptions". The dispatch and handlers were
+read: `src/modes/interactive/interactive-mode.ts:2900-3030` routes every
+command, and the handlers named below carry the behaviour.
+
+| Command | Handler | Semantics read |
+| --- | --- | --- |
+| `/compact` | `interactive-mode.ts:6419`, `agent-session.ts:1790` | aborts the running turn, emits `compaction_start{reason:"manual"}`, refuses with "Already compacted" when the last path entry is a compaction and "Nothing to compact (session too small)" when `prepareCompaction` returns nothing; an optional argument becomes "Additional focus:" appended to the prompt |
+| `/copy` | `interactive-mode.ts:6002` | copies the last assistant text; errors with "No agent messages to copy yet." when there is none |
+| `/name` | `interactive-mode.ts:6021` | with no argument shows the current name or the usage; sets by appending, and warns when the stored name differs from what was typed |
+| `/import` | `interactive-mode.ts:5864` | requires a path, CONFIRMS ("Replace current session with X?") before replacing the running session |
+| `/share` | `interactive-mode.ts:5908` | requires `gh` installed and logged in, exports HTML to a temp file, runs `gh gist create --public=false <file>`, parses the id from the returned URL; does NOT confirm |
+| `/model` | `interactive-mode.ts:4633` | with no argument opens the selector; with one, an exact match against the catalogue sets the model, and no match opens the selector filtered by the term |
+| `/trust` | `project-trust.ts`, `trust-manager.ts` | see §27.3 |
+| `/settings`, `/scoped-models`, `/logout`, `/tree`, `/fork` | dispatch only | open selector UIs; their behaviour is the selector's, which is TUI and not read |
+
+**Not read:** the selector UIs themselves, `/hotkeys` output construction beyond
+its key list, `/reload`'s resource reloading, `/changelog` rendering.
+
+### 27.2 Session file format and tree — `coding-agent.session.*`, C5
+
+Authority `src/core/session-manager.ts`.
+
+- **File**: JSONL. First line a `SessionHeader` (`:32`) — `type:"session"`,
+  `version`, `id`, `timestamp`, `cwd`, optional `parentSession`. Then
+  `SessionEntry` lines (`:144`), a nine-member union sharing
+  `SessionEntryBase{type,id,parentId,timestamp}` (`:46`).
+- **Path on disk**: `<agentDir>/sessions/--<cwd with the leading separator
+  stripped and `/`, `\`, `:` replaced by `-`>--/<timestamp with `:` and `.`
+  replaced by `-`>_<sessionId>.jsonl` (`:476-489`, `:953`).
+- **The conversation is a path, not the file**: `buildSessionPath` (`:334`)
+  walks `parentId` from a leaf to the root and reverses. `leafId === null`
+  yields an empty path; an absent leaf defaults to the LAST entry in the file.
+- **Branching**: continuing after moving the leaf writes new entries with
+  `parentId` = that leaf, so the abandoned entries stay in the file and remain
+  reachable by leaf id.
+- **Fork/clone**: `createBranchedSession` (`:1412`) copies the path to a leaf
+  into a NEW file, re-chaining `parentId` after dropping label entries, with
+  `parentSession` pointing at the origin. The original file is untouched.
+- **Discovery**: `findMostRecentSession` (`:635`) takes the newest `.jsonl` by
+  mtime whose header cwd matches, skipping unreadable files.
+- **Name**: `getSessionName` (`:1150`) walks entries in REVERSE and returns the
+  first `session_info` entry's trimmed name — so the latest wins and an empty
+  name clears the title.
+
+**Not read:** label entries and their re-chaining rules in full, branch summary
+entries, `custom`/`custom_message` payload contracts, migration between
+versions.
+
+### 27.3 Project trust — `coding-agent.setting.defaultProjectTrust`, `/trust`
+
+Authority `src/core/trust-manager.ts`, `src/core/project-trust.ts`.
+
+- **What it gates**: loading project config resources — the constant
+  `TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES` is `settings.json`, `extensions`,
+  `skills`, `prompts`, `themes`, `SYSTEM.md`, `APPEND_SYSTEM.md` — plus
+  installing project packages and executing project extensions.
+- **Store**: `<agentDir>/trust.json`, an object of canonical path to
+  `true|false|null`, written sorted.
+- **Resolution** (`project-trust.ts:46`): a `--approve`/`--no-approve` override
+  wins; a project with no trust-requiring resources is trusted without asking;
+  extensions may answer; otherwise the store's NEAREST recorded ancestor
+  decides (`findNearestTrustEntry`); otherwise `defaultProjectTrust`
+  (`ask|always|never`, default `ask`); with no UI, **false**.
+- **Options offered** (`getProjectTrustOptions`): trust, trust the parent
+  folder (which also clears the child's entry), trust for this session only,
+  and the two refusals.
+
+### 27.4 Compaction — supplements §25
+
+Authority `src/core/compaction/compaction.ts`.
+
+- **Token estimate** (`:266`): `ceil(chars/4)`, over user content and, for an
+  assistant message, text + thinking + each tool call's name and
+  `JSON.stringify(arguments)`.
+- **Valid cut points** (`:351`): indices of context-visible user-like or
+  assistant messages. Never a tool result — it must follow its call.
+- **Cut selection** (`:403`): walk back from the end accumulating estimated
+  tokens; at `keepRecentTokens`, take the first cut point at or after that
+  index; then scan back over adjacent entries that contribute no context
+  messages; a cut entry that does not start a turn makes it a SPLIT turn, whose
+  prefix is summarised separately by `TURN_PREFIX_SUMMARIZATION_PROMPT`
+  (`:795`).
+- **Preparation** (`:710`): returns nothing when the last path entry is already
+  a compaction; a previous compaction sets the boundary start to its
+  `firstKeptEntryId`, and its summary becomes `previousSummary`.
+- **Prompts**: `SUMMARIZATION_PROMPT` (`:467`) asks for a fixed section
+  structure — Goal, Constraints & Preferences, Progress (Done / In Progress /
+  Blocked), Key Decisions, Next Steps, Critical Context.
+  `UPDATE_SUMMARIZATION_PROMPT` (`:500`) is used when a previous summary exists
+  and instructs preservation. The conversation is serialised to text and wrapped
+  in `<conversation>` tags so the model summarises rather than continues it
+  (`:649-658`).
+- **Defaults** (`settings-manager.ts:13-16`): `keepRecentTokens` 20000,
+  `reserveTokens` 16384, `enabled` true.
+
+### 27.5 Settings storage — supplements §16
+
+Authority `src/core/settings-manager.ts`.
+
+- **Two scopes** (`:203-204`): global at `<agentDir>/settings.json`, project at
+  `<cwd>/<CONFIG_DIR_NAME>/settings.json`.
+- **Merge** (`:165`): deep, with the project overriding and nested objects
+  merging recursively.
+- Reads and writes take a per-scope lock (`SettingsStorage.withLock`).
+
+**Not read:** the semantics of individual keys beyond those §16 records.
+
+### 27.6 Credential storage — `coding-agent.auth.*`
+
+Authority `src/core/auth-storage.ts`. `<agentDir>/auth.json`, an object of
+provider to `Credential`, file mode 0600 and parent directory 0700, guarded by
+`proper-lockfile`. **Not read:** the OAuth flows and refresh.
+
+### 27.7 Default keybindings — `tui.*`, `app.*`
+
+Authority `packages/tui/src/keybindings.ts:72+` and
+`src/core/keybindings.ts`. The default key assignments for the editor and
+select-list actions were read verbatim (arrows, `ctrl+b/f/a/e`, `alt+b/f/d/y`,
+`ctrl+w`, `ctrl+u`, `ctrl+k`, `ctrl+y`, `ctrl+-`, `enter`, `shift+enter`,
+`ctrl+j`, `tab`), along with the action-name sets: **47** `tui.*` and **42** `app.*`, counted from the
+declaration tables rather than estimated.
+
+**Not read:** the key parser, chord handling, the alt-screen actions'
+behaviour, and every `app.*` action's implementation.
+
+### 27.8 Clipboard — `/copy`
+
+Authority `src/utils/clipboard.ts`. Order: on Linux `wl-copy` when the session
+is Wayland, then `xclip -selection clipboard`, then `xsel --clipboard --input`;
+on macOS `pbcopy`; on Windows `clip`; OSC 52 last, capped at 100,000 encoded
+characters, and deliberately not first because terminals that lack support
+print the payload.
+
+
 ## Counting discipline
 
 **A convenient proxy is not the authority.** Each count below states the source it is taken from,
@@ -2565,8 +2715,13 @@ satisfy itself that it is already following the rule while counting the proxy.
   commit.
 - **Open by decision:** the environment-variable family, where a literal search cannot establish
   closure in one direction.
-- **Not enumerated:** per-file source ledger; TUI, telemetry, evals, server, client and
-  session-backends semantics beyond module listing; auth flow semantics.
+- **Not enumerated:** per-file source ledger; TUI rendering/overlay/selector semantics, telemetry,
+  evals, server, client and session-backends semantics beyond module listing; auth flow semantics.
+
+Reconciled with the implementation on 2026-08-29. §27 records the surfaces read at the pin while
+building against them; `docs/product/parity-matrix.md` carries what pi-go has and the deviations
+awaiting an owner decision. Neither file changes the rule that an axis is closed only when every
+row of it is.
 
 Per-hook semantics and settings keys **are** enumerated (§19-24, §16). Examples are **partial**:
 counted and illustrated, not mapped file-by-file to feature IDs.
