@@ -191,45 +191,6 @@ func failureFrom(status int, raw []byte, key string) error {
 //
 // The set is the same one every provider in this repository answers with, so a
 // caller branches on the outcome rather than on which provider produced it.
-func endingFrom(finish, errorCode string) (ai.StopReason, error) {
-	// An overflow reported inside a 200 is the same condition as one reported
-	// by a status, and leaves as the same sentinel. Classifying it by the
-	// ending instead would call it an interruption, which is never retried — so
-	// the one failure this repository can recover from, by shortening, would be
-	// the one it gives up on.
-	if isContextOverflow(errorCode) {
-		return ai.StopError, fmt.Errorf("%w: the provider refused the request as too large",
-			ai.ErrContextOverflow)
-	}
-	// A failure reported inside a 200 can name its own reason. Classifying by
-	// the ending alone would call an exhausted balance an interruption, which
-	// reads as "try again later" for something that cannot succeed.
-	if failure, ok := failureFromCode(errorCode); ok {
-		return ai.StopError, fail(failure, 0, errorCode)
-	}
-	if errorCode != "" {
-		return ai.StopError, fail(FailureUnknown, 0, "the reply failed: "+errorCode)
-	}
-
-	switch finish {
-	case "stop":
-		return ai.StopEnd, nil
-	case "tool_calls", "function_call":
-		return ai.StopToolUse, nil
-	case "length":
-		return ai.StopLength, nil
-	case "content_filter":
-		return ai.StopError, fail(FailureRefused, 0, "the provider's filters removed the content")
-	case "":
-		// The stream ended without the provider saying why, so the reply is not
-		// known to be complete. Reporting it as finished would hand back a
-		// partial answer as the model's last word.
-		return ai.StopError, fail(FailureUnknown, 0, "the stream ended without a finish reason")
-	default:
-		return ai.StopError, fail(FailureUnknown, 0, fmt.Sprintf("unrecognised finish reason %q", finish))
-	}
-}
-
 // classifier is what the shared chat-completions capture asks this package for.
 //
 // The seam is small because the difference is small: everything about watching
@@ -244,3 +205,20 @@ func (classifier) Refusal(status int, body []byte, key string) error {
 
 // RetryAdvice reads this provider's own instruction about trying again.
 func (classifier) RetryAdvice(h http.Header) *bool { return retryAdvice(h) }
+
+// TerminalFailure classifies a failure this provider reported inside a 200.
+//
+// An overflow leaves as the shared sentinel rather than as a classification:
+// classifying it by the ending would call it an interruption, which is never
+// retried — so the one failure this repository can recover from, by shortening,
+// would be the one it gives up on.
+func (classifier) TerminalFailure(code string) (error, bool) {
+	if isContextOverflow(code) {
+		return fmt.Errorf("%w: the provider refused the request as too large",
+			ai.ErrContextOverflow), true
+	}
+	if failure, ok := failureFromCode(code); ok {
+		return fail(failure, 0, code), true
+	}
+	return nil, false
+}

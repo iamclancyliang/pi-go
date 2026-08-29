@@ -192,6 +192,17 @@ type Classifier interface {
 	// RetryAdvice reads the provider's own instruction about trying again, or
 	// nil when it gave none.
 	RetryAdvice(h http.Header) *bool
+
+	// TerminalFailure classifies a failure the provider reported INSIDE a 200,
+	// from its own error code. Returning false leaves the ending to the finish
+	// reason.
+	//
+	// Separate from Refusal because the two arrive differently and mean
+	// different things: one is a request rejected before it ran, the other a
+	// reply that started and then failed — an exhausted balance mid-stream
+	// among them, which classified by the ending alone would read as an
+	// interruption worth retrying.
+	TerminalFailure(code string) (error, bool)
 }
 
 // NewTransport wraps a transport so one exchange can be observed.

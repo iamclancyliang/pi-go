@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,9 +34,20 @@ var einoIsAllowedIn = []string{
 	// this list.
 	"internal/provider/openai",
 	"internal/provider/qwen",
+	"internal/provider/openrouter",
+
+	// The shared implementation for one dialect is on the same footing as the
+	// ports that use it: it drives the framework's adapters, and the same rule
+	// applies to what it exposes. Adding it here rather than exempting the
+	// whole tree keeps the list what it is — a decision per package, so a new
+	// one has to be argued for rather than inherited.
+	"internal/provider/chatcompletions",
 }
 
 const einoModule = "github.com/cloudwego/eino"
+
+// modulePath is this repository's own import path.
+const modulePath = "github.com/iamclancyliang/pi-go"
 
 func TestOnlyTheRuntimeNamesTheFramework(t *testing.T) {
 	root, err := filepath.Abs("../..")
@@ -113,6 +125,14 @@ func TestAProviderExposesNoFrameworkType(t *testing.T) {
 	// here as well.
 	for _, allowed := range einoIsAllowedIn {
 		if !strings.HasPrefix(allowed, "internal/provider/") {
+			continue
+		}
+		if allowed == dialectPackage {
+			// The shared dialect is INSIDE the boundary rather than at it: the
+			// only packages that compile against it are ports already allowed
+			// to name the framework, so a framework type in its signature moves
+			// the dependency nowhere. That it stays inside is not taken on
+			// trust — TestNothingOutsideTheBoundaryImportsTheDialect checks it.
 			continue
 		}
 		dir := filepath.Join(root, filepath.FromSlash(allowed))
@@ -281,4 +301,55 @@ func receiverIsExported(recv *ast.FieldList) bool {
 		name = t.Name
 	}
 	return name != "" && ast.IsExported(name)
+}
+
+// dialectPackage is the shared implementation ports of one wire dialect use.
+const dialectPackage = "internal/provider/chatcompletions"
+
+// TestNothingOutsideTheBoundaryImportsTheDialect is what lets the dialect
+// package name framework types in what it exports.
+//
+// The rule was never "no exported signature anywhere mentions eino" — it is
+// that the framework choice stays reversible, which means nothing outside the
+// provider boundary compiles against it. The dialect sits inside that boundary
+// and hands framework types only to ports that already depend on them.
+//
+// The moment something else imports it, that stops being true, and this is
+// where it is caught rather than in a review.
+func TestNothingOutsideTheBoundaryImportsTheDialect(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("repository root: %v", err)
+	}
+	dialect := modulePath + "/" + dialectPackage
+
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		relative = filepath.ToSlash(relative)
+		if strings.HasPrefix(relative, ".git/") || allowed(filepath.FromSlash(relative)) {
+			return nil
+		}
+
+		fset := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			return nil
+		}
+		for _, imported := range file.Imports {
+			if strings.Trim(imported.Path.Value, `"`) == dialect {
+				t.Errorf("%s imports the shared dialect from outside the provider boundary; "+
+					"it would compile against framework types", relative)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the repository: %v", err)
+	}
 }

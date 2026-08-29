@@ -13,6 +13,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
+	"github.com/iamclancyliang/pi-go/internal/provider/openrouter"
 	"github.com/iamclancyliang/pi-go/internal/provider/qwen"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
@@ -100,6 +101,30 @@ var Providers = map[string]Provider{
 				Transport:       transport,
 				Credential:      cred,
 				MaxOutputTokens: DefaultMaxOutputTokens,
+			})
+		},
+	},
+	"openrouter": {
+		Name: "openrouter",
+		// An aggregator addresses models as vendor/model, so a default names
+		// one — there is no house model to fall back to.
+		DefaultModel: "openai/gpt-4o-mini",
+		EnvVars:      openrouter.EnvVars,
+		build: func(model, apiKey string, transport http.RoundTripper) (ai.Port, error) {
+			cred, err := openrouter.Resolve(context.Background(), processEnvironment{}, apiKey)
+			if err != nil {
+				return nil, err
+			}
+			facts, _ := ai.Facts("openrouter", model)
+			return openrouter.New(openrouter.Config{
+				Model:           model,
+				Transport:       transport,
+				Credential:      cred,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
+				// Attribution is opt-in and this build does not opt in: it puts
+				// the caller on a public leaderboard, which is not a thing to
+				// decide for someone.
 			})
 		},
 	},

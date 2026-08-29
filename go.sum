@@ -32,6 +32,8 @@ github.com/cloudwego/eino-ext/components/model/agenticopenai v0.2.2 h1:ypI5PDFKc
 github.com/cloudwego/eino-ext/components/model/agenticopenai v0.2.2/go.mod h1:+TnIUKvZOM5X//h//dex0gtkLf5HidIdP7Gbzvmyixg=
 github.com/cloudwego/eino-ext/components/model/agenticqwen v0.1.0 h1:3+BQ7fYvGMHAoMQCPohzHr+RVb9OPEZHSNF3CjrnBak=
 github.com/cloudwego/eino-ext/components/model/agenticqwen v0.1.0/go.mod h1:L2EGV0hzgVP+NszbhOKJV1p/IJaQhoaJ/WpNjb1msXo=
+github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10 h1:i5YdCW8omvObZhyLGqL8ia5TC/pr3WipB4xQw9oN09Q=
+github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10/go.mod h1:WRc1OIXVaf2USal59xrIt+05TUCu9P1c8MQh0FcWG8c=
 github.com/cloudwego/eino-ext/components/model/qwen v0.1.9 h1:xCz/mp43JeWqupjPR3zLRArmwC6P29/6lTwbwh1yzYM=
 github.com/cloudwego/eino-ext/components/model/qwen v0.1.9/go.mod h1:slTGTuhzkzhNavf+1UtUg1FvUSA31iNAF+rq1mT4SnI=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.18-0.20260527084435-846f52bd97c6 h1:ES/xufN5eqJ3h+9tw/tq6F8kkgnAxBAHVUB6nqKsIDU=

@@ -1,4 +1,15 @@
-package qwen
+// The streaming half of a chat-completions port.
+//
+// Shared for the same reason the capture and the conversion are: of the 423
+// lines this began as, ONE named the provider it was written for — the call
+// that builds the adapter's model. Everything else is what this repository
+// promises about any reply: blocks opened and closed in order, tool calls whose
+// positions the provider chose, a terminal frame carrying usage and the served
+// model, and a refusal classified where the status still existed.
+//
+// A port supplies a Dialect and keeps its own vocabulary. It supplies nothing
+// else.
+package chatcompletions
 
 import (
 	"context"
@@ -7,12 +18,10 @@ import (
 	"io"
 	"sort"
 
-	"github.com/cloudwego/eino-ext/components/model/qwen"
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
-	cc "github.com/iamclancyliang/pi-go/internal/provider/chatcompletions"
 )
 
 // Stream answers as the reply arrives.
@@ -21,45 +30,45 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// No catalog exists here to consult and no default is invented: a
 		// request naming no model would otherwise reach whichever model the
 		// configuration happened to hold, and the reply would not say which.
-		return nil, fail(FailureRefused, 0, "no model named for this request")
+		return nil, p.fail(ai.FailureRefused, 0, "no model named for this request")
 	}
 	if req.Model != p.cfg.Model {
 		// This port serves one model. Serving another because a request asked
 		// for it would answer from a model the caller's configuration never
 		// chose, and the reply carries no sign of the substitution.
-		return nil, fail(FailureRefused, 0, fmt.Sprintf(
+		return nil, p.fail(ai.FailureRefused, 0, fmt.Sprintf(
 			"this port serves %q; the request named %q", p.cfg.Model, req.Model))
 	}
-	messages, err := toMessages(req.Messages)
+	messages, err := ToMessages(req.Messages)
 	if err != nil {
 		return nil, err
 	}
 	key := p.cfg.Credential.Key()
 
 	// This call's own record, held by the client it is about to use.
-	held := cc.NewTransport(p.cfg.Transport, classifier{}, key)
+	held := NewTransport(p.cfg.Transport, p.cfg.Classifier, key)
 	outputCap := p.cfg.MaxOutputTokens
-	chat, err := qwen.NewChatModel(ctx, &qwen.ChatModelConfig{
+	chat, err := p.cfg.NewModel(ctx, ModelRequest{
 		APIKey:  key,
 		BaseURL: p.cfg.BaseURL,
 		Model:   req.Model,
 		// The cap has to reach the request. Requiring it at construction says
 		// nothing about what was sent, and a reply with no cap is a bill nobody
 		// chose.
-		MaxTokens:  &outputCap,
-		HTTPClient: httpClient(held),
+		MaxOutputTokens: outputCap,
+		HTTPClient:      HTTPClient(held),
 	})
 	if err != nil {
-		return nil, wireFailure("building the model", key, err)
+		return nil, p.wireFailure("building the model", key, err)
 	}
 
 	var model einomodel.BaseChatModel = chat
 	// Tools travel with the call. A request that omits them leaves the model
 	// unable to ask for anything, which looks like a model that chose not to.
-	if specs := toolSpecs(req.Tools); len(specs) > 0 {
+	if specs := ToolSpecs(req.Tools); len(specs) > 0 {
 		bound, bindErr := chat.WithTools(specs)
 		if bindErr != nil {
-			return nil, wireFailure("binding tools", key, bindErr)
+			return nil, p.wireFailure("binding tools", key, bindErr)
 		}
 		model = bound
 	}
@@ -75,7 +84,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, wireFailure("starting the stream", key, err)
+		return nil, p.wireFailure("starting the stream", key, err)
 	}
 
 	out := make(chan ai.StreamEvent)
@@ -95,7 +104,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 // position is checked against the wire separately — see checkAnnounced —
 // because the adapter is trusted to carry it, not to be the record of it.
 func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Message],
-	held *cc.Transport, out chan<- ai.StreamEvent) {
+	held *Transport, out chan<- ai.StreamEvent) {
 
 	// Seeded empty: the model that served a reply comes from the reply. Seeding
 	// it with the configured name would report a model nobody confirmed, and a
@@ -136,7 +145,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = cc.UsageOf(held.Capture.Last())
+			ev.Final.Usage = UsageOf(held.Capture.Last())
 			if served := held.Capture.Last().Model; served != "" {
 				ev.Final.Model = served
 			}
@@ -144,7 +153,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		sendTerminal(ev)
 	}
 
-	// A stopped stream still ends with a cc.Terminal carrying what had already
+	// A stopped stream still ends with a Terminal carrying what had already
 	// arrived. A consumer that watched a reply appear should not have it vanish
 	// because it stopped, and a channel that simply closes says nothing about
 	// what they have.
@@ -161,7 +170,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = cc.UsageOf(held.Capture.Last())
+			ev.Final.Usage = UsageOf(held.Capture.Last())
 		}
 		sendTerminal(ev)
 	}()
@@ -214,7 +223,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			// A stop reported through the error rather than through the context
 			// ends the same way. Ending it as a failure would put a reply in the
 			// record as one the provider broke.
-			if stopped(err) {
+			if ai.Stopped(err) {
 				cancelled, stoppedBy = true, err
 				return
 			}
@@ -222,7 +231,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 				abort(refused)
 				return
 			}
-			abort(wireFailure("reading the stream", p.cfg.Credential.Key(), err))
+			abort(p.wireFailure("reading the stream", p.cfg.Credential.Key(), err))
 			return
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -233,7 +242,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		// Checked HERE, as each chunk arrives. Validating at the end would let
 		// content whose position the provider never gave reach the consumer
 		// first, and a consumer cannot unsee what it has been given.
-		if err := checkAnnounced(held); err != nil {
+		if err := p.checkAnnounced(held); err != nil {
 			abort(err)
 			return
 		}
@@ -286,7 +295,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 				// the provider sent a position, this one says the conversion
 				// still has it. Without it a conversion that dropped one would
 				// be a nil dereference rather than a report.
-				abort(fail(FailureUnknown, 0,
+				abort(p.fail(ai.FailureUnknown, 0,
 					"a tool call fragment reached this port with no position"))
 				return
 			}
@@ -323,9 +332,9 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	}
 
 	// Checked again once the stream has ended. The check inside the loop only
-	// runs when a chunk arrives, so an cc.Announcement carrying nothing at all
+	// runs when a chunk arrives, so an Announcement carrying nothing at all
 	// would otherwise reach the end unexamined.
-	if err := checkAnnounced(held); err != nil {
+	if err := p.checkAnnounced(held); err != nil {
 		abort(err)
 		return
 	}
@@ -337,20 +346,20 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	// The ending comes from what the provider said, captured before the adapter
 	// reinterpreted it.
 	final := held.Capture.Last()
-	reason, endErr := endingFrom(final.FinishReason, final.ErrorCode)
+	reason, endErr := p.endingFrom(final.FinishReason, final.ErrorCode)
 	if endErr != nil {
 		abort(endErr)
 		return
 	}
 	// Checked before the reply is completed: the accumulator has one ending, and
 	// a reply already declared finished cannot then be reported as a failure.
-	if f := p.overflow(reason, cc.UsageOf(final)); f != nil {
+	if f := p.overflow(reason, UsageOf(final)); f != nil {
 		ev, accErr := acc.Fail(ai.StopError, f)
 		if accErr != nil {
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = cc.UsageOf(final)
+			ev.Final.Usage = UsageOf(final)
 			if final.Model != "" {
 				ev.Final.Model = final.Model
 			}
@@ -358,7 +367,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		sendTerminal(ev)
 		return
 	}
-	done, err := acc.Done(reason, cc.UsageOf(final))
+	done, err := acc.Done(reason, UsageOf(final))
 	if err != nil {
 		abort(err)
 		return
@@ -386,9 +395,9 @@ func openBlock(kinds map[int]ai.BlockKind, kind ai.BlockKind) (int, bool) {
 // checking. These come from the provider's own bytes, upstream of any
 // conversion, so a conversion that started renumbering would be caught rather
 // than believed.
-func checkAnnounced(held *cc.Transport) error {
+func (p *Port) checkAnnounced(held *Transport) error {
 	for _, what := range held.Capture.AnonymousFragments() {
-		return fail(FailureUnknown, 0, fmt.Sprintf(
+		return p.fail(ai.FailureUnknown, 0, fmt.Sprintf(
 			"the provider sent %s; refusing to infer a position it did not send", what))
 	}
 	opened := map[int]string{}
@@ -399,12 +408,12 @@ func checkAnnounced(held *cc.Transport) error {
 				// A position that opens twice describes two calls in one place.
 				// Accepting it would merge them, and the arguments of the first
 				// would end up on the second.
-				return fail(FailureUnknown, 0, fmt.Sprintf(
+				return p.fail(ai.FailureUnknown, 0, fmt.Sprintf(
 					"the provider opened position %d twice, as %q and %q", a.Index, id, a.ID))
 			}
 			if a.Index != highest+1 {
 				// Positions that skip describe calls that were never sent.
-				return fail(FailureUnknown, 0, fmt.Sprintf(
+				return p.fail(ai.FailureUnknown, 0, fmt.Sprintf(
 					"the provider opened position %d where %d was expected; "+
 						"refusing to renumber a stream that skips", a.Index, highest+1))
 			}
@@ -415,9 +424,44 @@ func checkAnnounced(held *cc.Transport) error {
 		if _, known := opened[a.Index]; !known {
 			// A continuation of a call that was never opened has nothing to
 			// continue, and guessing which one it meant is guessing.
-			return fail(FailureUnknown, 0, fmt.Sprintf(
+			return p.fail(ai.FailureUnknown, 0, fmt.Sprintf(
 				"the provider continued position %d, which it never opened", a.Index))
 		}
 	}
 	return nil
+}
+
+// endingFrom maps a chat-completions finish reason onto a reply ending.
+//
+// The finish reasons are the dialect's and are the same everywhere; the error
+// codes are the provider's, so those go through the classifier first. A failure
+// reported inside a 200 that named its own reason must not be reclassified by
+// the ending: an exhausted balance called an interruption reads as "try again
+// later" for something that cannot succeed.
+func (p *Port) endingFrom(finish, errorCode string) (ai.StopReason, error) {
+	if errorCode != "" {
+		if failed, ok := p.cfg.Classifier.TerminalFailure(errorCode); ok {
+			return ai.StopError, failed
+		}
+		return ai.StopError, p.fail(ai.FailureUnknown, 0, "the reply failed: "+errorCode)
+	}
+
+	switch finish {
+	case "stop":
+		return ai.StopEnd, nil
+	case "tool_calls", "function_call":
+		return ai.StopToolUse, nil
+	case "length":
+		return ai.StopLength, nil
+	case "content_filter":
+		return ai.StopError, p.fail(ai.FailureRefused, 0, "the provider's filters removed the content")
+	case "":
+		// The stream ended without the provider saying why, so the reply is not
+		// known to be complete. Reporting it as finished would hand back a
+		// partial answer as the model's last word.
+		return ai.StopError, p.fail(ai.FailureUnknown, 0, "the stream ended without a finish reason")
+	default:
+		return ai.StopError, p.fail(ai.FailureUnknown, 0,
+			fmt.Sprintf("unrecognised finish reason %q", finish))
+	}
 }

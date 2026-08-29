@@ -1,4 +1,10 @@
-package qwen
+// Conversion between this repository's messages and the ones the eino adapters
+// for this dialect take.
+//
+// Here rather than in each port for the same reason the capture is: the
+// chat-completions message shape does not vary by provider. The Responses API
+// takes a different shape entirely, so the port speaking it keeps its own.
+package chatcompletions
 
 import (
 	"encoding/json"
@@ -17,7 +23,8 @@ import (
 // and tool results. Anything else would be a block the rest of this repository
 // has no contract for, and quietly dropping it would leave a caller believing
 // it was sent.
-func toMessages(msgs []ai.Message) ([]*schema.Message, error) {
+// ToMessages converts this repository's messages into the adapter's.
+func ToMessages(msgs []ai.Message) ([]*schema.Message, error) {
 	out := make([]*schema.Message, 0, len(msgs))
 	for _, m := range msgs {
 		converted, err := oneMessage(m)
@@ -79,7 +86,8 @@ func oneMessage(m ai.Message) (*schema.Message, error) {
 // model as a name and a sentence, and the model answers with an argument shape
 // it invented — which fails as a malformed payload rather than as the missing
 // declaration it is.
-func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
+// ToolSpecs converts this repository's tool descriptions for the adapter.
+func ToolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 	out := make([]*schema.ToolInfo, 0, len(specs))
 	for _, spec := range specs {
 		info := &schema.ToolInfo{Name: spec.Name, Desc: spec.Description}
@@ -100,7 +108,8 @@ func toolSpecs(specs []ai.ToolSpec) []*schema.ToolInfo {
 // the default client would make it, and a call budgeted for one request would
 // quietly make several — each billable, none counted, and the second carrying
 // the credential to wherever the first was pointed.
-func httpClient(tr http.RoundTripper) *http.Client {
+// HTTPClient wraps a transport for the adapter.
+func HTTPClient(tr http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

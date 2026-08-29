@@ -1,11 +1,20 @@
+// Package qwen reaches Qwen's OpenAI-compatible endpoint.
+//
+// A thin wrapper now: the streaming, the capture and the message conversion are
+// the chat-completions dialect's and live in internal/provider/chatcompletions.
+// What remains here is what is genuinely Qwen's — where its endpoint is, which
+// variable carries its key, and what its statuses and error codes mean.
 package qwen
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
+	einoqwen "github.com/cloudwego/eino-ext/components/model/qwen"
+	"github.com/cloudwego/eino/components/model"
+
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	cc "github.com/iamclancyliang/pi-go/internal/provider/chatcompletions"
 )
 
 // DefaultBaseURL is the provider's documented OpenAI-compatible endpoint.
@@ -24,17 +33,10 @@ func Resolve(ctx context.Context, env ai.Environment, stored string) (ai.Credent
 }
 
 // Config describes one provider instance.
-//
-// No raw key appears here beyond the resolved credential, which keeps itself
-// out of anything that formats it.
 type Config struct {
-	// Model is the model this port serves. Required.
-	//
-	// It is not a default: a request names its own model, and one naming a
-	// different model is refused rather than quietly served by this port. A
-	// value that only gets validated and printed is a second source of truth
-	// about which model is in play, and the wrong one to believe when
-	// diagnosing a reply.
+	// Model is the model this port serves. Required, and not a default: a
+	// request names its own model, and one naming a different model is refused
+	// rather than quietly served by this port.
 	Model string
 
 	// Transport carries requests. Required, and there is no default: a test
@@ -42,10 +44,6 @@ type Config struct {
 	Transport http.RoundTripper
 
 	// Credential is the key this port authenticates with, already resolved.
-	// Required, and there is no default.
-	//
-	// A resolved value rather than a resolver: this provider reads no store, so
-	// which source wins is settled once and nothing can vary between requests.
 	Credential ai.Credential
 
 	// MaxOutputTokens caps the reply. Required and positive: a cap that can be
@@ -56,91 +54,42 @@ type Config struct {
 	BaseURL string
 
 	// ContextWindow enables the count-based overflow checks. Zero leaves them
-	// off, which is the safe direction: failing to detect an overflow reports a
-	// refusal a caller already handles, while inventing one buys a shortened
-	// retry of a request that was fine.
-	//
-	// It must be a measured or authoritatively given value. A figure taken from
-	// documentation is not evidence: a published context length is often
-	// rounded, and a threshold below the real limit turns accepted replies into
-	// overflows.
+	// off, which is the safe direction.
 	ContextWindow int
 }
 
-// Port reaches Qwen's OpenAI-compatible endpoint.
-type Port struct {
-	cfg Config
-}
-
-// String and GoString keep a Config out of anything that formats it.
-func (c Config) String() string {
-	return "qwen.Config{Model:" + c.Model + ", BaseURL:" + c.BaseURL + "}"
-}
-
-// GoString matches String, so %#v cannot reach further than %v.
-func (c Config) GoString() string { return c.String() }
-
-// String and GoString keep configuration out of anything that formats a port.
-func (p *Port) String() string {
-	return "qwen.Port{Model:" + p.cfg.Model + ", BaseURL:" + p.cfg.BaseURL + "}"
-}
-func (p *Port) GoString() string { return p.String() }
+// Port reaches Qwen.
+type Port = cc.Port
 
 // New builds a Port, refusing a configuration that could not work.
 func New(cfg Config) (*Port, error) {
-	switch {
-	case cfg.Model == "":
-		return nil, fmt.Errorf("qwen: a model is required")
-	case cfg.Transport == nil:
-		return nil, fmt.Errorf("qwen: a transport is required; there is no default")
-	case cfg.Credential.Key() == "":
-		// Typed rather than prose, and refused here rather than at the first
-		// request: a caller can tell "nothing configured" from "the provider
-		// rejected what we sent", and learns it before anything is billed.
-		return nil, fail(FailureAuth, 0, "no credential was supplied for this provider")
-	case cfg.MaxOutputTokens <= 0:
-		return nil, fmt.Errorf("qwen: MaxOutputTokens must be positive, got %d", cfg.MaxOutputTokens)
-	case cfg.ContextWindow < 0:
-		return nil, fmt.Errorf("qwen: ContextWindow %d is negative", cfg.ContextWindow)
-	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
 	}
-	return &Port{cfg: cfg}, nil
+	return cc.New(cc.Config{
+		Provider:        providerName,
+		Model:           cfg.Model,
+		BaseURL:         cfg.BaseURL,
+		Transport:       cfg.Transport,
+		Credential:      cfg.Credential,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		ContextWindow:   cfg.ContextWindow,
+		Classifier:      classifier{},
+		NewModel:        newModel,
+	})
+}
+
+// newModel builds this provider's adapter for one call.
+func newModel(ctx context.Context, req cc.ModelRequest) (model.ToolCallingChatModel, error) {
+	outputCap := req.MaxOutputTokens
+	return einoqwen.NewChatModel(ctx, &einoqwen.ChatModelConfig{
+		APIKey:     req.APIKey,
+		BaseURL:    req.BaseURL,
+		Model:      req.Model,
+		MaxTokens:  &outputCap,
+		HTTPClient: req.HTTPClient,
+	})
 }
 
 // scrub removes a credential from text about to become an error.
 func scrub(text, key string) string { return ai.ScrubSecret(text, key) }
-
-// overflow reports a context overflow inferred from reported counts.
-//
-// Absent usage disables the check rather than reading as zero: silence is not a
-// measurement, and a window compared against a zero it invented would never
-// fire — or, with the comparison the other way, always would.
-func (p *Port) overflow(reason ai.StopReason, used ai.Usage) error {
-	window := p.cfg.ContextWindow
-	if window <= 0 || !used.Reported {
-		// The presence half cannot change an answer today: counts nobody
-		// reported are zero, and zero exceeds no window that construction
-		// already required to be positive. It stays because it is the premise
-		// the comparisons below rest on — a check that reads silence as a
-		// measurement is wrong even on the day it happens to agree.
-		return nil
-	}
-	input := used.InputTokens
-	if used.CacheReadTokens != nil {
-		// Cached prompt tokens are cheaper than uncached ones and occupy the
-		// same room. Counting only the uncached part would miss an overflow on
-		// exactly the requests a cache makes common.
-		input += *used.CacheReadTokens
-	}
-	if reason == ai.StopEnd && input > window {
-		return fmt.Errorf("%w: the provider accepted %d input tokens against a %d window",
-			ai.ErrContextOverflow, input, window)
-	}
-	if reason == ai.StopLength && input+used.OutputTokens > window {
-		return fmt.Errorf("%w: %d input and output tokens against a %d window",
-			ai.ErrContextOverflow, input+used.OutputTokens, window)
-	}
-	return nil
-}
