@@ -61,7 +61,7 @@ final disposition.
 | --- | --- | --- | --- | --- | --- |
 | Agent loop and messages | `packages/agent` | B | v0 | C1-C8 conformance traces, streaming and cancellation | in-spec |
 | Tool execution | `packages/agent`, coding-agent tools | B | v0/v1 | validation, batch modes, ordering, abort, side-effect policy | implemented · #25 open |
-| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial · #30, #33 open |
+| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial · #30, #33 open · denominator set by ADR-0007 |
 | Coding-agent assembly | `packages/coding-agent` | B | v1-v2 | documented commands, settings, modes, resources, tools and workflows | partial · #27, #28, #30 open |
 | Terminal UI library | `packages/tui` | B/R | v2 | rendering, input, overlays, width handling, streaming UX | partial · #28 open |
 | Sessions and compaction | coding-agent session/compaction; AgentHarness | B/W/N | v1-v2 | resume, tree, fork/clone, summaries, context projection, migration; net-new crash-safe replay policy | implemented · #26 open |
@@ -182,8 +182,9 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
 | context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
-| model catalogue | — | — | **incomplete** (#30) — §7.2 is a `source-gap`; not in the pinned repository |
-| the other 39 providers | — | — | **incomplete** (#33) |
+| model facts (window, output cap, reasoning) | `internal/ai/catalogue.go` | `TestTheMeasuredDeepSeekFactsAreWhatWasMeasured`, `TestAnUnrecordedModelSaysSoRatherThanAnsweringZero` | accepted-deviation — ADR-0007: owned, sourced per entry, one model recorded. Pi's generated catalogue is a `source-gap` (§7.2) and is not reproduced |
+| full per-provider model list | — | — | **incomplete** (#30) — needs a source `GET /v1/models` cannot give |
+| the other providers | — | — | **incomplete** (#33) — six, following eino-ext's components per ADR-0007, not Pi's 39 |
 
 ### Terminal interface — `tui.*`
 
