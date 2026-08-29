@@ -12,6 +12,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
+	"github.com/iamclancyliang/pi-go/internal/provider/ollama"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
 	"github.com/iamclancyliang/pi-go/internal/provider/openrouter"
 	"github.com/iamclancyliang/pi-go/internal/provider/qwen"
@@ -51,7 +52,7 @@ type Provider struct {
 
 // Providers are the providers this build can reach, by name.
 //
-// Pi's registry holds forty-two. These three are what pi-go has ports for, and
+// Pi's registry holds forty-two. These are what pi-go has ports for, and
 // naming any other one fails with the list rather than falling back to a
 // default — a request silently served by a provider the user did not ask for is
 // billed to an account they did not choose.
@@ -101,6 +102,32 @@ var Providers = map[string]Provider{
 				Transport:       transport,
 				Credential:      cred,
 				MaxOutputTokens: DefaultMaxOutputTokens,
+			})
+		},
+	},
+	"ollama": {
+		Name: "ollama",
+		// A local server serves whatever has been pulled, and this build
+		// cannot know what that is. The name pi's own overflow tests pull is
+		// the least surprising default; a wrong guess fails immediately and
+		// says how to fix it, rather than silently serving another model.
+		DefaultModel: "gpt-oss:20b",
+		// Empty on purpose: nothing to authenticate. The consequence is that
+		// the credential scan below never selects ollama, so it is reached only
+		// by asking for it — which is right. A user with no key configured
+		// should be told that, not have their prompt quietly sent to whatever
+		// happens to be listening on this machine.
+		EnvVars: ollama.EnvVars,
+		build: func(model, _ string, transport http.RoundTripper) (ai.Port, error) {
+			facts, _ := ai.Facts("ollama", model)
+			return ollama.New(ollama.Config{
+				Model:           model,
+				Transport:       transport,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
+				// KeepAlive is left at the server's own default: how long a
+				// model stays resident is a decision about this machine's
+				// memory, which belongs to whoever runs the server.
 			})
 		},
 	},
@@ -223,7 +250,8 @@ func SelectProvider(args Args) (Provider, error) {
 		}
 	}
 	return Provider{}, fmt.Errorf(
-		"no provider credential found; run /login, set one of %s, or pass --provider",
+		"no provider credential found; run /login, set one of %s, or pass --provider "+
+			"(--provider ollama needs no credential and reaches a server on this machine)",
 		strings.Join(credentialVars(), ", "))
 }
 

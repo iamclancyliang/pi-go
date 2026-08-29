@@ -184,7 +184,8 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
 | model facts (window, output cap, reasoning) | `internal/ai/catalogue.go` | `TestTheMeasuredDeepSeekFactsAreWhatWasMeasured`, `TestAnUnrecordedModelSaysSoRatherThanAnsweringZero` | accepted-deviation — ADR-0007: owned, sourced per entry, one model recorded. Pi's generated catalogue is a `source-gap` (§7.2) and is not reproduced |
 | full per-provider model list | — | — | **incomplete** (#30) — needs a source `GET /v1/models` cannot give |
-| the other providers | — | — | **incomplete** (#33) — six, following eino-ext's components per ADR-0007, not Pi's 39 |
+| OpenRouter, Ollama ports | `internal/provider/openrouter/`, `internal/provider/ollama/` | `TestAModerationRefusalIsNotAnAuthenticationFailure`, `TestAModelThatWasNeverPulledSaysHowToFixIt`, `TestAPromptThatDidNotFitIsReportedAsOverflow` | partial — **unverified-against-provider**: no credential exists for OpenRouter and no server for Ollama, so the wire semantics are this repository's reading of the documentation. `TestLiveOpenRouterAnswersAndReportsWhatItSpent` and `TestLiveOllamaAnswersFromThisMachine` are written and skipped until one exists |
+| the other providers | — | — | **incomplete** (#33) — four left (ark, qianfan, claude, gemini), following eino-ext's components per ADR-0007, not Pi's 39 |
 
 ### Terminal interface — `tui.*`
 
@@ -234,6 +235,7 @@ statement that Pi's behaviour is wrong.
 | D-3 | #26 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
 | D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
+| D-14 | #37 | context-overflow detection | one shared matcher over six recorded wordings, applied to every provider | per-port detection: two-number comparison (deepseek), error code (qwen, openai), pi's phrase (ollama), up-front counts where a window is recorded | a provider whose wording nobody recorded reports an overflow as an ordinary refusal, losing the one failure this repository can recover from. Pi's six positives and four negatives are recorded in its own tests and can be adopted on that basis |
 
 `D-13` was reserved for an up-front context-overflow rejection pi-go could not
 recognise. **It is no longer needed** (#29 closed 2026-08-29): an

@@ -36,6 +36,12 @@ var einoIsAllowedIn = []string{
 	"internal/provider/qwen",
 	"internal/provider/openrouter",
 
+	// A provider off the shared dialect is on the same footing: it drives its
+	// own framework adapter and exposes none of it. Being off the dialect
+	// changes what the port can SEE — the capture cannot read this wire's
+	// bytes — not what it may export.
+	"internal/provider/ollama",
+
 	// The shared implementation for one dialect is on the same footing as the
 	// ports that use it: it drives the framework's adapters, and the same rule
 	// applies to what it exposes. Adding it here rather than exempting the
