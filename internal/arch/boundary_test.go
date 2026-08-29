@@ -41,6 +41,7 @@ var einoIsAllowedIn = []string{
 	// changes what the port can SEE — the capture cannot read this wire's
 	// bytes — not what it may export.
 	"internal/provider/ollama",
+	"internal/provider/claude",
 
 	// The shared implementation for one dialect is on the same footing as the
 	// ports that use it: it drives the framework's adapters, and the same rule

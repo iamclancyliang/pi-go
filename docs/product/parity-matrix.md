@@ -178,14 +178,14 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | Feature ID | pi-go | Acceptance evidence | Proposed |
 | --- | --- | --- | --- |
 | DeepSeek, OpenAI, Qwen ports | `internal/provider/*` | 115 tests in `internal/provider`; live `TestLiveDeepSeekAnswersAndReportsWhatItSpent` | compatible |
-| one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test | compatible |
+| one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test; `internal/provider/claude/retry.go` suppresses the vendor SDK's own two retries, which would otherwise make one call three | compatible |
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
 | context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
 | model facts (window, output cap, reasoning) | `internal/ai/catalogue.go` | `TestTheMeasuredDeepSeekFactsAreWhatWasMeasured`, `TestAnUnrecordedModelSaysSoRatherThanAnsweringZero` | accepted-deviation — ADR-0007: owned, sourced per entry, one model recorded. Pi's generated catalogue is a `source-gap` (§7.2) and is not reproduced |
 | full per-provider model list | — | — | **incomplete** (#30) — needs a source `GET /v1/models` cannot give |
-| OpenRouter, Ollama ports | `internal/provider/openrouter/`, `internal/provider/ollama/` | `TestAModerationRefusalIsNotAnAuthenticationFailure`, `TestAModelThatWasNeverPulledSaysHowToFixIt`, `TestAPromptThatDidNotFitIsReportedAsOverflow` | partial — **unverified-against-provider**: no credential exists for OpenRouter and no server for Ollama, so the wire semantics are this repository's reading of the documentation. `TestLiveOpenRouterAnswersAndReportsWhatItSpent` and `TestLiveOllamaAnswersFromThisMachine` are written and skipped until one exists |
-| the other providers | — | — | **incomplete** (#33) — four left (ark, qianfan, claude, gemini), following eino-ext's components per ADR-0007, not Pi's 39 |
+| OpenRouter, Ollama, Claude ports | `internal/provider/openrouter/`, `internal/provider/ollama/`, `internal/provider/claude/` | `TestAModerationRefusalIsNotAnAuthenticationFailure`, `TestAModelThatWasNeverPulledSaysHowToFixIt`, `TestTheStatusesAndTypesThisProviderDocuments`, `TestOneCallSendsOneRequest` | partial — **unverified-against-provider**: no credential exists for OpenRouter or Claude and no server for Ollama, so the wire semantics are this repository's reading of the documentation and of wordings pi recorded at the pin. `TestLiveOpenRouterAnswersAndReportsWhatItSpent`, `TestLiveOllamaAnswersFromThisMachine` and `TestLiveClaudeAnswersAndReportsWhatItSpent` are written and skipped until each exists |
+| the other providers | — | — | **incomplete** (#33) — three left (ark, qianfan, gemini), following eino-ext's components per ADR-0007, not Pi's 39 |
 
 ### Terminal interface — `tui.*`
 

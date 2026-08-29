@@ -11,6 +11,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/auth"
+	"github.com/iamclancyliang/pi-go/internal/provider/claude"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
 	"github.com/iamclancyliang/pi-go/internal/provider/ollama"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
@@ -57,6 +58,28 @@ type Provider struct {
 // default — a request silently served by a provider the user did not ask for is
 // billed to an account they did not choose.
 var Providers = map[string]Provider{
+	"claude": {
+		Name: "claude",
+		// Dated on purpose: an alias moves to a new model when the vendor
+		// retires the old one, which changes what a run costs and what it
+		// answers without anything here changing.
+		DefaultModel: "claude-sonnet-4-5-20250929",
+		EnvVars:      claude.EnvVars,
+		build: func(model, apiKey string, transport http.RoundTripper) (ai.Port, error) {
+			cred, err := claude.Resolve(context.Background(), processEnvironment{}, apiKey)
+			if err != nil {
+				return nil, err
+			}
+			facts, _ := ai.Facts("claude", model)
+			return claude.New(claude.Config{
+				Model:           model,
+				Transport:       transport,
+				Credential:      cred,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
+			})
+		},
+	},
 	"deepseek": {
 		Name:         "deepseek",
 		DefaultModel: "deepseek-chat",
