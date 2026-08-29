@@ -36,7 +36,7 @@ always get distinct IDs.
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | **closed** — coding-agent 7 (§15), harness 4 (§8.2), both with input schemas |
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
-| **Model catalogue** | **`source-gap` — not in the repo, see §7.2** |
+| **Model catalogue** | **`source-gap` — the DATA is not in the repo. Its shape, its origin (models.dev) and the refresh mechanism are recorded (§7.2); the entries are not and cannot be, from this pin |
 | Auth / OAuth | `enumerated` (files) · storage shape read (§27.6); flows still `semantics-needed` |
 | Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
@@ -328,6 +328,40 @@ this gate exists to prevent.
 
 Image models are committed and countable: `packages/ai/src/image-models.generated.ts` — **45**
 entries. Registry: `packages/ai/src/images-api-registry.ts`.
+
+#### What IS recoverable from the pin, read 2026-08-29
+
+The data is absent; the shape it fills and where it comes from are not. Both were read while
+investigating what a port would need.
+
+**Origin** (`packages/ai/scripts/generate-models.ts:1311`): the generator fetches
+`https://models.dev/api.json` — a third-party catalogue — and writes one JSON file per provider into
+the gitignored directory. The per-provider `.models.ts` wrappers ARE tracked and do nothing but
+import that JSON and flatten it, so the tracked files describe the shape while carrying none of the
+content. `scripts/model-data.ts` carries a manifest with a schema version and per-file hashes, so a
+checkout can tell whether generated data matches the source that produced it.
+
+**Shape** (`packages/ai/src/types.ts:793-820`), the fields a catalogue entry holds:
+
+| Field | Meaning | Does pi-go need it today |
+| --- | --- | --- |
+| `id`, `name`, `provider`, `api`, `baseUrl` | identity and how to reach it | id and provider yes; the rest pi-go configures directly |
+| `contextWindow` | tokens the model accepts | **yes** — count-based overflow detection already takes it, and has none |
+| `maxTokens` | output cap | **yes** — currently one constant for every model |
+| `reasoning` | whether it reasons at all | **yes** — #36 sends a thinking field to models that may not support one |
+| `thinkingLevelMap` | `Partial<Record<level, string \| null>>`; a missing key means the provider default, `null` means the level is UNSUPPORTED | **yes** — #36 cannot send `reasoning_effort` without it |
+| `input` | `("text" \| "image")[]` | not yet — pi-go has no image content kind |
+| `cost` | per-million-token prices with optional tiers | not yet — pi-go ledgers tokens and computes no currency |
+| `samplingParams`, `headers`, `compat` | per-model request shaping | partially — pi-go's providers hard-code their own |
+
+**Runtime refresh is a separate mechanism, and it is nearly unused.** `ModelsRefreshOptions` and
+`RefreshModelsContext` (`models.ts:46-76`) let a provider fetch its own catalogue with a stored
+snapshot and a publish callback — but exactly **one** provider in the tree implements it. The
+generated catalogue is the source for the other forty-one.
+
+**One datum pi-go owns and Pi's catalogue does not give it:** the DeepSeek context window,
+**1,048,576 tokens**, measured by the authorized probe on 2026-08-29 rather than read from a
+catalogue. See `conformance/testdata/deepseek-large-request-rejected.json`.
 
 ### 7.3 Auth — `Kind: auth`, `ai.auth.*`
 
