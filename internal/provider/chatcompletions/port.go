@@ -53,6 +53,24 @@ type Config struct {
 
 	// Classifier reads what this provider's statuses and codes mean.
 	Classifier Classifier
+
+	// Wire says this provider speaks the chat-completions format, so the
+	// capture can read its bytes: usage with per-field presence, the served
+	// model, and the tool-call positions a renumbering would hide.
+	//
+	// False for a provider on its own wire. Refusals are still classified —
+	// those are ordinary JSON bodies — but the three above become unavailable,
+	// and the port answers from the framework's own metadata instead. Each loss
+	// is named on MetaSource.
+	Wire bool
+}
+
+// source is the view of a reply this port can offer.
+func (c Config) source(held *Transport) Source {
+	if c.Wire {
+		return wireSource{capture: held.Capture, port: &Port{cfg: c}}
+	}
+	return MetaSource{Capture: held.Capture}
 }
 
 // Port is the shared implementation every chat-completions provider uses.

@@ -45,8 +45,10 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	}
 	key := p.cfg.Credential.Key()
 
-	// This call's own record, held by the client it is about to use.
+	// This call's own record, held by the client it is about to use, and the
+	// view of the reply the rest of this reads through.
 	held := NewTransport(p.cfg.Transport, p.cfg.Classifier, key)
+	src := p.cfg.source(held)
 	outputCap := p.cfg.MaxOutputTokens
 	chat, err := p.cfg.NewModel(ctx, ModelRequest{
 		APIKey:  key,
@@ -78,7 +80,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// A refusal was classified at the transport, where the status and the
 		// provider's own code still existed. Preferring it keeps a caller
 		// branching on a value rather than on the adapter's prose.
-		if refused := held.Capture.Refusal(); refused != nil {
+		if refused := src.Refusal(); refused != nil {
 			return nil, refused
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -91,7 +93,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	go func() {
 		defer close(out)
 		defer reader.Close()
-		p.pump(ctx, reader, held, out)
+		p.pump(ctx, reader, held, src, out)
 	}()
 	return out, nil
 }
@@ -104,7 +106,12 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 // position is checked against the wire separately — see checkAnnounced —
 // because the adapter is trusted to carry it, not to be the record of it.
 func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Message],
-	held *Transport, out chan<- ai.StreamEvent) {
+	held *Transport, src Source, out chan<- ai.StreamEvent) {
+
+	// What the framework itself carried, kept so a port that cannot read the
+	// wire still has counts to report. Updated as chunks arrive, because the
+	// usage lands on one of them.
+	var metaUsage *schema.TokenUsage
 
 	// Seeded empty: the model that served a reply comes from the reply. Seeding
 	// it with the configured name would report a model nobody confirmed, and a
@@ -145,8 +152,8 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = UsageOf(held.Capture.Last())
-			if served := held.Capture.Last().Model; served != "" {
+			ev.Final.Usage = src.Usage(metaUsage)
+			if served := src.ServedModel(); served != "" {
 				ev.Final.Model = served
 			}
 		}
@@ -170,7 +177,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = UsageOf(held.Capture.Last())
+			ev.Final.Usage = src.Usage(metaUsage)
 		}
 		sendTerminal(ev)
 	}()
@@ -212,6 +219,11 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 
 	for {
 		chunk, err := reader.Recv()
+		if chunk != nil && chunk.ResponseMeta != nil && chunk.ResponseMeta.Usage != nil {
+			// Kept as it arrives: the usage lands on one chunk, and a port
+			// without the wire has nowhere else to read it from.
+			metaUsage = chunk.ResponseMeta.Usage
+		}
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -227,7 +239,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 				cancelled, stoppedBy = true, err
 				return
 			}
-			if refused := held.Capture.Refusal(); refused != nil {
+			if refused := src.Refusal(); refused != nil {
 				abort(refused)
 				return
 			}
@@ -242,7 +254,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		// Checked HERE, as each chunk arrives. Validating at the end would let
 		// content whose position the provider never gave reach the consumer
 		// first, and a consumer cannot unsee what it has been given.
-		if err := p.checkAnnounced(held); err != nil {
+		if err := src.CheckAnnounced(); err != nil {
 			abort(err)
 			return
 		}
@@ -334,7 +346,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	// Checked again once the stream has ended. The check inside the loop only
 	// runs when a chunk arrives, so an Announcement carrying nothing at all
 	// would otherwise reach the end unexamined.
-	if err := p.checkAnnounced(held); err != nil {
+	if err := src.CheckAnnounced(); err != nil {
 		abort(err)
 		return
 	}
@@ -395,14 +407,14 @@ func openBlock(kinds map[int]ai.BlockKind, kind ai.BlockKind) (int, bool) {
 // checking. These come from the provider's own bytes, upstream of any
 // conversion, so a conversion that started renumbering would be caught rather
 // than believed.
-func (p *Port) checkAnnounced(held *Transport) error {
-	for _, what := range held.Capture.AnonymousFragments() {
+func (p *Port) checkAnnounced(held *Capture) error {
+	for _, what := range held.AnonymousFragments() {
 		return p.fail(ai.FailureUnknown, 0, fmt.Sprintf(
 			"the provider sent %s; refusing to infer a position it did not send", what))
 	}
 	opened := map[int]string{}
 	highest := -1
-	for _, a := range held.Capture.Announcements() {
+	for _, a := range held.Announcements() {
 		if a.Named {
 			if id, already := opened[a.Index]; already {
 				// A position that opens twice describes two calls in one place.

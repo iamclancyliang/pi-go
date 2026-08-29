@@ -93,7 +93,10 @@ func New(cfg Config) (*Port, error) {
 		MaxOutputTokens: cfg.MaxOutputTokens,
 		ContextWindow:   cfg.ContextWindow,
 		Classifier:      classifier{},
-		NewModel:        newModel,
+		// This provider speaks the chat-completions wire, so the capture can
+		// read its bytes rather than falling back to the framework metadata.
+		Wire:     true,
+		NewModel: newModel,
 	})
 }
 
