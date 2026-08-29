@@ -61,7 +61,7 @@ final disposition.
 | --- | --- | --- | --- | --- | --- |
 | Agent loop and messages | `packages/agent` | B | v0 | C1-C8 conformance traces, streaming and cancellation | in-spec |
 | Tool execution | `packages/agent`, coding-agent tools | B | v0/v1 | validation, batch modes, ordering, abort, side-effect policy | implemented · #25 open |
-| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial · #29, #30 open |
+| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial · #30, #33 open |
 | Coding-agent assembly | `packages/coding-agent` | B | v1-v2 | documented commands, settings, modes, resources, tools and workflows | partial · #27, #28, #30 open |
 | Terminal UI library | `packages/tui` | B/R | v2 | rendering, input, overlays, width handling, streaming UX | partial · #28 open |
 | Sessions and compaction | coding-agent session/compaction; AgentHarness | B/W/N | v1-v2 | resume, tree, fork/clone, summaries, context projection, migration; net-new crash-safe replay policy | implemented · #26 open |
@@ -92,8 +92,8 @@ claimed at merge time drifts the first time something is changed afterwards.
 
 **These rows are still not a parity claim.** What each says is that the surface
 exists and its evidence runs. Reaching `compatible` needs the incomplete
-deviations closed (#25, #26, #27, #28) and, for the provider rows, the open
-question in #29. Every `incomplete` row below names the issue that tracks it —
+deviations closed (#25, #26, #27, #28). The provider rows' open question, #29,
+was closed on 2026-08-29 by an authorized probe. Every `incomplete` row below names the issue that tracks it —
 `docs/product/feature-inventory-schema.md` §C7 refuses a row that is blocked
 without saying by what.
 
@@ -181,6 +181,7 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test | compatible |
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
+| context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
 | model catalogue | — | — | **incomplete** (#30) — §7.2 is a `source-gap`; not in the pinned repository |
 | the other 39 providers | — | — | **incomplete** (#33) |
 
@@ -233,12 +234,12 @@ statement that Pi's behaviour is wrong.
 | D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
 
-`D-13` (#29) is reserved: whether pi-go recognises a provider's up-front
-context-overflow rejection is still open. The probe authorized on 2026-08-29 ran
-once and did not reach the condition — see
-`docs/research/provider-contract-source-audit.md`, "Probe result". Until a
-rejection is recorded or the requirement is waived, the provider-contract rows
-cannot reach a final disposition.
+`D-13` was reserved for an up-front context-overflow rejection pi-go could not
+recognise. **It is no longer needed** (#29 closed 2026-08-29): an
+owner-authorized probe recorded a real rejection, and
+`internal/provider/deepseek/overflow.go` recognises it by comparing the two
+token counts the message carries. The provider-contract rows are unblocked. See
+`docs/research/provider-contract-source-audit.md`, "Probe result".
 
 ## Native remote-capability checklist (wire decision C)
 

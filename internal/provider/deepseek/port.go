@@ -267,7 +267,15 @@ func failureFrom(resp *http.Response, key string) error {
 }
 
 // failureFromBytes classifies a failure from bytes already read.
+//
+// An up-front overflow is recognised first, because it is the one refusal the
+// caller can recover from: everything else at this status is a request the
+// caller must change, while this one is a request the runtime can shorten and
+// send again. Classified as an ordinary refusal it would end the turn.
 func failureFromBytes(status int, raw []byte, key string) error {
+	if overflow, isOverflow := overflowFromRejection(status, raw); isOverflow {
+		return overflow
+	}
 	return failureWith(classifyStatus(status), status, raw, key)
 }
 
@@ -379,6 +387,19 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, Cred
 		// the message: reading it twice would need it buffered anyway, and the
 		// classification has to happen BEFORE the retry decision.
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+
+		// An up-front overflow leaves here, before the retry decision. It is
+		// the one refusal at this layer the caller can recover from — the
+		// runtime shortens the conversation and sends again — and a retry
+		// decision taken first would either repeat the oversized request or
+		// bury the recovery inside an ordinary refusal. It is returned rather
+		// than classified because it is a sentinel the caller matches with
+		// errors.Is, not a member of the closed failure set.
+		if overflow, isOverflow := overflowFromRejection(resp.StatusCode, raw); isOverflow {
+			resp.Body.Close()
+			return nil, cred, append(attempts, Attempt{Usage: usageFromBytes(raw)}), overflow
+		}
+
 		failure := classifyStatus(resp.StatusCode)
 		if p.cfg.DetectExhaustion != nil && p.cfg.DetectExhaustion(resp.StatusCode, raw) {
 			failure = FailureQuota

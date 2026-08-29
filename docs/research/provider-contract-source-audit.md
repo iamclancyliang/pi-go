@@ -4,22 +4,21 @@ Reviewed contract head: `14300ee7e7dc457d7f95ad11ed8240a1773e1970`
 
 Pi source pin: `086c32e74530564922d011ade23ff582c9d63116`
 
-Verdict: **NO-GO as an implementation precondition.** The owner authorized the probe on
-2026-08-29; it ran once, within its recorded boundary, and **did not reach the condition** — see
-"Probe result" below. The finding is unchanged and the decision is open again, now with a measured
-lower bound instead of an assumption.
+Verdict: **GO.** The one finding that blocked it — the unknown shape of an up-front
+context-overflow rejection — was closed on 2026-08-29 by an owner-authorized probe that recorded a
+real rejection. See "Probe result" below.
 
-The rest of the contract stands as reviewed: the branch is one owner-authored commit, DeepSeek's official status mapping is correct, the numeric overflow and
-request-count contracts are coherent, and the unknown up-front rejection shape is now described
-without inventing 400/422 facts. The selected provider still cannot satisfy that rejection-path
-overflow obligation until a rejection is recorded, so that path remains open for either a larger
-authorized probe or an explicit owner scope waiver.
+The rest of the contract stands as reviewed: the branch is one owner-authored commit, DeepSeek's
+official status mapping is correct, and the numeric overflow and request-count contracts are
+coherent.
 
 ## Probe result, 2026-08-29
 
 Authorized by @qy-liang, executed once under the boundary this document records: one request, no
 retry asserted by a counting transport, locally generated filler, the credential injected through
 the environment seam with no path to the fixture, and no rerun.
+
+### First attempt — accepted
 
 **The request was accepted.** 1,048,570 characters of filler reached DeepSeek as **182,365 prompt
 tokens** and were answered normally; the reply stopped at `finish_reason: "length"`, which is the
@@ -38,14 +37,64 @@ What this establishes and what it does not:
   accepted against a documented "1M": the published figure is not the real bound, and neither is a
   megabyte of text.
 
-Reaching a rejection means a request several times larger — past a million tokens, so roughly six
-megabytes of input — and it would be billed at the prompt-token rate for whatever the provider
-counts before refusing. That is materially more than this probe cost and was **not** what the owner
-authorized, so the escalation is a new decision rather than a retry.
+### Second attempt — rejected, and the shape recorded
 
-Two defects in the probe were fixed afterwards, from the response already captured rather than by
-sending anything again: usage was extracted only from a single JSON object and so recorded nothing
-for a streamed reply, and the fixture was named for the hoped-for answer rather than the question.
+The owner authorized the escalation. One further request, same boundary. Two things changed: the
+size, and the filler.
+
+The filler mattered as much as the size. Repeated text tokenises efficiently — a megabyte of one
+phrase came to 182,365 tokens, about 5.75 characters each — so reaching a large window that way
+means uploading megabytes for tokens the provider merges anyway. Unpredictable text costs the
+tokeniser far more per character: **4 MB became 2,911,935 prompt tokens**, roughly 1.4 characters
+each, so the request that had to travel stayed small while the token count went four times past
+what the first probe reached.
+
+**The request was refused.** Recorded at
+`conformance/testdata/deepseek-large-request-rejected.json`:
+
+```
+HTTP 400
+{"error":{"message":"This model's maximum context length is 1048576 tokens. However, you
+ requested 2911951 tokens (2911935 in the messages, 16 in the completion). Please reduce the
+ length of the messages or completion.","type":"invalid_request_error","param":null,
+ "code":"invalid_request_error"}}
+```
+
+What this establishes:
+
+- **The window is 1,048,576 tokens** — exactly 1Mi, and consistent with the 1,015,083-token request
+  this document already recorded as accepted. The published "1M" is that figure rounded, not a
+  different number.
+- **The status, type and code are all generic.** 400 with `invalid_request_error` is what this
+  provider returns for any malformed request, so none of the three distinguishes an overflow. That
+  is what the earlier finding suspected and could not confirm.
+- **No usage was reported.** The rejection happens before the request is billed, which bounds the
+  cost of a false positive lower than this document assumed: a wrongly detected overflow costs one
+  summarisation call, not a second billed prompt.
+
+**Implementation.** `internal/provider/deepseek/overflow.go` recognises it by comparing the two
+NUMBERS the message carries rather than by matching the sentence around them. Prose is the
+provider's to reword — a changed adjective, a translation, a reordered clause — and a detector built
+on it fails silently the day that happens; the numbers are the condition itself. Requiring
+`requested > limit` means a message that merely mentions a context length cannot be mistaken for a
+refusal about one. Failing to match leaves the ordinary refusal in place, which is the safe
+direction: a missed overflow costs one recovery that does not happen, a false positive costs one
+summarisation.
+
+The detector runs BEFORE the retry decision. Taken afterwards it would either repeat the oversized
+request or bury the recovery inside an ordinary refusal, and a test fails on the second.
+
+The positive fixture in `internal/provider/deepseek/overflow_test.go` is read from the recorded
+response rather than written by hand: a hand-written string would test the matcher against its
+author's memory of the provider, which is the failure this whole probe existed to avoid. The
+negatives are other 400s carrying the same type and code.
+
+### Probe defects fixed
+
+Both from the response already captured, without sending anything again: usage was extracted only
+from a single JSON object and so recorded nothing for a streamed reply — losing the token count that
+was the most useful number the first probe produced — and the fixture was named for the hoped-for
+answer rather than the question.
 
 ## Sources checked
 
@@ -68,7 +117,12 @@ for a streamed reply, and the fixture was named for the hoped-for answer rather 
 
 ## Successor findings at `14300ee`
 
-### 1. The proposed DeepSeek text detector has no provider source and its safety argument is false
+### 1. The up-front overflow rejection — CLOSED 2026-08-29
+
+The rejection shape is recorded and implemented; see "Probe result" above. What follows is the
+finding as it stood before the probe, kept because it is what the probe was authorized to settle.
+
+#### As it stood: the proposed DeepSeek text detector had no provider source
 
 The contract now correctly treats `ErrContextOverflow` as an existing port obligation rather than an
 optional v1 feature. It proposes to identify provider-rejected overflow by matching text in one named

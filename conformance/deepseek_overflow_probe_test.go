@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -49,7 +51,13 @@ const (
 	// that says so — a file called "context-overflow" holding a 200 is how a
 	// later reader comes to believe something that never happened.
 	probeFixtureDir = "testdata"
-	probeFillerLen  = 1 << 20
+
+	// probeSizeVar sets how much input to send, in megabytes. Explicit rather
+	// than a constant, so escalating the probe is an act at the command line
+	// and shows up in the shell history of whoever authorized it — not an edit
+	// that reads the same in a diff whatever number it carries.
+	probeSizeVar     = "PI_GO_PROBE_MEGABYTES"
+	probeDefaultSize = 1
 )
 
 // recordedProbe is what the probe learns, and all it learns.
@@ -115,8 +123,13 @@ func TestProbeDeepSeekContextOverflow(t *testing.T) {
 		t.Skipf("the overflow probe is off; it sends one deliberately oversized billed request. "+
 			"Set %s=1 to run it, and only when the recorded fixture needs replacing.", probeGate)
 	}
-	if recorded, _ := filepath.Glob(filepath.Join(probeFixtureDir, "deepseek-*-*.json")); len(recorded) > 0 {
-		t.Skipf("%v already records a probe result; delete it to probe again", recorded)
+	// Stops when the question is ANSWERED, which a rejection is and an
+	// acceptance is not. The first probe was accepted; that bounded the window
+	// and left the question open, so it must not stand in the way of the
+	// larger request that could close it. The gate variable still has to be set
+	// either way, so this can never happen by accident.
+	if answered, _ := filepath.Glob(filepath.Join(probeFixtureDir, "deepseek-*-rejected.json")); len(answered) > 0 {
+		t.Skipf("%v already records a rejection; delete it to probe again", answered)
 	}
 
 	key := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
@@ -136,9 +149,26 @@ func TestProbeDeepSeekContextOverflow(t *testing.T) {
 		t.Fatalf("configuring the provider: %v", err)
 	}
 
-	// Generated here, from nothing. The filler is meaningless text repeated to
-	// length; no file, conversation or environment value goes into it.
-	oversized := strings.Repeat("overflow probe filler. ", probeFillerLen/23)
+	megabytes := probeDefaultSize
+	if given := strings.TrimSpace(os.Getenv(probeSizeVar)); given != "" {
+		parsed, err := strconv.Atoi(given)
+		if err != nil || parsed < 1 {
+			t.Fatalf("%s is %q; it takes a positive number of megabytes", probeSizeVar, given)
+		}
+		megabytes = parsed
+	}
+
+	// Generated here, from nothing: no file, conversation or environment value
+	// goes into it.
+	//
+	// Random-looking rather than repeated, and that is the lesson of the first
+	// probe. Repeated text tokenises efficiently — 1MB of one phrase came to
+	// 182,365 tokens, about 5.75 characters each — so reaching a large context
+	// window that way means uploading megabytes for tokens the provider merges
+	// anyway. Unpredictable text costs the tokeniser far more per character, so
+	// the same bytes buy several times the tokens, and the request that has to
+	// travel stays smaller.
+	oversized := randomFiller(megabytes << 20)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -186,7 +216,8 @@ func TestProbeDeepSeekContextOverflow(t *testing.T) {
 		t.Fatalf("writing the fixture: %v", err)
 	}
 
-	t.Logf("status %d", recorded.Status)
+	t.Logf("sent %d MB as %d prompt tokens", megabytes, promptTokens(recorded.Usage))
+	t.Logf("outcome: %s, status %d", recorded.Outcome, recorded.Status)
 	t.Logf("body: %s", recorded.Body)
 	t.Logf("reported usage: %s", recorded.Usage)
 	t.Logf("recorded to %s; the probe will not run again while it exists", fixture)
@@ -255,4 +286,31 @@ func scrub(text, key string) string {
 		text = strings.ReplaceAll(text, key, "[redacted]")
 	}
 	return keyShaped.ReplaceAllString(text, "[redacted]")
+}
+
+// randomFiller is n bytes of locally generated, unpredictable text.
+//
+// Seeded from the clock rather than a fixed value: a probe is not reproducing
+// anything, and a fixed seed would only invite someone to believe two runs sent
+// the same thing when the size can differ.
+func randomFiller(n int) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+	source := rand.New(rand.NewSource(time.Now().UnixNano()))
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = alphabet[source.Intn(len(alphabet))]
+	}
+	return string(out)
+}
+
+// promptTokens reads the count back out of the recorded usage, for the log line
+// that tells the operator what the request actually cost.
+func promptTokens(usage string) int {
+	var parsed struct {
+		PromptTokens int `json:"prompt_tokens"`
+	}
+	if err := json.Unmarshal([]byte(usage), &parsed); err != nil {
+		return 0
+	}
+	return parsed.PromptTokens
 }
