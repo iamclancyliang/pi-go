@@ -103,6 +103,18 @@ type Tool interface {
 	// a bad payload rather than as a missing declaration.
 	Parameters() *Schema
 
+	// Prompt is what this tool contributes to the system prompt.
+	//
+	// The prompt a model reads is composed from the registered tool set, so
+	// changing which tools are offered changes it. A hard-coded prompt loses
+	// that coupling: a tool the model was never told about is one it does not
+	// reach for, and a rule the tool depends on — that every edit matches the
+	// original file, say — never arrives.
+	//
+	// Part of the interface for the same reason Parameters is: forgetting it
+	// is silent.
+	Prompt() Contribution
+
 	// Execution reports this tool's scheduling metadata.
 	Execution() Execution
 

@@ -63,6 +63,9 @@ type Runtime struct {
 	// project's trust question was answered. /settings and /trust read it.
 	Config Config
 
+	// Thinking is how much reasoning to ask for on every turn.
+	Thinking ai.ThinkingLevel
+
 	// ReadLine, when set, replaces the plain line scanner with an editing
 	// prompt — the terminal path. Nil reads lines from Streams.In, which is
 	// what tests and redirected input use. A seam rather than a TTY check
@@ -94,6 +97,7 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		ModelName: rt.ModelName,
 		Tools:     rt.Tools,
 		Session:   sess,
+		Thinking:  rt.Thinking,
 		// A one-shot can overflow too, and a refusal with no recovery is a
 		// failed run where a shortened context would have answered.
 		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
@@ -155,6 +159,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			ModelName: modelName,
 			Tools:     rt.Tools,
 			Session:   current.Session,
+			Thinking:  rt.Thinking,
 			// The same summariser /compact uses. Without it an overflow is
 			// terminal: the request is refused, and a conversation long enough
 			// to overflow once will do it again on every turn after.

@@ -51,6 +51,11 @@ func (f *FileRead) Description() string {
 
 // Execution implements Tool. Parallel-safe and read-only.
 // Parameters describes the one path this fixture reads.
+// Prompt describes this fixture to the model.
+func (f *FileRead) Prompt() Contribution {
+	return Contribution{Snippet: "Read the contents of a known file"}
+}
+
 func (f *FileRead) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{
@@ -132,6 +137,11 @@ func (l *ListFiles) Description() string {
 // listing files inherently requires that — it is declared so the scheduling
 // contract has a tool that exercises it.
 // Parameters describes the optional prefix this fixture filters on.
+// Prompt describes this fixture to the model.
+func (l *ListFiles) Prompt() Contribution {
+	return Contribution{Snippet: "List the known file paths"}
+}
+
 func (l *ListFiles) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{

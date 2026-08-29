@@ -38,6 +38,17 @@ func (f *Find) Execution() Execution {
 	return Execution{ReadOnly: true, Replay: ReplaySafe}
 }
 
+// Prompt is what this tool tells the model about itself.
+//
+// The wording is Pi's, kept because it is what its models were given: a
+// rephrasing is a different instruction, and the difference would show up as
+// a behaviour change nobody could trace to a decision.
+func (f *Find) Prompt() Contribution {
+	return Contribution{
+		Snippet: "Find files by glob pattern (respects .gitignore)",
+	}
+}
+
 func (f *Find) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{

@@ -1457,3 +1457,42 @@ func TestAToolTakingNoArgumentsSendsNoShape(t *testing.T) {
 		t.Fatalf("a tool taking no arguments sent an argument shape:\n%s", tr.bodies[0])
 	}
 }
+
+// TestAThinkingRequestReachesTheWire, and says nothing when nothing was asked.
+//
+// Silence is not the same as asking for none: a model that reasons by default
+// keeps doing so, and turning that off is a decision a caller makes rather than
+// one an absent field makes for them.
+func TestAThinkingRequestReachesTheWire(t *testing.T) {
+	cases := map[string]struct {
+		level ai.ThinkingLevel
+		want  string
+	}{
+		"nothing asked": {level: "", want: ""},
+		"asked for off": {level: ai.ThinkingOff, want: `"thinking":{"type":"disabled"}`},
+		"asked for it":  {level: ai.ThinkingHigh, want: `"thinking":{"type":"enabled"}`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			tr := &countingTransport{respond: func(int) *http.Response {
+				return sse(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+			}}
+			p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "sk-test-credential"})
+			if _, err := p.Generate(context.Background(),
+				ai.Request{Model: "m", Thinking: c.level}); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			body := tr.bodies[0]
+			if c.want == "" {
+				if strings.Contains(body, "thinking") {
+					t.Fatalf("a request asking for nothing carried a thinking field:\n%s", body)
+				}
+				return
+			}
+			if !strings.Contains(body, c.want) {
+				t.Fatalf("the wire does not carry %s:\n%s", c.want, body)
+			}
+		})
+	}
+}

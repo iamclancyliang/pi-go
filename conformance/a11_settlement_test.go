@@ -1127,3 +1127,12 @@ func (s *silentTool) Parameters() *tools.Schema { return nil }
 func (c *repeatableTool) Parameters() *tools.Schema { return nil }
 
 func (f *failingTool) Parameters() *tools.Schema { return nil }
+
+// A double contributes nothing to the prompt: an empty snippet keeps it out of
+// the tool list, which is what a stand-in for a real tool should be.
+func (i *idempotentWriteTool) Prompt() tools.Contribution { return tools.Contribution{} }
+func (t *recordReadingTool) Prompt() tools.Contribution   { return tools.Contribution{} }
+func (w *writingTool) Prompt() tools.Contribution         { return tools.Contribution{} }
+func (s *silentTool) Prompt() tools.Contribution          { return tools.Contribution{} }
+func (c *repeatableTool) Prompt() tools.Contribution      { return tools.Contribution{} }
+func (f *failingTool) Prompt() tools.Contribution         { return tools.Contribution{} }

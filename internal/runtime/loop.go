@@ -46,6 +46,12 @@ type Config struct {
 	// ModelName labels the model in events.
 	ModelName string
 
+	// Thinking is how much reasoning to ask for, on every request this agent
+	// makes. Held here rather than passed per call because it is a property of
+	// the run: a turn that reasoned and a turn that did not would otherwise be
+	// indistinguishable in the record.
+	Thinking ai.ThinkingLevel
+
 	// Tools is the tool registration seam. Required, may be empty.
 	Tools *tools.Registry
 
@@ -322,7 +328,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		// every request; passing it here as well puts it in the context twice,
 		// which is a change to the prompt the model actually sees.
 		Instruction: "",
-		Model:       newEinoChatModel(observed, observed.currentModel),
+		Model:       newEinoChatModel(observed, observed.currentModel, a.cfg.Thinking),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,

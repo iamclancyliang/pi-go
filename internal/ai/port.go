@@ -86,9 +86,14 @@ type Request struct {
 	// without rebuilding the agent.
 	Model string
 
-	// ReasoningLevel is a provider-specific reasoning/thinking setting
-	// ("", "low", "high"). Empty means unset.
-	ReasoningLevel string
+	// Thinking is how much reasoning to ask for. Empty leaves the provider's
+	// own default, which is not the same as asking for none — a provider that
+	// reasons by default keeps doing so.
+	//
+	// A repository-wide vocabulary rather than a provider's own words: a caller
+	// above this boundary chooses how hard to think, and translating that into
+	// whatever each provider calls it is the adapter's job.
+	Thinking ThinkingLevel
 }
 
 // Response is a model's reply.

@@ -224,3 +224,24 @@ func TestAFailedAttemptThatReportedNothingIsStillAnAttempt(t *testing.T) {
 		t.Fatalf("an attempt that said nothing was ledgered as having reported: %+v", spent)
 	}
 }
+
+// TestAnUnknownThinkingLevelIsRefusedNamingTheOnes. A caller who asked for more
+// reasoning and silently got the default would read the answer as what the
+// model produces when it thinks hard, which is the one conclusion they must not
+// draw.
+func TestAnUnknownThinkingLevelIsRefusedNamingTheOnes(t *testing.T) {
+	_, err := ai.ParseThinkingLevel("very hard")
+	if err == nil {
+		t.Fatal("an unknown thinking level was accepted")
+	}
+	for _, level := range []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"} {
+		if !strings.Contains(err.Error(), level) {
+			t.Fatalf("the failure does not name %q: %v", level, err)
+		}
+	}
+	for _, accepted := range []string{"off", "HIGH", " max "} {
+		if _, err := ai.ParseThinkingLevel(accepted); err != nil {
+			t.Fatalf("%q was refused: %v", accepted, err)
+		}
+	}
+}

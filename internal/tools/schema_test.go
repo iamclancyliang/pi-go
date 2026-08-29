@@ -259,3 +259,7 @@ func TestOnlyTheReadingToolsSayTheyAreSafe(t *testing.T) {
 		}
 	}
 }
+
+// A double contributes nothing to the prompt: an empty snippet keeps it out of
+// the tool list, which is what a stand-in for a real tool should be.
+func (d *declared) Prompt() tools.Contribution { return tools.Contribution{} }

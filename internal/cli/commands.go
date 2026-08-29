@@ -170,6 +170,13 @@ func runSessionInfo(c *commandContext, _ string) bool {
 	used := c.session.Usage()
 
 	fmt.Fprintf(c.out, "  messages   %d\n", len(snapshot.Messages))
+	thinking := string(c.args.Thinking)
+	if thinking == "" {
+		// Said rather than shown as "off": nothing was asked for, and the
+		// provider's own default is not necessarily none.
+		thinking = "(the provider's default)"
+	}
+	fmt.Fprintf(c.out, "  thinking   %s\n", thinking)
 	if c.conversation.Path == "" {
 		fmt.Fprintln(c.out, "  recorded   no (--no-session)")
 	} else {

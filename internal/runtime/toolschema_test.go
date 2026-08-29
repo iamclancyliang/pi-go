@@ -162,3 +162,7 @@ func TestAToolWithNoArgumentsCarriesNoShapeToTheModelPort(t *testing.T) {
 		t.Fatalf("a tool taking no arguments carried %s", specs[0].Parameters)
 	}
 }
+
+// A double contributes nothing to the prompt: an empty snippet keeps it out of
+// the tool list, which is what a stand-in for a real tool should be.
+func (s *schemaTool) Prompt() tools.Contribution { return tools.Contribution{} }

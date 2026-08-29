@@ -592,3 +592,62 @@ func TestLiveDeepSeekDoesNotSeeAnAbandonedBranch(t *testing.T) {
 	t.Logf("after branching, the model said: %s", strings.TrimSpace(said))
 	t.Logf("requests: %d", transport.count())
 }
+
+// A double contributes nothing to the prompt: an empty snippet keeps it out of
+// the tool list, which is what a stand-in for a real tool should be.
+// Forwarded, not emptied: a wrapper that dropped the contribution would take
+// the wrapped tool out of the list the model reads, and the run under test
+// would not be the run the user gets.
+func (u *usageRecorder) Prompt() tools.Contribution { return u.inner.Prompt() }
+func (r *recordingTool) Prompt() tools.Contribution { return r.inner.Prompt() }
+
+// TestLiveDeepSeekAcceptsAThinkingRequest is the check the model catalogue
+// would otherwise answer.
+//
+// Pi gates the thinking fields on catalogue facts — whether a model reasons,
+// whether it takes an effort, what each level maps to for that model — and this
+// repository has no catalogue (§7.2 is a source-gap, #30). Sending a field the
+// provider rejects would break every request for anyone who passed --thinking,
+// so whether it is accepted is checked against the provider rather than
+// assumed.
+//
+// Cheap: two minimal calls, capped output.
+func TestLiveDeepSeekAcceptsAThinkingRequest(t *testing.T) {
+	liveOrSkip(t)
+
+	for _, level := range []ai.ThinkingLevel{ai.ThinkingOff, ai.ThinkingHigh} {
+		t.Run(string(level), func(t *testing.T) {
+			transport := &countingTransport{inner: http.Client{Timeout: 60 * time.Second}}
+			port := livePort(t, transport, 16)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			got, err := port.Generate(ctx, ai.Request{
+				Model:    "deepseek-chat",
+				Thinking: level,
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: "Reply with the single word: ok"}},
+			})
+			if err != nil {
+				// A refusal here is the finding, not a flake: it means the
+				// field must be gated, and the gate needs the catalogue.
+				t.Fatalf("the provider refused a request asking for thinking %q: %v\n"+
+					"if this is a 400 about an unknown field, the mapping must be gated on #30", level, err)
+			}
+			if strings.TrimSpace(got.Content) == "" {
+				t.Fatalf("thinking %q produced no answer: %+v", level, got)
+			}
+			// Asking for none and getting none is the direction worth pinning:
+			// it shows the field is read rather than merely tolerated. The
+			// other direction is logged instead — a model may decline to reason
+			// about a trivial prompt however hard it was asked to, and a test
+			// that demanded it would fail on the model's judgement.
+			if level == ai.ThinkingOff && len(got.Reasoning) > 0 {
+				t.Fatalf("thinking=off still produced %d characters of reasoning; "+
+					"the field is not being honoured", len(got.Reasoning))
+			}
+			t.Logf("thinking=%s accepted · content=%q reasoning=%d chars",
+				level, strings.TrimSpace(got.Content), len(got.Reasoning))
+		})
+	}
+}

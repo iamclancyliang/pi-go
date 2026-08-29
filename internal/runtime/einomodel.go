@@ -26,13 +26,14 @@ import (
 // A run may change model between turns, and a name copied at construction keeps
 // naming the model the run started with: the change would apply to nothing while
 // still being announced, which is worse than not supporting it.
-func newEinoChatModel(p ai.Port, defaultModel func() string) model.BaseChatModel {
-	return &einoChatModel{port: p, defaultModel: defaultModel}
+func newEinoChatModel(p ai.Port, defaultModel func() string, thinking ai.ThinkingLevel) model.BaseChatModel {
+	return &einoChatModel{port: p, defaultModel: defaultModel, thinking: thinking}
 }
 
 type einoChatModel struct {
 	port         ai.Port
 	defaultModel func() string
+	thinking     ai.ThinkingLevel
 }
 
 func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
@@ -40,6 +41,7 @@ func (m *einoChatModel) Generate(ctx context.Context, input []*schema.Message, o
 		Messages: fromEinoMessages(input),
 		Tools:    toolSpecsFromOptions(opts),
 		Model:    m.defaultModel(),
+		Thinking: m.thinking,
 	}
 
 	resp, err := m.port.Generate(ctx, req)
@@ -82,6 +84,7 @@ func (m *einoChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 		Messages: fromEinoMessages(input),
 		Tools:    toolSpecsFromOptions(opts),
 		Model:    m.defaultModel(),
+		Thinking: m.thinking,
 	})
 	if err != nil {
 		return nil, err

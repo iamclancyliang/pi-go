@@ -104,10 +104,9 @@ func run(argv []string) int {
 		}
 	}
 
-	system := args.SystemPrompt
-	if system == "" {
-		system = cli.DefaultSystemPrompt
-	}
+	// Built from the tool set this run offers and the project's own
+	// instructions, not from a constant.
+	system := cli.BuildSystemPrompt(args, registry, root, cfg.AgentDir)
 	conversation, err := cli.OpenConversation(args, root, system)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
@@ -122,6 +121,7 @@ func run(argv []string) int {
 		System:       system,
 		Provider:     providerName,
 		Conversation: conversation,
+		Thinking:     args.Thinking,
 		Args:         args,
 		WorkingDir:   root,
 		Transport:    http.DefaultTransport,
@@ -177,7 +177,10 @@ Flags:
       --provider NAME      deepseek, openai or qwen
       --model NAME         the model to ask for
       --api-key KEY        the credential, instead of the environment
-      --system-prompt TEXT what to tell the agent it is
+      --system-prompt TEXT replace the assembled prompt
+      --append-system-prompt TEXT   add to it; repeatable
+      --thinking LEVEL     off, minimal, low, medium, high, xhigh or max
+      --no-context-files   ignore the project's AGENTS.md and the like
       --no-tools           offer the model no tools
   -h, --help               this text
   -v, --version            the version
@@ -197,6 +200,10 @@ In a session, /help lists the commands — and says which of Pi's are not here.
 Settings live in <agent-dir>/settings.json, and a project may carry its own in
 .pi-go/settings.json — read only once you trust the project (/trust), because
 settings include the shell every command runs in.
+
+The system prompt is assembled from the tools this run offers and the project's
+own instructions — AGENTS.md, AGENTS.override.md or CLAUDE.md, read from the
+agent directory and every ancestor of the working directory, nearest last.
 
 Credentials come from --api-key, then from what /login saved, then from the
 environment: DEEPSEEK_API_KEY, OPENAI_API_KEY or DASHSCOPE_API_KEY. With no

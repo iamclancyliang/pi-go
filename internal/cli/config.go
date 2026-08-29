@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/settings"
 	"github.com/iamclancyliang/pi-go/internal/tools"
@@ -155,6 +157,13 @@ func ApplyDefaults(args Args, effective settings.Settings) Args {
 	if args.SessionDir == "" {
 		args.SessionDir = effective.SessionDir
 	}
+	if args.Thinking == "" && effective.DefaultThinkingLevel != "" {
+		// Already validated when the settings loaded, so a failure here would
+		// mean the file changed underneath the run.
+		if level, err := ai.ParseThinkingLevel(effective.DefaultThinkingLevel); err == nil {
+			args.Thinking = level
+		}
+	}
 	return args
 }
 
@@ -192,4 +201,26 @@ func BuildTools(root string, effective settings.Settings) (*tools.Registry, erro
 		}
 	}
 	return registry, nil
+}
+
+// BuildSystemPrompt assembles what the model is told for this run.
+//
+// Composed rather than constant, which is the coupling §15.1 of the inventory
+// names: the prompt a model reads is built from the tool set it was given, so
+// offering a different set changes it. A hard-coded prompt loses that — a tool
+// the model was never told about is one it does not reach for, and a rule the
+// tool depends on never arrives.
+//
+// The project's own instructions come last, so a repository can narrow a
+// general instruction without arguing with something read afterwards.
+func BuildSystemPrompt(args Args, registry *tools.Registry, workingDir, agentDir string) string {
+	prompt := tools.SystemPrompt{
+		Custom:     args.SystemPrompt,
+		Append:     strings.Join(args.AppendSystemPrompt, "\n\n"),
+		WorkingDir: workingDir,
+	}
+	if !args.NoContextFiles {
+		prompt.Context = tools.LoadContextFiles(agentDir, workingDir)
+	}
+	return prompt.Build(registry.All())
 }

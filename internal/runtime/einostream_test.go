@@ -80,7 +80,7 @@ func TestFrameworkSeesIncrementsOnlyOnce(t *testing.T) {
 		{Index: 1, Kind: ai.BlockText, Delta: "Hel"},
 		{Index: 1, Kind: ai.BlockText, Delta: "lo"},
 	}}
-	model := newEinoChatModel(port, func() string { return "fake-1" })
+	model := newEinoChatModel(port, func() string { return "fake-1" }, "")
 
 	reader, err := model.Stream(context.Background(), nil)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestAFailedReplyFailsTheFrameworkStream(t *testing.T) {
 		chunks: []ai.Chunk{{Index: 0, Kind: ai.BlockText, Delta: "half"}},
 		fail:   errors.New("provider hung up"),
 	}
-	model := newEinoChatModel(port, func() string { return "fake-1" })
+	model := newEinoChatModel(port, func() string { return "fake-1" }, "")
 
 	reader, err := model.Stream(context.Background(), nil)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestANonStreamingPortStillWorks(t *testing.T) {
 	model := newEinoChatModel(&ai.Scripted{
 		Name:  "fake-1",
 		Final: ai.AssistantText("all at once"),
-	}, func() string { return "fake-1" })
+	}, func() string { return "fake-1" }, "")
 
 	reader, err := model.Stream(context.Background(), nil)
 	if err != nil {

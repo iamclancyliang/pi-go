@@ -173,6 +173,20 @@ type wireRequest struct {
 	} `json:"stream_options,omitempty"`
 
 	Tools []wireTool `json:"tools,omitempty"`
+
+	// Thinking and ReasoningEffort carry a request for reasoning.
+	//
+	// The shape is this provider's, read from Pi's `deepseek` thinking format:
+	// an enabled/disabled object, and separately an effort. Pi gates both on
+	// catalogue facts — whether the model reasons at all, whether it accepts an
+	// effort, and what each level maps to for that model — and this repository
+	// has no catalogue (§7.2 is a source-gap). What is sent here was checked
+	// against the live API instead; see TestLiveDeepSeekAcceptsAThinkingRequest.
+	Thinking *wireThinking `json:"thinking,omitempty"`
+}
+
+type wireThinking struct {
+	Type string `json:"type"`
 }
 
 type wireTool struct {
@@ -196,6 +210,16 @@ func (p *Port) buildRequest(req ai.Request, stream bool, maxTokens int) wireRequ
 	// otherwise reach whatever this port happened to be built with, and a
 	// caller reading the reply would have no way to know which.
 	out := wireRequest{Model: req.Model, Stream: stream, MaxTokens: maxTokens}
+	// Only when the caller said something. Silence leaves the provider's own
+	// default, which is not the same as asking for none: a model that reasons
+	// by default keeps doing so, and turning that off is a decision a caller
+	// has to make rather than one absence should make for them.
+	switch {
+	case req.Thinking == ai.ThinkingOff:
+		out.Thinking = &wireThinking{Type: "disabled"}
+	case req.Thinking != "":
+		out.Thinking = &wireThinking{Type: "enabled"}
+	}
 	if stream {
 		out.StreamOptions = &struct {
 			IncludeUsage bool `json:"include_usage"`

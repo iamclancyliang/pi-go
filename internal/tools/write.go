@@ -40,6 +40,18 @@ func (w *Write) Execution() Execution {
 	return Execution{}
 }
 
+// Prompt is what this tool tells the model about itself.
+//
+// The wording is Pi's, kept because it is what its models were given: a
+// rephrasing is a different instruction, and the difference would show up as
+// a behaviour change nobody could trace to a decision.
+func (w *Write) Prompt() Contribution {
+	return Contribution{
+		Snippet:    "Create or overwrite files",
+		Guidelines: []string{"Use write only for new files or complete rewrites."},
+	}
+}
+
 func (w *Write) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{

@@ -8,6 +8,8 @@ package cli
 import (
 	"sort"
 	"strings"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // Mode is what --mode accepts.
@@ -61,6 +63,17 @@ type Args struct {
 	// SessionDir overrides where sessions are kept.
 	SessionDir string
 
+	// Thinking is how much reasoning to ask for.
+	Thinking ai.ThinkingLevel
+
+	// AppendSystemPrompt is added after the assembled prompt, for a caller
+	// adding to the default rather than replacing it. Repeatable, and the
+	// pieces join in the order given.
+	AppendSystemPrompt []string
+
+	// NoContextFiles keeps the project's own instructions out of the prompt.
+	NoContextFiles bool
+
 	// Messages are the prompts to send, in order.
 	Messages []string
 
@@ -83,12 +96,12 @@ type Args struct {
 // effect — the failure mode a parser must never have.
 var notPorted = map[string]bool{
 	"name": true, "session": true, "session-id": true, "fork": true,
-	"append-system-prompt": true, "thinking": true, "models": true,
-	"tools": true, "exclude-tools": true, "no-builtin-tools": true,
+	"models": true,
+	"tools":  true, "exclude-tools": true, "no-builtin-tools": true,
 	"extensions": true, "no-extensions": true, "export": true,
 	"no-skills": true, "skills": true, "prompt-templates": true,
 	"no-prompt-templates": true, "themes": true, "use-theme": true,
-	"no-themes": true, "no-context-files": true, "list-models": true,
+	"no-themes": true, "list-models": true,
 	"offline": true, "tui-mode": true, "verbose": true,
 	"approve": true, "no-approve": true,
 }
@@ -128,6 +141,30 @@ func ParseArgs(argv []string) Args {
 			continue
 		case "--no-session":
 			parsed.NoSession = true
+			continue
+		case "--no-context-files":
+			parsed.NoContextFiles = true
+			continue
+		case "--thinking":
+			if i+1 < len(argv) {
+				level, err := ai.ParseThinkingLevel(argv[i+1])
+				if err != nil {
+					// Refused rather than ignored: a caller who asked for more
+					// reasoning and silently got the default would read the
+					// answer as what the model produces when it thinks hard.
+					parsed.Diagnostics = append(parsed.Diagnostics,
+						Diagnostic{Message: err.Error()})
+				} else {
+					parsed.Thinking = level
+				}
+				i++
+			}
+			continue
+		case "--append-system-prompt":
+			if i+1 < len(argv) {
+				parsed.AppendSystemPrompt = append(parsed.AppendSystemPrompt, argv[i+1])
+				i++
+			}
 			continue
 		case "--continue", "-c":
 			parsed.Continue = true

@@ -57,6 +57,22 @@ func (b *Bash) Execution() Execution {
 	return Execution{}
 }
 
+// Prompt is what this tool tells the model about itself.
+//
+// The wording is Pi's, kept because it is what its models were given: a
+// rephrasing is a different instruction, and the difference would show up as
+// a behaviour change nobody could trace to a decision.
+func (b *Bash) Prompt() Contribution {
+	return Contribution{
+		Snippet: "Execute bash commands (ls, grep, find, etc.)",
+		// Pi's guideline here points the model at PI_* environment variables
+		// carrying model and session details. This build exposes none, and a
+		// guideline naming what is not there teaches the model to look for it
+		// and report its absence as a problem.
+		Guidelines: nil,
+	}
+}
+
 func (b *Bash) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{

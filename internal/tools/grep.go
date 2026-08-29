@@ -38,6 +38,17 @@ func (g *Grep) Execution() Execution {
 	return Execution{ReadOnly: true, Replay: ReplaySafe}
 }
 
+// Prompt is what this tool tells the model about itself.
+//
+// The wording is Pi's, kept because it is what its models were given: a
+// rephrasing is a different instruction, and the difference would show up as
+// a behaviour change nobody could trace to a decision.
+func (g *Grep) Prompt() Contribution {
+	return Contribution{
+		Snippet: "Search file contents for patterns (respects .gitignore)",
+	}
+}
+
 func (g *Grep) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{

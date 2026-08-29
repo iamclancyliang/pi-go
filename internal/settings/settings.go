@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // FileName is what a settings file is called in either scope.
@@ -72,6 +74,9 @@ type Settings struct {
 	// QuietStartup suppresses the session banner.
 	QuietStartup bool `json:"quietStartup,omitempty"`
 
+	// DefaultThinkingLevel stands in for --thinking when the flag is absent.
+	DefaultThinkingLevel string `json:"defaultThinkingLevel,omitempty"`
+
 	// DefaultProjectTrust decides what happens when a project carries
 	// configuration and nobody has said whether to trust it. Global only: a
 	// project choosing its own trust default is the project trusting itself.
@@ -122,6 +127,11 @@ func (s Settings) validate(path string) error {
 	if s.Compaction.KeepRecentTokens < 0 {
 		return fmt.Errorf("settings: %s: compaction.keepRecentTokens is negative", path)
 	}
+	if s.DefaultThinkingLevel != "" {
+		if _, err := ai.ParseThinkingLevel(s.DefaultThinkingLevel); err != nil {
+			return fmt.Errorf("settings: %s: %w", path, err)
+		}
+	}
 	return nil
 }
 
@@ -152,6 +162,9 @@ func Merge(global, project Settings) Settings {
 	}
 	if project.QuietStartup {
 		merged.QuietStartup = true
+	}
+	if project.DefaultThinkingLevel != "" {
+		merged.DefaultThinkingLevel = project.DefaultThinkingLevel
 	}
 	// DefaultProjectTrust is deliberately NOT merged from the project: a
 	// project choosing its own trust default is the project trusting itself.

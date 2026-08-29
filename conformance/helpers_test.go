@@ -164,3 +164,7 @@ func runRoundWith(t testingT, registry *tools.Registry, reply ai.Response) (*run
 // an empty schema would instead tell a model there is a shape to fill in.
 
 func (t *timedTool) Parameters() *tools.Schema { return nil }
+
+// A double contributes nothing to the prompt: an empty snippet keeps it out of
+// the tool list, which is what a stand-in for a real tool should be.
+func (t *timedTool) Prompt() tools.Contribution { return tools.Contribution{} }

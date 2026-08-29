@@ -38,6 +38,17 @@ func (l *Ls) Execution() Execution {
 	return Execution{ReadOnly: true, Replay: ReplaySafe}
 }
 
+// Prompt is what this tool tells the model about itself.
+//
+// The wording is Pi's, kept because it is what its models were given: a
+// rephrasing is a different instruction, and the difference would show up as
+// a behaviour change nobody could trace to a decision.
+func (l *Ls) Prompt() Contribution {
+	return Contribution{
+		Snippet: "List directory contents",
+	}
+}
+
 func (l *Ls) Parameters() *Schema {
 	return &Schema{Parameters: []Parameter{
 		{
