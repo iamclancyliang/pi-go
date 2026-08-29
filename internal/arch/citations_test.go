@@ -80,3 +80,52 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// TestEveryIssueCitedByTheParityMatrixExists.
+//
+// The matrix refuses a blocked row that does not say what blocks it, so the
+// issue numbers are load-bearing: a row citing an issue that was never opened,
+// or one closed and reused, points a reader at the wrong thing. Checked with
+// the same discipline as the test citations.
+//
+// Skipped where GitHub cannot be reached — offline and CI-without-a-token are
+// ordinary, and a docs check must not be the reason a build fails there.
+func TestEveryIssueCitedByTheParityMatrixExists(t *testing.T) {
+	root := repoRoot(t)
+	matrix, err := os.ReadFile(filepath.Join(root, "docs", "product", "parity-matrix.md"))
+	if err != nil {
+		t.Fatalf("reading the parity matrix: %v", err)
+	}
+	cited := regexp.MustCompile(`#(\d+)`).FindAllStringSubmatch(string(matrix), -1)
+	if len(cited) == 0 {
+		t.Skip("the matrix cites no issues")
+	}
+
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("no gh; cannot check issue citations")
+	}
+	listed, err := exec.Command("gh", "issue", "list", "--state", "all",
+		"--limit", "200", "--json", "number", "--jq", ".[].number").Output()
+	if err != nil {
+		t.Skipf("cannot reach GitHub: %v", err)
+	}
+	open := map[string]bool{}
+	for _, n := range strings.Fields(string(listed)) {
+		open[n] = true
+	}
+
+	seen := map[string]bool{}
+	var missing []string
+	for _, match := range cited {
+		if seen[match[1]] {
+			continue
+		}
+		seen[match[1]] = true
+		if !open[match[1]] {
+			missing = append(missing, "#"+match[1])
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("the parity matrix cites issues that do not exist: %s", strings.Join(missing, ", "))
+	}
+}

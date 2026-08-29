@@ -4,12 +4,48 @@ Reviewed contract head: `14300ee7e7dc457d7f95ad11ed8240a1773e1970`
 
 Pi source pin: `086c32e74530564922d011ade23ff582c9d63116`
 
-Verdict: **NO-GO as an implementation precondition, solely pending an owner decision.** The branch
-is one owner-authored commit, DeepSeek's official status mapping is correct, the numeric overflow and
+Verdict: **NO-GO as an implementation precondition.** The owner authorized the probe on
+2026-08-29; it ran once, within its recorded boundary, and **did not reach the condition** — see
+"Probe result" below. The finding is unchanged and the decision is open again, now with a measured
+lower bound instead of an assumption.
+
+The rest of the contract stands as reviewed: the branch is one owner-authored commit, DeepSeek's official status mapping is correct, the numeric overflow and
 request-count contracts are coherent, and the unknown up-front rejection shape is now described
 without inventing 400/422 facts. The selected provider still cannot satisfy that rejection-path
-overflow obligation until a real response is recorded, so implementation remains held for either an
+overflow obligation until a rejection is recorded, so that path remains open for either a larger
 authorized probe or an explicit owner scope waiver.
+
+## Probe result, 2026-08-29
+
+Authorized by @qy-liang, executed once under the boundary this document records: one request, no
+retry asserted by a counting transport, locally generated filler, the credential injected through
+the environment seam with no path to the fixture, and no rerun.
+
+**The request was accepted.** 1,048,570 characters of filler reached DeepSeek as **182,365 prompt
+tokens** and were answered normally; the reply stopped at `finish_reason: "length"`, which is the
+16-token OUTPUT cap, not the input. Recorded at
+`conformance/testdata/deepseek-large-request-accepted.json`, named for what happened rather than
+for what was being looked for.
+
+What this establishes and what it does not:
+
+- The window of the model that served (`deepseek-v4-flash`, requested as `deepseek-chat`) is **above
+  182,365 tokens**. That is a measured lower bound, replacing the assumption that a megabyte of text
+  would overflow anything.
+- It says nothing about the rejection shape, which is what finding 1 needs. The question is
+  unanswered, not answered negatively.
+- It is consistent with the earlier record in this document of 1,015,083 prompt tokens being
+  accepted against a documented "1M": the published figure is not the real bound, and neither is a
+  megabyte of text.
+
+Reaching a rejection means a request several times larger — past a million tokens, so roughly six
+megabytes of input — and it would be billed at the prompt-token rate for whatever the provider
+counts before refusing. That is materially more than this probe cost and was **not** what the owner
+authorized, so the escalation is a new decision rather than a retry.
+
+Two defects in the probe were fixed afterwards, from the response already captured rather than by
+sending anything again: usage was extracted only from a single JSON object and so recorded nothing
+for a streamed reply, and the fixture was named for the hoped-for answer rather than the question.
 
 ## Sources checked
 

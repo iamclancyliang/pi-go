@@ -1,0 +1,15 @@
+{
+  "recorded": "2026-08-29T07:00:12Z",
+  "outcome": "accepted",
+  "note": "A deliberately oversized request was ACCEPTED. This does not record an overflow rejection; it bounds the context window from below and shows the shape of a successful reply at that size.",
+  "model_requested": "deepseek-chat",
+  "model_served": "deepseek-v4-flash",
+  "prompt_chars": 1048570,
+  "prompt_tokens_reported": 182365,
+  "status": 200,
+  "header": {
+    "Content-Type": "text/event-stream; charset=utf-8"
+  },
+  "reported_usage": "{\"prompt_tokens\":182365,\"completion_tokens\":16,\"total_tokens\":182381,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":182365}",
+  "finish_reason": "length (the output cap, not the input)"
+}

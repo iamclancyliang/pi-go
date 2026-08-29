@@ -53,19 +53,19 @@ that its area is completely inventoried unless the source-coverage ledger and th
 feature records are complete.
 
 Statuses were reconciled against the code on 2026-08-29; the feature-level rows below carry the
-evidence. `implemented, unowned` means the surface exists with acceptance evidence and no assigned
-owner — which under §C7 blocks the parity release just as `unknown` does, and is recorded that way
-rather than as progress.
+evidence. `implemented` means the surface exists with acceptance evidence and an owner, and is not
+by itself a parity claim — the open issues named beside each area are what stands between it and a
+final disposition.
 
 | Area | Pi source surface | Class | Target | Initial acceptance boundary | Status |
 | --- | --- | --- | --- | --- | --- |
 | Agent loop and messages | `packages/agent` | B | v0 | C1-C8 conformance traces, streaming and cancellation | in-spec |
-| Tool execution | `packages/agent`, coding-agent tools | B | v0/v1 | validation, batch modes, ordering, abort, side-effect policy | implemented, unowned |
-| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial — 3 of 42 providers; catalogue is a source-gap |
-| Coding-agent assembly | `packages/coding-agent` | B | v1-v2 | documented commands, settings, modes, resources, tools and workflows | partial — commands, settings, modes; resources absent |
-| Terminal UI library | `packages/tui` | B/R | v2 | rendering, input, overlays, width handling, streaming UX | partial — input only; rendering and overlays absent |
-| Sessions and compaction | coding-agent session/compaction; AgentHarness | B/W/N | v1-v2 | resume, tree, fork/clone, summaries, context projection, migration; net-new crash-safe replay policy | implemented, unowned |
-| Session storage port | session abstractions and harness storage contract | B/R | v1 | narrow persistence interface, atomicity/recovery needs, in-memory conformance implementation | implemented, unowned |
+| Tool execution | `packages/agent`, coding-agent tools | B | v0/v1 | validation, batch modes, ordering, abort, side-effect policy | implemented · #25 open |
+| Model/provider layer | `packages/ai` | B/I | v1-v2 | provider calls, message conversion, streaming, auth, usage/cost, generated catalogue | partial · #29, #30 open |
+| Coding-agent assembly | `packages/coding-agent` | B | v1-v2 | documented commands, settings, modes, resources, tools and workflows | partial · #27, #28, #30 open |
+| Terminal UI library | `packages/tui` | B/R | v2 | rendering, input, overlays, width handling, streaming UX | partial · #28 open |
+| Sessions and compaction | coding-agent session/compaction; AgentHarness | B/W/N | v1-v2 | resume, tree, fork/clone, summaries, context projection, migration; net-new crash-safe replay policy | implemented · #26 open |
+| Session storage port | session abstractions and harness storage contract | B/R | v1 | narrow persistence interface, atomicity/recovery needs, in-memory conformance implementation | implemented |
 | Concrete session backends | `packages/session-backends/*` | B/R/W | v3 | file/sqlite backends, migrations, leases and recovery | inventory-needed |
 | Extensions | coding-agent extensions + examples | R/W | v0 seam / v2 product | v0 core seams for tools/events/policy/state/capabilities; v2 discovery, UI, lifecycle, degradation and TS migration; evaluate pigo's Node-host bridge without treating its no-op capabilities as parity | architecture-risk |
 | Skills and prompt resources | coding-agent docs/resource loader | B/W | v2 | user/project discovery, precedence, invocation and compatible formats | inventory-needed |
@@ -87,11 +87,15 @@ Feature-level rows for what pi-go actually has. Written by reading the code and
 running its tests, not from the commit log — a matrix derived from what was
 claimed at merge time drifts the first time something is changed afterwards.
 
-**These rows are not a parity claim.** Every one of them carries acceptance
-evidence and a proposed disposition; none carries an owner or an issue, and per
-`feature-inventory-schema.md` §C7 an `unowned` row blocks the parity release.
-Assigning owners, and deciding the deviations in the register below, is the
-repository owner's.
+**Owner: @qy-liang** for every row — this repository has one. Assigned
+2026-08-29, which clears the `unowned` condition of §C7.
+
+**These rows are still not a parity claim.** What each says is that the surface
+exists and its evidence runs. Reaching `compatible` needs the incomplete
+deviations closed (#25, #26, #27, #28) and, for the provider rows, the open
+question in #29. Every `incomplete` row below names the issue that tracks it —
+`docs/product/feature-inventory-schema.md` §C7 refuses a row that is blocked
+without saying by what.
 
 Evidence is reproducible: each row names a test that fails when the behaviour it
 describes is removed. Every offline test runs under `go test -race ./...`; the
@@ -126,8 +130,8 @@ Pi source: `src/main.ts:118-133`, `src/cli/args.ts`. Class B. Target v1.
 | --- | --- | --- | --- |
 | `coding-agent.mode.interactive` | `internal/cli/run.go` `RunInteractive` | `TestInteractiveAnswersEachLineAndEndsAtEOF` | compatible, less D-7 |
 | `coding-agent.mode.print` | `internal/cli/run.go` `RunPrint` | `TestPrintWritesTheAnswerToStdoutAndNothingElse`, `TestPrintReportsAFailureOnStderrAndInTheExitCode` | compatible |
-| `coding-agent.mode.json` | — | — | **incomplete** — event schema is `schema-needed`; the mode resolves and refuses rather than emitting an invented shape |
-| `coding-agent.mode.rpc` | — | — | **incomplete**, same reason |
+| `coding-agent.mode.json` | — | — | **incomplete** (#31) — event schema is `schema-needed`; the mode resolves and refuses rather than emitting an invented shape |
+| `coding-agent.mode.rpc` | — | — | **incomplete** (#31), same reason |
 | mode resolution (§2.1) | `internal/cli/mode.go` | `TestTheTerminalIsHalfTheDecision`, `TestModeTextMeansLetTheEnvironmentDecide` | compatible |
 | CLI flags | `internal/cli/args.go` | `TestTheFlagsThisBuildActsOn`, `TestAPiFlagThisBuildLacksIsSaidAloud` | partial — 13 of 40 acted on; the rest warn rather than being silently ignored |
 
@@ -152,7 +156,7 @@ Pi source: `src/core/slash-commands.ts:20-41` and the handlers in
 | `reload` | `internal/cli/settings_cmd.go` | partial — settings only; Pi also reloads extensions, skills, prompts, themes, context files |
 | `hotkeys` | `internal/tui/bindings.go` | partial — the editor's keys; Pi's app-level chords need the full interface |
 | `changelog` | `CHANGELOG.md`, embedded | compatible |
-| `scoped-models` | — | **incomplete** — needs the model catalogue (§7.2, `source-gap`) |
+| `scoped-models` | — | **incomplete** (#30) — needs the model catalogue (§7.2, `source-gap`) |
 
 ### Sessions — `coding-agent.session.*`
 
@@ -165,7 +169,7 @@ Pi source: `src/core/session-manager.ts`, `agent-session-runtime.ts`. Class B/W/
 | session tree, branch, fork | `internal/session/filestore.go` | `TestBranchingLeavesTheOldLineWhereItWas`, `TestForkingCopiesIntoANewFileAndLeavesTheOldOne`, live `TestLiveDeepSeekDoesNotSeeAnAbandonedBranch` | compatible |
 | compaction | `internal/compaction/` | `TestACutNeverSeparatesAToolCallFromItsResult`, live `TestLiveDeepSeekSummarisesAConversation` | compatible, less D-3 |
 | session name | `internal/session/store.go` | `TestNamingAConversationOutlivesTheRun` | compatible |
-| labels, branch summaries, `session_info` beyond name | — | — | **incomplete** — entry kinds not ported |
+| labels, branch summaries, `session_info` beyond name | — | — | **incomplete** (#32) — entry kinds not ported |
 
 ### Providers — `ai.provider.*`
 
@@ -176,9 +180,9 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | DeepSeek, OpenAI, Qwen ports | `internal/provider/*` | 115 tests in `internal/provider`; live `TestLiveDeepSeekAnswersAndReportsWhatItSpent` | compatible |
 | one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test | compatible |
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
-| stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only |
-| model catalogue | — | — | **incomplete** — §7.2 is a `source-gap`; not in the pinned repository |
-| the other 39 providers | — | — | **incomplete** |
+| stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
+| model catalogue | — | — | **incomplete** (#30) — §7.2 is a `source-gap`; not in the pinned repository |
+| the other 39 providers | — | — | **incomplete** (#33) |
 
 ### Terminal interface — `tui.*`
 
@@ -189,30 +193,52 @@ Pi source: `packages/tui`, `src/modes/interactive/`. Class B/R. Target v2.
 | key decoding | `internal/tui/keys.go` | `TestDecodingTheKeysTheBindingsName`, `TestAReadEndingMidSequenceWaitsForTheRest` | compatible |
 | line editor, kill ring, undo, history | `internal/tui/editor.go` | `TestConsecutiveKillsYankBackAsOne`, `TestHistoryBrowsingKeepsTheLineBeingWritten` | compatible |
 | key assignments | `internal/tui/bindings.go` | table is Pi's verbatim for the actions implemented | compatible |
-| full-screen interface, chat rendering, selectors, overlays | — | — | **incomplete** — the bulk of `packages/tui` (16.7k lines) and `interactive-mode.ts` |
+| full-screen interface, chat rendering, selectors, overlays | — | — | **incomplete** (#28) — the bulk of `packages/tui` (16.7k lines) and `interactive-mode.ts` |
 
-## Deviation register — awaiting an owner decision
+## Deviation register — decided 2026-08-29
 
-Each is a place pi-go behaves differently from Pi **on purpose**, recorded in
-the code at the point it happens. Per §C7 an accepted deviation needs the
-repository owner's explicit decision; none of these has one, so all are
-`proposed` and each blocks its row from reaching `compatible`.
+Each is a place pi-go behaves differently from Pi. **@qy-liang decided these on
+2026-08-29**, splitting them the way §C7 requires: an `accepted-deviation` is
+permanent and its row may reach a final disposition; an `incomplete` is a gap
+that will be closed and blocks its row until it is.
 
-| # | Where | Pi | pi-go | Why |
+The split is not about how defensible each difference is — all twelve had a
+reason at the point they were made. It is about whether the difference is
+meant to last.
+
+### Accepted deviations — permanent
+
+| # | Where | Pi | pi-go | Why it stands |
 | --- | --- | --- | --- | --- |
 | D-1 | `find`, `grep` | shells out to `fd`/`ripgrep`, downloading them if absent | implements the behaviour in Go | no binary-fetching machinery; adding one is a distribution feature, not a search feature |
-| D-2 | `edit` | falls back to fuzzy matching (trailing whitespace, smart quotes) and overlays the change to keep unchanged bytes | exact matching only; a miss is reported | a partly correct overlay silently rewrites regions nobody touched, which for an editing tool is worse than not matching |
-| D-3 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
 | D-4 | `import` | confirms before replacing the running session | does not confirm | the conversation being left is already on disk and resumable; nothing is lost |
-| D-5 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-6 | `share` | uploads without asking | asks first, only an explicit yes proceeds | a coding conversation carries source and tool output; a secret gist is unlisted, not private, and cannot be recalled |
-| D-7 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
 | D-8 | settings | 49 keys | 9, each read by something | a key that parses and does nothing is a setting the user believes is on |
 | D-9 | session files, agent directory | `~/.pi/agent`, Pi's JSONL shape | `~/.pi-go/agent`, pi-go's own shape | ADR-0006 gives pi-go a native wire and rules out interoperability; a shared directory would offer conversations the other program cannot read |
 | D-10 | `read` | tries macOS filename fallbacks (NFD, curly quotes, narrow no-break space) | fails as a missing file | a path that quietly resolves to a different file is worse than one that fails |
 | D-11 | `--mode <invalid>` | ignored silently | ignored, with a warning | `--mode interactive` names the one mode the flag rejects and would otherwise look like it worked |
 | D-12 | unimplemented Pi flags and commands | — | warn, naming the reason | a flag a user believes took effect is the failure a parser must not have |
 
+
+
+### Incomplete — a gap that will be closed
+
+These block their rows from a final disposition. Each has an issue; none is a
+statement that Pi's behaviour is wrong.
+
+| # | Issue | Where | Pi | pi-go | What closing it needs |
+| --- | --- | --- | --- | --- | --- |
+| D-2 | #25 | `edit` | falls back to fuzzy matching (trailing whitespace, smart quotes) and overlays the change to keep unchanged bytes | exact matching only; a miss is reported | a partly correct overlay silently rewrites regions nobody touched, which for an editing tool is worse than not matching |
+| D-3 | #26 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
+| D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
+| D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
+
+`D-13` (#29) is reserved: whether pi-go recognises a provider's up-front
+context-overflow rejection is still open. The probe authorized on 2026-08-29 ran
+once and did not reach the condition — see
+`docs/research/provider-contract-source-audit.md`, "Probe result". Until a
+rejection is recorded or the requirement is waived, the provider-contract rows
+cannot reach a final disposition.
 
 ## Native remote-capability checklist (wire decision C)
 
