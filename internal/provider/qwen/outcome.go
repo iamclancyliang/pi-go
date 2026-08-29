@@ -229,3 +229,18 @@ func endingFrom(finish, errorCode string) (ai.StopReason, error) {
 		return ai.StopError, fail(FailureUnknown, 0, fmt.Sprintf("unrecognised finish reason %q", finish))
 	}
 }
+
+// classifier is what the shared chat-completions capture asks this package for.
+//
+// The seam is small because the difference is small: everything about watching
+// one of these streams is the same, and only what a status or an error code
+// MEANS belongs to a provider.
+type classifier struct{}
+
+// Refusal classifies a non-2xx response.
+func (classifier) Refusal(status int, body []byte, key string) error {
+	return failureFrom(status, body, key)
+}
+
+// RetryAdvice reads this provider's own instruction about trying again.
+func (classifier) RetryAdvice(h http.Header) *bool { return retryAdvice(h) }

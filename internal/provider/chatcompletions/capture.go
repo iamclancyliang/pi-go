@@ -1,15 +1,20 @@
-// Package qwen reaches Qwen's OpenAI-compatible endpoint.
+// Package chatcompletions watches an OpenAI-compatible chat-completions stream
+// go past.
 //
-// The wire, the SSE decoding and the tool-schema conversion come from an
-// eino-ext adapter. Everything this repository promises about a provider does
-// not: credentials, the typed failure set, the usage ledger, block identity,
-// served-model truth, retry ownership and overflow recovery stay here.
+// Extracted rather than copied a third time. Of the 375 lines this began as,
+// two mentioned the provider they were written for: everything else — the
+// Terminal frame, the usage counts with their presence preserved, the
+// tool-call positions a renumbering would hide, the tee that observes a body
+// without delaying it — is true of any provider speaking this dialect.
 //
-// Two things in particular have to be taken before the adapter's conversion
-// runs. It reports the model it was configured with rather than the one that
-// answered, and it flattens a cached-token count the provider may never have
-// sent into a zero. Both are read here from the provider's own bytes.
-package qwen
+// What is NOT shared is how a refusal is classified. Statuses and error codes
+// mean different things per provider — OpenRouter's 403 is a moderation
+// refusal where another's is an authentication failure — so that stays behind
+// the Classifier seam, which is the only thing a caller must supply.
+//
+// This is the chat-completions dialect specifically. The Responses API is a
+// different event shape, and the port speaking it keeps its own Capture.
+package chatcompletions
 
 import (
 	"bytes"
@@ -22,13 +27,13 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
-// terminal is what the provider itself said, before anything reinterpreted it.
+// Terminal is what the provider itself said, before anything reinterpreted it.
 //
 // Every field is optional on purpose: absent means the provider did not say,
 // and that is not the same as zero. Filling a gap from the request — the model
 // we ASKED for, or a zero standing in for silence — would manufacture evidence
-// for the two claims this capture exists to support.
-type terminal struct {
+// for the two claims this Capture exists to support.
+type Terminal struct {
 	// Model is the model the provider reports as having served the reply.
 	Model string
 
@@ -48,21 +53,21 @@ type terminal struct {
 	ErrorCode string
 }
 
-// capture holds what one logical call observed.
+// Capture holds what one logical call observed.
 //
 // Owned by the call that created it and reachable from nowhere else: there is
 // no shared table keyed by anything, so no failure or cancellation inside the
-// adapter can attach one call's terminal to another request.
-type capture struct {
+// adapter can attach one call's Terminal to another request.
+type Capture struct {
 	mu   sync.Mutex
-	seen terminal
+	seen Terminal
 
 	// failure is the classified reason a request was refused, when one was.
 	failure error
 
 	// announced is every tool-call position the provider sent, in order, and
 	// whether that fragment named the call it belongs to.
-	announced []announcement
+	announced []Announcement
 
 	// anonymous describes every fragment the provider sent without the index
 	// that identifies it. Held separately because there is no index to hold it
@@ -70,19 +75,21 @@ type capture struct {
 	anonymous []string
 }
 
-// announcement is one tool-call fragment as the provider addressed it.
-type announcement struct {
-	index int
-	// named is true when the fragment carried the call's id or name, which the
+// Announcement is one tool-call fragment as the provider addressed it.
+type Announcement struct {
+	Index int
+
+	// Named is true when the fragment carried the call's id or name, which the
 	// provider sends once, on the fragment that opens the call.
-	named bool
-	id    string
+	Named bool
+
+	ID string
 }
 
 // observe records what the reply reported, keeping the last value of each
 // field the provider actually sent. A later chunk that omits a field has not
 // retracted it: usage and the served model arrive once, on different chunks.
-func (c *capture) observe(t terminal) {
+func (c *Capture) observe(t Terminal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if t.Model != "" {
@@ -108,63 +115,107 @@ func (c *capture) observe(t terminal) {
 	}
 }
 
-func (c *capture) last() terminal {
+// Last is the most recent terminal frame this exchange carried.
+func (c *Capture) Last() Terminal {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.seen
 }
 
 // observeFailure records why a request was refused.
-func (c *capture) observeFailure(err error) {
+func (c *Capture) observeFailure(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.failure = err
 }
 
 // refusal is the classified failure, if the provider refused.
-func (c *capture) refusal() error {
+// Refusal is the classified reason a request was refused, when one was.
+func (c *Capture) Refusal() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.failure
 }
 
 // observeCall records a tool-call fragment as the provider addressed it.
-func (c *capture) observeCall(a announcement) {
+func (c *Capture) observeCall(a Announcement) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.announced = append(c.announced, a)
 }
 
 // observeAnonymous records a fragment sent with no identity.
-func (c *capture) observeAnonymous(what string) {
+func (c *Capture) observeAnonymous(what string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.anonymous = append(c.anonymous, what)
 }
 
-func (c *capture) announcements() []announcement {
+// Announcements are the tool-call positions the provider sent, in order.
+func (c *Capture) Announcements() []Announcement {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]announcement(nil), c.announced...)
+	return append([]Announcement(nil), c.announced...)
 }
 
-func (c *capture) anonymousFragments() []string {
+// AnonymousFragments are the fragments sent with no position to identify them.
+func (c *Capture) AnonymousFragments() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.anonymous...)
 }
 
-// captureTransport reads the provider's own metadata as it goes past.
+// Transport reads the provider's own metadata as it goes past.
 //
 // It does not count requests: the injected transport already answers that from
 // the outside, and a second counter nobody reads is a claim with no reader.
-type captureTransport struct {
-	inner   http.RoundTripper
-	capture *capture
-	key     string
+// Transport observes a chat-completions exchange without changing it.
+type Transport struct {
+	inner      http.RoundTripper
+	classifier Classifier
+	key        string
+
+	// Capture holds what this exchange revealed, and is read after it.
+	Capture *Capture
 }
 
-func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+// Classifier is the only thing a provider must supply.
+//
+// Statuses and error codes mean different things per provider — OpenRouter's
+// 403 is a moderation refusal where another's is an authentication failure — so
+// the mapping cannot be shared even though everything around it can.
+type Classifier interface {
+	// Refusal classifies a non-2xx response, with the credential to scrub from
+	// anything it quotes.
+	Refusal(status int, body []byte, key string) error
+
+	// RetryAdvice reads the provider's own instruction about trying again, or
+	// nil when it gave none.
+	RetryAdvice(h http.Header) *bool
+}
+
+// NewTransport wraps a transport so one exchange can be observed.
+//
+// One per call, holding that call's record: a transport shared across calls
+// would attribute one call's terminal frame to another.
+func NewTransport(inner http.RoundTripper, classifier Classifier, key string) *Transport {
+	return &Transport{inner: inner, classifier: classifier, key: key, Capture: &Capture{}}
+}
+
+// UsageOf turns a captured terminal into this repository's usage.
+//
+// Here rather than in each port: what presence means, and that a cached prompt
+// is subtracted rather than counted beside the whole one, is the shared rule.
+func UsageOf(t Terminal) ai.Usage {
+	return ai.ReportedCounts{
+		InputTokens:     t.InputTokens,
+		OutputTokens:    t.OutputTokens,
+		CachedTokens:    t.CachedTokens,
+		ReasoningTokens: t.ReasoningTokens,
+	}.Usage()
+}
+
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.inner.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err
@@ -181,13 +232,13 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// Classified here, where the status and the provider's own error code
 		// both exist. After this the adapter turns it into prose, and a
 		// classification rebuilt from prose is one a change of wording breaks.
-		refused := failureFrom(resp.StatusCode, raw, t.key)
+		refused := t.classifier.Refusal(resp.StatusCode, raw, t.key)
 		var classified *ai.ProviderError
 		if errors.As(refused, &classified) {
 			// The provider's own instruction about retrying travels with the
 			// failure. Nothing here retries, so an instruction that is not
 			// carried out is one the caller who does decide never learns of.
-			classified.Advise(retryAdvice(resp.Header))
+			classified.Advise(t.classifier.RetryAdvice(resp.Header))
 		}
 		// A refused request may still report what it read. Recording it keeps
 		// a failed call from being accounted for as free.
@@ -198,7 +249,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 				refused = ai.WithUsage(refused, used)
 			}
 		}
-		t.capture.observeFailure(refused)
+		t.Capture.observeFailure(refused)
 		return resp, nil
 	}
 
@@ -207,9 +258,9 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// a stream into a wait.
 	resp.Body = &teeBody{
 		inner:       resp.Body,
-		onTerminal:  t.capture.observe,
-		onCall:      t.capture.observeCall,
-		onAnonymous: t.capture.observeAnonymous,
+		onTerminal:  t.Capture.observe,
+		onCall:      t.Capture.observeCall,
+		onAnonymous: t.Capture.observeAnonymous,
 	}
 	return resp, nil
 }
@@ -217,8 +268,8 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 // teeBody watches an event stream go past without changing or delaying it.
 type teeBody struct {
 	inner       io.ReadCloser
-	onTerminal  func(terminal)
-	onCall      func(announcement)
+	onTerminal  func(Terminal)
+	onCall      func(Announcement)
 	onAnonymous func(string)
 	pending     []byte
 }
@@ -276,7 +327,7 @@ func (t *teeBody) handleLine(line []byte) {
 
 // handle reads one streamed chunk.
 func (t *teeBody) handle(payload []byte) {
-	var body wireChunk
+	var body chunk
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return
 	}
@@ -297,19 +348,19 @@ func (t *teeBody) handle(payload []byte) {
 					t.onAnonymous("a tool call fragment with no index")
 				}
 			case t.onCall != nil:
-				t.onCall(announcement{
-					index: *call.Index,
-					named: call.ID != "" || (call.Function != nil && call.Function.Name != ""),
-					id:    call.ID,
+				t.onCall(Announcement{
+					Index: *call.Index,
+					Named: call.ID != "" || (call.Function != nil && call.Function.Name != ""),
+					ID:    call.ID,
 				})
 			}
 		}
 	}
 }
 
-// wireChunk is only the parts this capture is responsible for. Everything else
+// chunk is only the parts this Capture is responsible for. Everything else
 // about the reply comes from the adapter.
-type wireChunk struct {
+type chunk struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		FinishReason string `json:"finish_reason"`
@@ -323,15 +374,15 @@ type wireChunk struct {
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
-	Usage *wireUsage `json:"usage"`
+	Usage *usage `json:"usage"`
 	Error *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
-// wireUsage is the provider's own count, with presence preserved.
-type wireUsage struct {
+// usage is the provider's own count, with presence preserved.
+type usage struct {
 	PromptTokens     *int `json:"prompt_tokens"`
 	CompletionTokens *int `json:"completion_tokens"`
 	PromptDetails    *struct {
@@ -342,8 +393,8 @@ type wireUsage struct {
 	} `json:"completion_tokens_details"`
 }
 
-func (w wireChunk) toTerminal() terminal {
-	found := terminal{Model: w.Model}
+func (w chunk) toTerminal() Terminal {
+	found := Terminal{Model: w.Model}
 	for _, choice := range w.Choices {
 		if choice.FinishReason != "" {
 			found.FinishReason = choice.FinishReason
@@ -367,9 +418,9 @@ func (w wireChunk) toTerminal() terminal {
 
 // usageFromBody reads usage a refused request reported, when it reported any.
 func usageFromBody(raw []byte) (ai.Usage, bool) {
-	var body wireChunk
+	var body chunk
 	if err := json.Unmarshal(raw, &body); err != nil || body.Usage == nil {
 		return ai.Usage{}, false
 	}
-	return usageFrom(body.toTerminal()), true
+	return UsageOf(body.toTerminal()), true
 }

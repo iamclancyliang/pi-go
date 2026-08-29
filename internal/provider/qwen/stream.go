@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	cc "github.com/iamclancyliang/pi-go/internal/provider/chatcompletions"
 )
 
 // Stream answers as the reply arrives.
@@ -36,7 +37,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	key := p.cfg.Credential.Key()
 
 	// This call's own record, held by the client it is about to use.
-	held := &capture{}
+	held := cc.NewTransport(p.cfg.Transport, classifier{}, key)
 	outputCap := p.cfg.MaxOutputTokens
 	chat, err := qwen.NewChatModel(ctx, &qwen.ChatModelConfig{
 		APIKey:  key,
@@ -46,7 +47,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// nothing about what was sent, and a reply with no cap is a bill nobody
 		// chose.
 		MaxTokens:  &outputCap,
-		HTTPClient: httpClient(&captureTransport{inner: p.cfg.Transport, capture: held, key: key}),
+		HTTPClient: httpClient(held),
 	})
 	if err != nil {
 		return nil, wireFailure("building the model", key, err)
@@ -68,7 +69,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// A refusal was classified at the transport, where the status and the
 		// provider's own code still existed. Preferring it keeps a caller
 		// branching on a value rather than on the adapter's prose.
-		if refused := held.refusal(); refused != nil {
+		if refused := held.Capture.Refusal(); refused != nil {
 			return nil, refused
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -94,7 +95,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 // position is checked against the wire separately — see checkAnnounced —
 // because the adapter is trusted to carry it, not to be the record of it.
 func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Message],
-	held *capture, out chan<- ai.StreamEvent) {
+	held *cc.Transport, out chan<- ai.StreamEvent) {
 
 	// Seeded empty: the model that served a reply comes from the reply. Seeding
 	// it with the configured name would report a model nobody confirmed, and a
@@ -135,15 +136,15 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = usageFrom(held.last())
-			if served := held.last().Model; served != "" {
+			ev.Final.Usage = cc.UsageOf(held.Capture.Last())
+			if served := held.Capture.Last().Model; served != "" {
 				ev.Final.Model = served
 			}
 		}
 		sendTerminal(ev)
 	}
 
-	// A stopped stream still ends with a terminal carrying what had already
+	// A stopped stream still ends with a cc.Terminal carrying what had already
 	// arrived. A consumer that watched a reply appear should not have it vanish
 	// because it stopped, and a channel that simply closes says nothing about
 	// what they have.
@@ -160,7 +161,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = usageFrom(held.last())
+			ev.Final.Usage = cc.UsageOf(held.Capture.Last())
 		}
 		sendTerminal(ev)
 	}()
@@ -217,7 +218,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 				cancelled, stoppedBy = true, err
 				return
 			}
-			if refused := held.refusal(); refused != nil {
+			if refused := held.Capture.Refusal(); refused != nil {
 				abort(refused)
 				return
 			}
@@ -322,7 +323,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	}
 
 	// Checked again once the stream has ended. The check inside the loop only
-	// runs when a chunk arrives, so an announcement carrying nothing at all
+	// runs when a chunk arrives, so an cc.Announcement carrying nothing at all
 	// would otherwise reach the end unexamined.
 	if err := checkAnnounced(held); err != nil {
 		abort(err)
@@ -335,7 +336,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 
 	// The ending comes from what the provider said, captured before the adapter
 	// reinterpreted it.
-	final := held.last()
+	final := held.Capture.Last()
 	reason, endErr := endingFrom(final.FinishReason, final.ErrorCode)
 	if endErr != nil {
 		abort(endErr)
@@ -343,13 +344,13 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	}
 	// Checked before the reply is completed: the accumulator has one ending, and
 	// a reply already declared finished cannot then be reported as a failure.
-	if f := p.overflow(reason, usageFrom(final)); f != nil {
+	if f := p.overflow(reason, cc.UsageOf(final)); f != nil {
 		ev, accErr := acc.Fail(ai.StopError, f)
 		if accErr != nil {
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = usageFrom(final)
+			ev.Final.Usage = cc.UsageOf(final)
 			if final.Model != "" {
 				ev.Final.Model = final.Model
 			}
@@ -357,7 +358,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		sendTerminal(ev)
 		return
 	}
-	done, err := acc.Done(reason, usageFrom(final))
+	done, err := acc.Done(reason, cc.UsageOf(final))
 	if err != nil {
 		abort(err)
 		return
@@ -385,37 +386,37 @@ func openBlock(kinds map[int]ai.BlockKind, kind ai.BlockKind) (int, bool) {
 // checking. These come from the provider's own bytes, upstream of any
 // conversion, so a conversion that started renumbering would be caught rather
 // than believed.
-func checkAnnounced(held *capture) error {
-	for _, what := range held.anonymousFragments() {
+func checkAnnounced(held *cc.Transport) error {
+	for _, what := range held.Capture.AnonymousFragments() {
 		return fail(FailureUnknown, 0, fmt.Sprintf(
 			"the provider sent %s; refusing to infer a position it did not send", what))
 	}
 	opened := map[int]string{}
 	highest := -1
-	for _, a := range held.announcements() {
-		if a.named {
-			if id, already := opened[a.index]; already {
+	for _, a := range held.Capture.Announcements() {
+		if a.Named {
+			if id, already := opened[a.Index]; already {
 				// A position that opens twice describes two calls in one place.
 				// Accepting it would merge them, and the arguments of the first
 				// would end up on the second.
 				return fail(FailureUnknown, 0, fmt.Sprintf(
-					"the provider opened position %d twice, as %q and %q", a.index, id, a.id))
+					"the provider opened position %d twice, as %q and %q", a.Index, id, a.ID))
 			}
-			if a.index != highest+1 {
+			if a.Index != highest+1 {
 				// Positions that skip describe calls that were never sent.
 				return fail(FailureUnknown, 0, fmt.Sprintf(
 					"the provider opened position %d where %d was expected; "+
-						"refusing to renumber a stream that skips", a.index, highest+1))
+						"refusing to renumber a stream that skips", a.Index, highest+1))
 			}
-			highest = a.index
-			opened[a.index] = a.id
+			highest = a.Index
+			opened[a.Index] = a.ID
 			continue
 		}
-		if _, known := opened[a.index]; !known {
+		if _, known := opened[a.Index]; !known {
 			// A continuation of a call that was never opened has nothing to
 			// continue, and guessing which one it meant is guessing.
 			return fail(FailureUnknown, 0, fmt.Sprintf(
-				"the provider continued position %d, which it never opened", a.index))
+				"the provider continued position %d, which it never opened", a.Index))
 		}
 	}
 	return nil

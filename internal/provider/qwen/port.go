@@ -112,21 +112,6 @@ func New(cfg Config) (*Port, error) {
 // scrub removes a credential from text about to become an error.
 func scrub(text, key string) string { return ai.ScrubSecret(text, key) }
 
-// usageFrom turns a captured terminal into this repository's usage.
-//
-// Only the mapping from this provider's fields is local; what presence means,
-// and how a cached prompt is counted, is the shared rule. The adapter's own
-// conversion cannot do either, which is the whole reason the terminal is
-// captured before it runs.
-func usageFrom(t terminal) ai.Usage {
-	return ai.ReportedCounts{
-		InputTokens:     t.InputTokens,
-		OutputTokens:    t.OutputTokens,
-		CachedTokens:    t.CachedTokens,
-		ReasoningTokens: t.ReasoningTokens,
-	}.Usage()
-}
-
 // overflow reports a context overflow inferred from reported counts.
 //
 // Absent usage disables the check rather than reading as zero: silence is not a
