@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/cli"
 	"github.com/iamclancyliang/pi-go/internal/settings"
@@ -717,5 +718,35 @@ func TestChangelogShowsWhatChanged(t *testing.T) {
 	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/changelog")
 	if !strings.Contains(out, "# Changelog") || !strings.Contains(out, "Seven built-in tools") {
 		t.Fatalf("/changelog showed:\n%s", out)
+	}
+}
+
+// TestThinkingReachesAModelNothingIsRecordedAbout. Refusing to try would make
+// every unrecorded model unable to reason, and unrecorded is the normal case
+// for a catalogue this small.
+func TestThinkingReachesAModelNothingIsRecordedAbout(t *testing.T) {
+	got, why := cli.ThinkingFor("deepseek", "some-unrecorded-model", ai.ThinkingHigh)
+	if got != ai.ThinkingHigh {
+		t.Fatalf("an unrecorded model dropped the thinking request: %q (%s)", got, why)
+	}
+	if why != "" {
+		t.Fatalf("an unrecorded model produced a complaint: %s", why)
+	}
+}
+
+// TestThinkingReachesAModelRecordedAsReasoning.
+func TestThinkingReachesAModelRecordedAsReasoning(t *testing.T) {
+	got, why := cli.ThinkingFor("deepseek", "deepseek-chat", ai.ThinkingHigh)
+	if got != ai.ThinkingHigh || why != "" {
+		t.Fatalf("a model measured to reason got %q (%s)", got, why)
+	}
+}
+
+// TestAskingForNothingIsNotAComplaint: silence leaves the provider's default,
+// which is not a decision the catalogue should second-guess.
+func TestAskingForNothingIsNotAComplaint(t *testing.T) {
+	got, why := cli.ThinkingFor("deepseek", "deepseek-chat", "")
+	if got != "" || why != "" {
+		t.Fatalf("asking for nothing produced %q (%s)", got, why)
 	}
 }

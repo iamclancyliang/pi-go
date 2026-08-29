@@ -71,13 +71,18 @@ var Providers = map[string]Provider{
 				}
 				store = memory
 			}
+			facts, _ := ai.Facts("deepseek", model)
 			return deepseek.New(deepseek.Config{
-				Model:           model,
-				Transport:       &http.Client{Transport: transport, Timeout: requestTimeout},
-				Environment:     processEnvironment{},
-				Store:           store,
-				ProviderID:      "deepseek",
-				MaxOutputTokens: DefaultMaxOutputTokens,
+				Model:       model,
+				Transport:   &http.Client{Transport: transport, Timeout: requestTimeout},
+				Environment: processEnvironment{},
+				Store:       store,
+				ProviderID:  "deepseek",
+				// Recorded facts where there are any, the caller's defaults
+				// where there are none. A zero window leaves the count-based
+				// overflow checks off, which is where they already were.
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
 			})
 		},
 	},
@@ -231,4 +236,36 @@ func Open(args Args, transport http.RoundTripper) (ai.Port, string, string, erro
 		return nil, "", "", fmt.Errorf("%s: %w", p.Name, err)
 	}
 	return port, p.Name, model, nil
+}
+
+// outputCap is the model's own cap when one is recorded, and this build's
+// default otherwise.
+func outputCap(facts ai.ModelFacts) int {
+	if facts.MaxOutputTokens > 0 {
+		return facts.MaxOutputTokens
+	}
+	return DefaultMaxOutputTokens
+}
+
+// ThinkingFor decides what to ask a model for, given what is recorded about it.
+//
+// A level asked for reaches a model recorded as reasoning, or one nothing is
+// recorded about — the second because refusing to try would make every
+// unrecorded model unable to reason, and an unrecorded model is the normal case
+// for a catalogue this small. A model recorded as NOT reasoning gets nothing,
+// which is the case the record exists to catch.
+//
+// Reported rather than silently dropped: a caller who asked for reasoning and
+// got none should be told why, not left reading an ordinary answer as a
+// considered one.
+func ThinkingFor(provider, model string, asked ai.ThinkingLevel) (ai.ThinkingLevel, string) {
+	if asked == "" {
+		return "", ""
+	}
+	facts, recorded := ai.Facts(provider, model)
+	if recorded && facts.ReasoningKnown && !facts.Reasoning {
+		return "", fmt.Sprintf("%s/%s is recorded as not reasoning; --thinking %s was not sent",
+			provider, model, asked)
+	}
+	return asked, ""
 }

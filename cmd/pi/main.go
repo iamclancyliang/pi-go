@@ -107,6 +107,11 @@ func run(argv []string) int {
 	// Built from the tool set this run offers and the project's own
 	// instructions, not from a constant.
 	system := cli.BuildSystemPrompt(args, registry, root, cfg.AgentDir)
+
+	thinking, why := cli.ThinkingFor(providerName, model, args.Thinking)
+	if why != "" {
+		fmt.Fprintf(streams.Err, "pi: %s\n", why)
+	}
 	conversation, err := cli.OpenConversation(args, root, system)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
@@ -121,7 +126,7 @@ func run(argv []string) int {
 		System:       system,
 		Provider:     providerName,
 		Conversation: conversation,
-		Thinking:     args.Thinking,
+		Thinking:     thinking,
 		Args:         args,
 		WorkingDir:   root,
 		Transport:    http.DefaultTransport,
