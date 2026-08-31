@@ -178,6 +178,126 @@ func TestTheCodesThisProvidersOwnSDKNames(t *testing.T) {
 	}
 }
 
+// TestAModelThisAccountCannotUseIsNotReportedAsABadCredential.
+//
+// **The provider answers an unknown model with HTTP 401.** Measured, not
+// assumed — recorded on 2026-08-31 from a real refusal. Classified on the
+// status alone, that sends a user to replace a key that is working perfectly
+// while the actual problem is the name they typed.
+//
+// The refusal here is the whole reason the code is read before the status, and
+// the reason this port was rewritten after its first live run: the vocabulary
+// it had been given by the vendor's SDK is the CLASSIC surface's, and the
+// compatible endpoint uses none of it.
+func TestAModelThisAccountCannotUseIsNotReportedAsABadCredential(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refused(401,
+		`{"error":{"code":"invalid_model","message":"The model does not exist or you do not have access to it.",`+
+			`"type":"invalid_request_error"},"id":"as-bkv66krfus"}`)}}
+
+	_, err := ask(t, newPort(t, tr))
+	if err == nil {
+		t.Fatal("an unknown model reported success")
+	}
+	if got := failureOf(t, err); got != ai.FailureRefused {
+		t.Fatalf("an unknown model was classified as %q; the user would go and change their key", got)
+	}
+	if !strings.Contains(err.Error(), "invalid_model") {
+		t.Fatalf("the failure does not say which refusal it was: %v", err)
+	}
+	// The request id is what this provider's own support asks for, and nothing
+	// here could reconstruct it.
+	if !strings.Contains(err.Error(), "as-bkv66krfus") {
+		t.Fatalf("the request id was dropped: %v", err)
+	}
+}
+
+// TestARealCredentialFailureIsStillOne. The mapping above must not turn every
+// 401 into a refusal — the case it exists to separate has to stay separated.
+func TestARealCredentialFailureIsStillOne(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refused(401,
+		`{"error":{"code":"invalid_iam_token","message":"invalid_iam_token",`+
+			`"type":"invalid_request_error"},"id":"as-r43wh8e35y"}`)}}
+
+	_, err := ask(t, newPort(t, tr))
+	if err == nil {
+		t.Fatal("a bad credential reported success")
+	}
+	if got := failureOf(t, err); got != ai.FailureAuth {
+		t.Fatalf("a bad credential was classified as %q", got)
+	}
+}
+
+// TestAnAccountInArrearsIsNotReportedAsABadCredential.
+//
+// The provider answers an overdue account with HTTP **403** — measured on
+// 2026-08-31, when the credential under test ran out mid-session. Every port
+// here reads 403 as authentication, so without the code this failure tells a
+// user to go and check a key that is perfectly valid, when what they have to do
+// is settle a bill.
+//
+// It is also not a throttle: waiting does not add money. Classified as quota,
+// which is the one class that means "this will not succeed until you do
+// something outside this program".
+func TestAnAccountInArrearsIsNotReportedAsABadCredential(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refused(403,
+		`{"error":{"code":"account_overdue","message":"Access denied due to overdue account",`+
+			`"type":"access_denied"},"id":"as-xp1jmkxe03"}`)}}
+
+	_, err := ask(t, newPort(t, tr))
+	if err == nil {
+		t.Fatal("an overdue account reported success")
+	}
+	if got := failureOf(t, err); got != ai.FailureQuota {
+		t.Fatalf("an overdue account was classified as %q; the user would go and change their key", got)
+	}
+	if ai.Retryable(err) {
+		t.Fatalf("an overdue account was reported as worth retrying: %v", err)
+	}
+	if !strings.Contains(err.Error(), "overdue") {
+		t.Fatalf("the failure does not say what is wrong: %v", err)
+	}
+}
+
+// TestTheRecordedRefusalsAreClassifiedAsRecorded.
+//
+// Every one of these is a body this provider actually sent, captured on
+// 2026-08-31 with the owner's credential. Written from what came back rather
+// than from what a source said would come back — which is the difference this
+// port exists to demonstrate, since the first version was written the other way
+// and was wrong.
+func TestTheRecordedRefusalsAreClassifiedAsRecorded(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   ai.Failure
+	}{
+		{"a missing model parameter", 400,
+			`{"error":{"code":"invalid_argument","message":"you must provide a model parameter","type":"invalid_request_error"},"id":"as-yqc9riacmc"}`,
+			ai.FailureRefused},
+		{"a role the provider does not accept", 400,
+			`{"error":{"code":"invalid_argument","message":"the role must be one of the following: system,developer,user,assistant,tool","type":"invalid_request_error"},"id":"as-0vmp2re2ed"}`,
+			ai.FailureRefused},
+		{"an output cap out of range", 400,
+			`{"error":{"code":"invalid_argument","message":"parameter check failed, max_completion_tokens range is [1, 12288]","type":"invalid_request_error"},"id":"as-k3s5gezrta"}`,
+			ai.FailureRefused},
+		{"no credential at all", 401,
+			`{"error":{"code":"invalid_iam_token","message":"invalid_iam_token","type":"invalid_request_error"},"id":"as-qiawvbpq8x"}`,
+			ai.FailureAuth},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tr := &recordedTransport{responses: []*http.Response{refused(c.status, c.body)}}
+			_, err := ask(t, newPort(t, tr))
+			if err == nil {
+				t.Fatal("expected a failure")
+			}
+			if got := failureOf(t, err); got != c.want {
+				t.Fatalf("classified as %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // TestEitherErrorShapeIsRead.
 //
 // A compatible surface may answer in the envelope it is compatible with or in
@@ -186,8 +306,8 @@ func TestTheCodesThisProvidersOwnSDKNames(t *testing.T) {
 // alone.
 func TestEitherErrorShapeIsRead(t *testing.T) {
 	for name, body := range map[string]string{
-		"the provider's own shape": `{"error_code":17,"error_msg":"Open api daily request limit reached"}`,
-		"the compatible envelope":  `{"error":{"code":"17","message":"Open api daily request limit reached","type":"invalid_request_error"}}`,
+		"the classic surface's flat pair": `{"error_code":17,"error_msg":"Open api daily request limit reached"}`,
+		"a number inside the envelope":    `{"error":{"code":"17","message":"Open api daily request limit reached","type":"invalid_request_error"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := &recordedTransport{responses: []*http.Response{refused(400, body)}}
