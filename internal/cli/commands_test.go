@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -529,8 +530,13 @@ func TestLoginRefusesAProviderThisBuildDoesNotHave(t *testing.T) {
 func TestAStoredCredentialIsUsedWithoutTheEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	auth.Open(dir).Set("deepseek", auth.APIKey("sk-stored"))
-	for _, v := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"} {
-		t.Setenv(v, "")
+	// Every provider's variables, not a list written once: selection walks the
+	// providers in name order, so a variable left set for one that sorts before
+	// deepseek would decide this test on what happens to be exported.
+	for _, name := range cli.ProviderNames() {
+		for _, v := range cli.Providers[name].EnvVars {
+			t.Setenv(v, "")
+		}
 	}
 
 	chosen, err := cli.SelectProvider(cli.Args{SessionDir: dir})
@@ -539,6 +545,25 @@ func TestAStoredCredentialIsUsedWithoutTheEnvironment(t *testing.T) {
 	}
 	if chosen.Name != "deepseek" {
 		t.Fatalf("the stored credential selected %q", chosen.Name)
+	}
+}
+
+// TestAProviderWithNoDefaultModelSaysWhatToPass.
+//
+// One provider here is addressed by a deployment id its own account created,
+// so no default this build could pick would be right for anyone. Left to the
+// port, the failure reads "a model is required", which sounds like a bug in
+// this build rather than a thing the user supplies.
+func TestAProviderWithNoDefaultModelSaysWhatToPass(t *testing.T) {
+	dir := t.TempDir()
+	auth.Open(dir).Set("ark", auth.APIKey("ark-stored"))
+
+	_, _, _, err := cli.Open(cli.Args{Provider: "ark", SessionDir: dir}, http.DefaultTransport)
+	if err == nil {
+		t.Fatal("a provider with no default model was opened without one")
+	}
+	if !strings.Contains(err.Error(), "--model") {
+		t.Fatalf("the failure does not say what to pass: %v", err)
 	}
 }
 

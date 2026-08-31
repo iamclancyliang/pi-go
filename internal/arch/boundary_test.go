@@ -42,6 +42,8 @@ var einoIsAllowedIn = []string{
 	// bytes — not what it may export.
 	"internal/provider/ollama",
 	"internal/provider/claude",
+	"internal/provider/ark",
+	"internal/provider/gemini",
 
 	// The shared implementation for one dialect is on the same footing as the
 	// ports that use it: it drives the framework's adapters, and the same rule

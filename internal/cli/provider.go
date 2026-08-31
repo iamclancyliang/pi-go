@@ -11,8 +11,10 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/auth"
+	"github.com/iamclancyliang/pi-go/internal/provider/ark"
 	"github.com/iamclancyliang/pi-go/internal/provider/claude"
 	"github.com/iamclancyliang/pi-go/internal/provider/deepseek"
+	"github.com/iamclancyliang/pi-go/internal/provider/gemini"
 	"github.com/iamclancyliang/pi-go/internal/provider/ollama"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
 	"github.com/iamclancyliang/pi-go/internal/provider/openrouter"
@@ -58,6 +60,30 @@ type Provider struct {
 // default — a request silently served by a provider the user did not ask for is
 // billed to an account they did not choose.
 var Providers = map[string]Provider{
+	"ark": {
+		Name: "ark",
+		// Empty on purpose. This provider is addressed by an ENDPOINT id the
+		// account itself created — "ep-20240101120000-abcde" — so there is no
+		// name this build could pick that would be right for anyone. A missing
+		// --model is refused with that explanation rather than defaulted into
+		// a call that bills someone else's deployment.
+		DefaultModel: "",
+		EnvVars:      ark.EnvVars,
+		build: func(model, apiKey string, transport http.RoundTripper) (ai.Port, error) {
+			cred, err := ark.Resolve(context.Background(), processEnvironment{}, apiKey)
+			if err != nil {
+				return nil, err
+			}
+			facts, _ := ai.Facts("ark", model)
+			return ark.New(ark.Config{
+				Model:           model,
+				Transport:       transport,
+				Credential:      cred,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
+			})
+		},
+	},
 	"claude": {
 		Name: "claude",
 		// Dated on purpose: an alias moves to a new model when the vendor
@@ -125,6 +151,25 @@ var Providers = map[string]Provider{
 				Transport:       transport,
 				Credential:      cred,
 				MaxOutputTokens: DefaultMaxOutputTokens,
+			})
+		},
+	},
+	"gemini": {
+		Name:         "gemini",
+		DefaultModel: "gemini-2.5-pro",
+		EnvVars:      gemini.EnvVars,
+		build: func(model, apiKey string, transport http.RoundTripper) (ai.Port, error) {
+			cred, err := gemini.Resolve(context.Background(), processEnvironment{}, apiKey)
+			if err != nil {
+				return nil, err
+			}
+			facts, _ := ai.Facts("gemini", model)
+			return gemini.New(gemini.Config{
+				Model:           model,
+				Transport:       transport,
+				Credential:      cred,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
 			})
 		},
 	},
@@ -299,6 +344,14 @@ func Open(args Args, transport http.RoundTripper) (ai.Port, string, string, erro
 	model := args.Model
 	if model == "" {
 		model = p.DefaultModel
+	}
+	if model == "" {
+		// A provider with no default has none because no name would be right
+		// for everyone — an account's own deployment id, say. Saying so is
+		// better than the port's "a model is required", which reads as a bug
+		// in this build rather than as a thing the user has to supply.
+		return nil, "", "", fmt.Errorf(
+			"%s addresses models by a name only your account knows; pass --model", p.Name)
 	}
 	// Order: the flag, then what /login stored, then the environment — which is
 	// the provider's own last resort. Most explicit first, so a key given for
