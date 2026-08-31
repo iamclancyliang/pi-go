@@ -83,6 +83,8 @@ github.com/cloudwego/eino-ext/components/model/gemini v0.1.33 h1:LnzDQ3Psf0cPxvR
 github.com/cloudwego/eino-ext/components/model/gemini v0.1.33/go.mod h1:snXILkr06Zr2jm6WlqcWeytwiCramhNVPfxASgbjH40=
 github.com/cloudwego/eino-ext/components/model/ollama v0.1.9 h1:+eZbquy5lF3WHvK9+T7UUqI0CTRqDEniP7fzL85lJuk=
 github.com/cloudwego/eino-ext/components/model/ollama v0.1.9/go.mod h1:C3rf3yy2nEoXFP/CQJne4gbiu1pREKplHKmFlhuOzPE=
+github.com/cloudwego/eino-ext/components/model/openai v0.1.13 h1:5XHRTiTD5bt9KQrMHcfvuWNklEC3tpm3XHejdozt9vM=
+github.com/cloudwego/eino-ext/components/model/openai v0.1.13/go.mod h1:mgIoqYYOc0eECCqvLbEYpOJrQNTNxkwXzSJzFU+v5sQ=
 github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10 h1:i5YdCW8omvObZhyLGqL8ia5TC/pr3WipB4xQw9oN09Q=
 github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10/go.mod h1:WRc1OIXVaf2USal59xrIt+05TUCu9P1c8MQh0FcWG8c=
 github.com/cloudwego/eino-ext/components/model/qwen v0.1.9 h1:xCz/mp43JeWqupjPR3zLRArmwC6P29/6lTwbwh1yzYM=

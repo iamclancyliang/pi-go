@@ -44,6 +44,7 @@ var einoIsAllowedIn = []string{
 	"internal/provider/claude",
 	"internal/provider/ark",
 	"internal/provider/gemini",
+	"internal/provider/qianfan",
 
 	// The shared implementation for one dialect is on the same footing as the
 	// ports that use it: it drives the framework's adapters, and the same rule

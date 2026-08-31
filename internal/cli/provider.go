@@ -18,6 +18,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/provider/ollama"
 	"github.com/iamclancyliang/pi-go/internal/provider/openai"
 	"github.com/iamclancyliang/pi-go/internal/provider/openrouter"
+	"github.com/iamclancyliang/pi-go/internal/provider/qianfan"
 	"github.com/iamclancyliang/pi-go/internal/provider/qwen"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
@@ -220,6 +221,25 @@ var Providers = map[string]Provider{
 				// Attribution is opt-in and this build does not opt in: it puts
 				// the caller on a public leaderboard, which is not a thing to
 				// decide for someone.
+			})
+		},
+	},
+	"qianfan": {
+		Name:         "qianfan",
+		DefaultModel: "ernie-4.5-turbo-128k",
+		EnvVars:      qianfan.EnvVars,
+		build: func(model, apiKey string, transport http.RoundTripper) (ai.Port, error) {
+			cred, err := qianfan.Resolve(context.Background(), processEnvironment{}, apiKey)
+			if err != nil {
+				return nil, err
+			}
+			facts, _ := ai.Facts("qianfan", model)
+			return qianfan.New(qianfan.Config{
+				Model:           model,
+				Transport:       transport,
+				Credential:      cred,
+				MaxOutputTokens: outputCap(facts),
+				ContextWindow:   facts.ContextWindow,
 			})
 		},
 	},
