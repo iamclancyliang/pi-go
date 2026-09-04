@@ -105,18 +105,26 @@ type finalLine struct {
 	EarlierAttempts []usageLine `json:"earlier_attempts,omitempty"`
 }
 
-// Writer serialises both event families to one stream.
+// Writer serialises every family — lifecycle, reply, and command responses —
+// to one stream, and numbers them.
 //
 // It implements events.Observer and the runtime's reply-observer contract, so
-// wiring it into a run is passing it twice. Writes are serialised by a mutex
-// because the two families arrive from different goroutines; order within the
-// stream is still the emitter's, carried by Seq.
+// wiring it into a run is passing it twice; the RPC channel hands it responses
+// through WriteResponse. The families arrive from different goroutines, and
+// the wire's one promise is that `seq` is the order things were written. That
+// promise holds only if a line's number is allocated and the line written under
+// ONE lock: a number taken before the lock can reach the wire after a higher
+// one taken by another goroutine that got to the lock first. So the counter
+// lives here, and the number the runtime assigned in process is replaced on
+// the way out — in-process order is for in-process observers; the wire has its
+// own, and it is the write order by construction.
 //
 // The first write error latches and every later write becomes a no-op: a
 // broken pipe reported once, at the end, is a diagnosis, and reported on every
 // event it is noise that hides it.
 type Writer struct {
 	mu  sync.Mutex
+	seq events.Sequence
 	out io.Writer
 	err error
 }
@@ -124,13 +132,14 @@ type Writer struct {
 // NewWriter starts a stream on out by writing the version line.
 func NewWriter(out io.Writer) *Writer {
 	w := &Writer{out: out}
-	w.write(header{Protocol: "pi-go-stream", Version: Version})
+	w.write(header{Protocol: "pi-go-stream", Version: Version}, nil)
 	return w
 }
 
 // OnEvent implements events.Observer.
 func (w *Writer) OnEvent(e events.Event) {
-	w.write(runLine{Family: "run", Event: e})
+	line := runLine{Family: "run", Event: e}
+	w.write(&line, func(n int) { line.Seq = n })
 }
 
 // Reply implements the runtime's ReplyObserver contract.
@@ -156,19 +165,14 @@ func (w *Writer) Reply(e ai.StreamEvent) {
 		line.Final = finalFrom(e.Final)
 	}
 
-	w.write(line)
+	w.write(&line, func(n int) { line.Seq = n })
 }
 
-// WriteResponse writes one command response, its sequence already allocated
-// from the shared counter. It is how the RPC channel joins this stream: the
-// response family lands in the one order among the run and reply families.
-//
-// The seq is set here rather than trusted from the caller's struct so the wire
-// number is the one the shared counter handed out — the same discipline the
-// events go through.
-func (w *Writer) WriteResponse(seq int, resp rpc.Response) error {
-	resp.Seq = seq
-	w.write(resp)
+// WriteResponse writes one command response. It is how the RPC channel joins
+// this stream: the response family lands in the one order among the run and
+// reply families, numbered by the same counter under the same lock.
+func (w *Writer) WriteResponse(resp rpc.Response) error {
+	w.write(&resp, func(n int) { resp.Seq = n })
 	return w.Err()
 }
 
@@ -179,11 +183,17 @@ func (w *Writer) Err() error {
 	return w.err
 }
 
-func (w *Writer) write(v any) {
+// write numbers and writes one line under the lock. setSeq receives the
+// allocated number and must store it into v before it is marshalled; nil for
+// the one line that carries no number.
+func (w *Writer) write(v any, setSeq func(int)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.err != nil {
 		return
+	}
+	if setSeq != nil {
+		setSeq(w.seq.Next())
 	}
 
 	encoded, err := json.Marshal(v)

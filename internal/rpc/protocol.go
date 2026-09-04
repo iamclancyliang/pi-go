@@ -58,6 +58,16 @@ const (
 	// FailBadArgument is a recognised command whose arguments it cannot act on.
 	FailBadArgument FailureKind = "bad_argument"
 
+	// FailBusy is a prompt arriving while one is already running. One run at a
+	// time is the channel's rule, said as a typed answer rather than a queue
+	// the client cannot see into; a client that wants to redirect the running
+	// work has steer and follow_up for exactly that.
+	FailBusy FailureKind = "busy"
+
+	// FailNotRunning is a command that only means something while a prompt is
+	// in flight — steer, follow_up — arriving when nothing is.
+	FailNotRunning FailureKind = "not_running"
+
 	// FailProvider is a failure that came from the model provider, carrying the
 	// provider-independent classification every port already produces.
 	FailProvider FailureKind = "provider_failure"

@@ -22,14 +22,11 @@ type emitter struct {
 	now            func() time.Time
 }
 
-func newEmitter(now func() time.Time, seq *events.Sequence, observers []events.Observer, replyObservers []ReplyObserver) *emitter {
+func newEmitter(now func() time.Time, observers []events.Observer, replyObservers []ReplyObserver) *emitter {
 	if now == nil {
 		now = time.Now
 	}
-	if seq == nil {
-		seq = &events.Sequence{}
-	}
-	return &emitter{seq: seq, observers: observers, replyObservers: replyObservers, now: now}
+	return &emitter{seq: &events.Sequence{}, observers: observers, replyObservers: replyObservers, now: now}
 }
 
 // emit publishes an event, filling in Seq, Time and the current turn.

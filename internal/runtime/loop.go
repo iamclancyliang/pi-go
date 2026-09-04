@@ -71,13 +71,6 @@ type Config struct {
 	// Observers receive the event stream.
 	Observers []events.Observer
 
-	// Sequence numbers this agent's events. Optional: an agent given none
-	// keeps its own. It is passed in only when something outside the runtime
-	// writes to the same stream and must share one order — the RPC command
-	// channel, whose responses are numbered from here so a consumer can put
-	// them back among the events.
-	Sequence *events.Sequence
-
 	// Now overrides the clock, for deterministic traces in tests.
 	Now func() time.Time
 
@@ -127,7 +120,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 	return &Agent{
 		cfg:     cfg,
-		emitter: newEmitter(cfg.Now, cfg.Sequence, cfg.Observers, cfg.ReplyObservers),
+		emitter: newEmitter(cfg.Now, cfg.Observers, cfg.ReplyObservers),
 		caps:    V0Capabilities(),
 		state:   NewStateNamespace(),
 	}, nil

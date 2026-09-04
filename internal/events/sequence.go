@@ -2,14 +2,16 @@ package events
 
 import "sync"
 
-// Sequence hands out the ordering numbers on the observable stream.
+// Sequence hands out ordering numbers.
 //
-// It exists so that more than one producer can share a single order. In the
-// JSON stream, lifecycle events, reply events, and — under `--mode rpc` —
-// command responses are three families on one stdout, and a consumer
-// reconstructs their true order from one monotonic counter (ADR-0009). If each
-// family numbered itself, "before" would stop meaning anything the moment two
-// families interleaved.
+// One order is a promise about DELIVERY, not just about numbers: whoever uses a
+// Sequence must allocate the number and deliver the thing it numbers under one
+// critical section, or a lower number can still arrive after a higher one taken
+// by whoever reached the lock first. Next guarantees the numbers are distinct
+// and increasing; it cannot guarantee the deliveries happen in that order. The
+// runtime's emitter and the JSON stream's writer each keep their own and each
+// hold their own lock across the delivery, which is why each of their orders
+// is real and why they are not the same order.
 //
 // The zero value is a valid, unused sequence starting at 1.
 type Sequence struct {
@@ -18,11 +20,6 @@ type Sequence struct {
 }
 
 // Next returns the next number, starting at 1.
-//
-// Whoever writes to the stream must allocate its number and write it under one
-// critical section of their own, or a lower number can still reach the wire
-// after a higher one. Next guarantees the numbers are distinct and increasing;
-// it cannot guarantee the writes happen in that order.
 func (s *Sequence) Next() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

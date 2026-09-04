@@ -191,25 +191,33 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 	return code
 }
 
+// agentRunner narrows the runtime's Agent to what the channel drives. Start
+// returns the runtime's own *Run, which already has the channel's contract;
+// the adapter exists only because Go does not let a concrete return type
+// satisfy an interface's.
+type agentRunner struct{ agent *runtime.Agent }
+
+func (a agentRunner) Start(ctx context.Context, prompt string) (rpc.Run, error) {
+	return a.agent.Start(ctx, prompt)
+}
+
 // RunRPC drives the command channel: commands on stdin, responses and events on
 // stdout, one JSON object per line.
 //
-// The run's events and the command responses share one sequence counter, so a
-// consumer reconstructs the true order of everything on stdout. Commands are
-// handled one at a time in order — a prompt runs to completion, its events
-// written, before the next command is read — which is what makes the one
-// counter honest without a lock between the two producers.
+// A prompt runs on its own goroutine while stdin keeps being read, which is
+// what lets abort, steer and follow_up arrive during one. Everything on stdout
+// is numbered by the writer under its own lock, so the wire's order is the
+// order things were written whichever goroutine wrote them.
 //
-// It returns when stdin reaches EOF. A command that fails is answered with a
-// typed failure and the loop continues; only a broken stdout stream, or stdin
-// itself failing, ends the run.
+// It returns when stdin reaches EOF, after letting a running prompt finish. A
+// command that fails is answered with a typed failure and the loop continues;
+// only a broken stdout stream, or stdin itself failing, ends the run.
 func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 	if rt.Conversation == nil || rt.Conversation.Session == nil {
 		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
 		return 1
 	}
 
-	seq := &events.Sequence{}
 	writer := jsonstream.NewWriter(streams.Out)
 
 	sess := rt.Conversation.Session
@@ -220,7 +228,6 @@ func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 		Session:        sess,
 		Thinking:       rt.Thinking,
 		Summarize:      (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
-		Sequence:       seq,
 		Observers:      []events.Observer{writer},
 		ReplyObservers: []runtime.ReplyObserver{writer},
 	})
@@ -229,8 +236,8 @@ func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 		return 1
 	}
 
-	state := rpc.NewState(sess, rt.Provider, rt.ModelName)
-	if err := rpc.Loop(ctx, streams.In, writer, seq, agent, state); err != nil {
+	channel := rpc.NewChannel(agentRunner{agent}, rpc.NewState(sess, rt.Provider, rt.ModelName))
+	if err := rpc.Loop(ctx, streams.In, writer, channel); err != nil {
 		if err == context.Canceled {
 			return 0
 		}

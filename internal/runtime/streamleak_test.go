@@ -62,7 +62,7 @@ func TestAbandoningAStreamDoesNotLeak(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		port := &observingPort{
 			inner:     endlessStream{},
-			emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, nil, []events.Observer{NewRecorder()}, nil),
+			emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, []events.Observer{NewRecorder()}, nil),
 			session:   session.New("You are pi-go."),
 			modelName: "fake-1",
 		}

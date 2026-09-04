@@ -153,9 +153,14 @@ commands and names why it cannot answer twelve is more useful than exit 2.
 5. ~~The parity matrix updated~~ — shipped 2026-09-04; the row reads `partial`, six commands
    answered natively, each unbuilt one pointing at its issue.
 
-**Shipped as a first slice.** Six commands answer — `prompt`, `get_state`, `get_messages`,
-`get_session_stats`, `get_last_assistant_text`, `set_session_name` — the framing is complete, and
-every other command fails with a typed kind that separates unknown from unbuilt. The rest arrive as
-their features do: `abort` and `steer`/`follow_up` need a prompt running while stdin is read
-concurrently, which the synchronous loop deliberately does not yet do, and the rest are the
-feature gaps this table already named.
+**Shipped, then made concurrent the same day.** The first slice answered six commands from a
+synchronous loop. The loop now runs a prompt on its own goroutine while stdin keeps being read,
+which is what `abort`, `steer` and `follow_up` need — each is a command that only means anything
+DURING a run — so nine commands answer natively. Two rules came with the concurrency: one prompt at
+a time, a second refused as `busy` rather than queued (a queue the client cannot see into is a
+prompt it believes is running; steer and follow_up are how work in flight is added to), and on EOF a
+running prompt is allowed to finish, because a client that stopped sending has not asked for the
+work to be thrown away. The one-order guarantee moved with it: it no longer rests on the loop being
+synchronous, but on the stream writer allocating every line's number under its own write lock —
+see ADR-0009's amendment. Every other command still fails with a typed kind that separates unknown
+from unbuilt, and those are the feature gaps this table already named.

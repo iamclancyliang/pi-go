@@ -76,7 +76,7 @@ func overflowPort(t *testing.T, inner ai.Port, sess *session.Session) (*observin
 	rec := NewRecorder()
 	return &observingPort{
 		inner:     inner,
-		emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, nil, []events.Observer{rec}, nil),
+		emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, []events.Observer{rec}, nil),
 		session:   sess,
 		modelName: "fake-1",
 		summarize: func(context.Context, []ai.Message) (string, []ai.Message, error) {

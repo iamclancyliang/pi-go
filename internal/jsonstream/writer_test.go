@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestAReplyLineNeverCarriesTheSnapshot(t *testing.T) {
 	}
 	got := lines(t, &buf)
 	line := got[1]
-	if line["family"] != "reply" || line["delta"] != "so" || line["seq"] != float64(2) {
+	if line["family"] != "reply" || line["delta"] != "so" || line["seq"] != float64(1) {
 		t.Fatalf("the delta line lost its content: %v", line)
 	}
 	// Index zero is a real block, and omitting it would make the first block's
@@ -159,5 +160,39 @@ func TestTheFirstWriteFailureLatches(t *testing.T) {
 	w.OnEvent(events.Event{Seq: 2, Kind: events.KindAgentEnd})
 	if w.Err() != first {
 		t.Fatal("a later write replaced the first failure")
+	}
+}
+
+// TestTheOrderIsTheWriteOrderUnderConcurrency is the wire's one promise, made
+// falsifiable: two goroutines write as fast as they can, and the seq on each
+// line must equal that line's position. A number allocated before the lock
+// rather than under it lets a lower number reach the wire after a higher one,
+// which this burst is wide enough to catch.
+func TestTheOrderIsTheWriteOrderUnderConcurrency(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+
+	const perWriter = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < perWriter; i++ {
+			w.OnEvent(events.Event{Kind: events.KindTurnStart})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < perWriter; i++ {
+			w.Reply(ai.StreamEvent{Kind: ai.StreamTextDelta, Delta: "x"})
+		}
+	}()
+	wg.Wait()
+
+	got := lines(t, &buf)
+	for i, line := range got[1:] {
+		if seq, _ := line["seq"].(float64); int(seq) != i+1 {
+			t.Fatalf("line %d carries seq %v: a number reached the wire out of order", i+1, seq)
+		}
 	}
 }

@@ -66,9 +66,18 @@ the lifecycle stream here never carried the deltas in the first place.
 so a consumer that buffers, or any hop that reorders, cannot tell what happened first.
 
 `events.Event.Seq` already exists and is documented as the ordering authority — "consumers must not
-infer order from Time", because wall clocks tie and go backwards. It goes on the wire, and reply
-lines are numbered from the same counter, so a client can interleave the two families correctly
-rather than guessing that a delta belongs to the turn currently open.
+infer order from Time", because wall clocks tie and go backwards. The wire carries a number with
+the same meaning, and reply lines are numbered from the same counter, so a client can interleave
+the two families correctly rather than guessing that a delta belongs to the turn currently open.
+
+*(Amended 2026-09-04, when the RPC channel went concurrent.)* The wire's number is **allocated by
+the stream writer under its own write lock**, not copied from the runtime's `Seq`. Once two
+goroutines write — a prompt's events and the command channel's responses — a number taken before
+the lock can reach the wire after a higher one taken by whoever got to the lock first, and "one
+order" would be a lie exactly when it mattered. So the runtime's `Seq` orders in-process observers
+and the writer's orders the wire; each is real because each is allocated and delivered under one
+lock, and they are not the same numbers. `TestTheOrderIsTheWriteOrderUnderConcurrency` is the
+falsifier: with allocation moved before the lock it fails every run.
 
 This is what ADR-0006's capability checklist calls correlation, for a one-way stream.
 

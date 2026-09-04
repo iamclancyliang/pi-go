@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -81,33 +82,77 @@ func TestAMalformedLineIsAnsweredNotFatal(t *testing.T) {
 
 // TestAPromptsResponseAndItsEventsShareOneOrder is the whole point of the
 // channel joining the stream: every line, response or event, carries a seq, and
-// the numbers are 1..N with no gap. The prompt's ack is numbered AFTER the
-// events it produced, because the work finished before the ack was made.
+// the numbers are 1..N with no gap, even though the ack and the events come
+// from different goroutines. The ack is a receipt, so it precedes the run's
+// end; the run's end is the last thing written, because the loop lets a
+// running prompt finish before it returns on EOF.
 func TestAPromptsResponseAndItsEventsShareOneOrder(t *testing.T) {
 	lines := runRPC(t, scripted("the answer"),
 		`{"id":"1","command":"prompt","message":"a question"}`)
 
-	sawRun, sawResponse := false, false
+	ackAt, endAt := -1, -1
 	for i, l := range lines {
 		seq, ok := l["seq"].(float64)
 		if !ok || int(seq) != i+1 {
 			t.Fatalf("line %d has seq %v: the one order has a gap", i+1, l["seq"])
 		}
-		switch l["family"] {
-		case "run", "reply":
-			sawRun = true
-		case "response":
-			sawResponse = true
-			if !sawRun {
-				t.Fatal("the prompt ack came before any of its events")
-			}
+		if l["family"] == "response" {
 			if l["ok"] != true || l["id"] != "1" {
 				t.Fatalf("the prompt ack is wrong: %v", l)
 			}
+			ackAt = i
+		}
+		if l["family"] == "run" && l["kind"] == "agent_end" {
+			endAt = i
 		}
 	}
-	if !sawRun || !sawResponse {
-		t.Fatalf("the stream is missing a family: run=%v response=%v", sawRun, sawResponse)
+	if ackAt < 0 || endAt < 0 {
+		t.Fatalf("the stream is missing the ack or the end: ack=%d end=%d", ackAt, endAt)
+	}
+	if ackAt > endAt {
+		t.Fatal("the ack came after the run ended: a receipt that arrives after the work is not one")
+	}
+	if endAt != len(lines)-1 {
+		t.Fatalf("agent_end is not the last line; EOF did not wait for the run: %v", lines[len(lines)-1])
+	}
+}
+
+// heldModel blocks until its context is cancelled: the shape of a model call
+// that only abort can end.
+type heldModel struct{}
+
+func (heldModel) Generate(ctx context.Context, _ ai.Request) (ai.Response, error) {
+	<-ctx.Done()
+	return ai.Response{}, ctx.Err()
+}
+
+// TestAbortEndsARunningPromptAndTheStreamSaysAborted. The abort command is read
+// while the model is still blocked — which is only possible because a prompt no
+// longer holds the loop — and the run's end reports the cancellation rather
+// than an error.
+func TestAbortEndsARunningPromptAndTheStreamSaysAborted(t *testing.T) {
+	lines := runRPC(t, heldModel{},
+		`{"id":"1","command":"prompt","message":"never answers"}`,
+		`{"id":"2","command":"abort"}`)
+
+	var abortAck map[string]any
+	var end map[string]any
+	for _, l := range lines {
+		if l["family"] == "response" && l["id"] == "2" {
+			abortAck = l
+		}
+		if l["family"] == "run" && l["kind"] == "agent_end" {
+			end = l
+		}
+	}
+	if abortAck == nil || abortAck["ok"] != true || !strings.Contains(fmt.Sprint(abortAck["data"]), "true") {
+		t.Fatalf("abort did not report cancelling a run: %v", abortAck)
+	}
+	if end == nil {
+		t.Fatal("the aborted run never ended on the stream")
+	}
+	if detail, _ := end["detail"].(map[string]any); detail["reason"] != "aborted" {
+		t.Fatalf("the run's end does not say it was aborted: %v", end)
 	}
 }
 
