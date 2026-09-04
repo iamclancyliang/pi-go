@@ -36,6 +36,25 @@ type Command struct {
 
 	// Name is the new session name, on `set_session_name`.
 	Name string `json:"name,omitempty"`
+
+	// EntryID names a point in the conversation, on `fork`; a prefix is
+	// enough, the way /tree shows them, and an ambiguous one is refused.
+	EntryID string `json:"entry_id,omitempty"`
+
+	// Session names another recorded conversation, on `switch_session`: an id
+	// (a prefix will do) or the path of its file.
+	Session string `json:"session,omitempty"`
+
+	// Since, on `get_entries`, returns only the entries after that id.
+	Since string `json:"since,omitempty"`
+
+	// Provider and Model select what answers from the next turn, on
+	// `set_model`. Provider may be empty: the one already answering.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+
+	// Instructions is what to focus a summary on, on `compact`.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // FailureKind is why a command did not succeed. Closed and stable: a client
@@ -67,6 +86,11 @@ const (
 	// FailNotRunning is a command that only means something while a prompt is
 	// in flight — steer, follow_up — arriving when nothing is.
 	FailNotRunning FailureKind = "not_running"
+
+	// FailUnavailable is a command whose subject this run does not have — a
+	// conversation kept in memory only has no shape to show and nothing to
+	// fork. The command is real and built; this run cannot answer it.
+	FailUnavailable FailureKind = "unavailable"
 
 	// FailProvider is a failure that came from the model provider, carrying the
 	// provider-independent classification every port already produces.

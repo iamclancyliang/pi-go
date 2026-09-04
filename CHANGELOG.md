@@ -19,9 +19,13 @@ file carries what a person upgrading would want to know.
   sequence, so a client can put a reply back among the events it caused. A
   prompt runs while stdin keeps being read, so `abort`, `steer` and
   `follow_up` act on it; a second prompt during a run is refused as busy.
-  `get_state`, `get_messages`, `get_session_stats`, `get_last_assistant_text`
-  and `set_session_name` answer at any time; the rest of Pi's commands fail
-  with a typed reason that says whether they are unknown or not yet built.
+  The conversation can be read and reshaped over the channel — `get_tree`,
+  `get_entries`, `fork`, `clone`, `switch_session`, `new_session`,
+  `set_session_name`, `compact` — the model switched with `set_model`, and
+  the session inspected with `get_state`, `get_messages`, `get_session_stats`,
+  `get_last_assistant_text` and `get_commands`. Eighteen of Pi's commands
+  answer; the rest fail with a typed reason that says whether they are
+  unknown or not yet built.
 - Seven built-in tools, ported against the pinned Pi source: `read`, `ls`,
   `find`, `grep`, `write`, `edit`, `bash`. Searches honour `.gitignore`; edits
   match against the original file and refuse ambiguity; bash output keeps the

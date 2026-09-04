@@ -11,6 +11,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
 // runRPC feeds commands to RunRPC and returns every stdout line parsed, with
@@ -165,5 +166,123 @@ func TestAnUnbuiltCommandFailsWithATypedKind(t *testing.T) {
 	errObj := got[0]["error"].(map[string]any)
 	if got[0]["ok"] != false || errObj["kind"] != "unimplemented" {
 		t.Fatalf("an unbuilt command was not typed unimplemented: %v", got[0])
+	}
+}
+
+// recordedRuntime opens a conversation that is written to disk, seeded with
+// one exchange, so the store-backed commands have a record to work on.
+func recordedRuntime(t *testing.T) (cli.Runtime, string) {
+	t.Helper()
+	dir := t.TempDir()
+	work := t.TempDir()
+	registry, err := tools.NewBuiltInRegistry(work)
+	if err != nil {
+		t.Fatalf("building tools: %v", err)
+	}
+	conversation, err := cli.OpenConversation(cli.Args{SessionDir: dir}, work, cli.DefaultSystemPrompt)
+	if err != nil {
+		t.Fatalf("opening a conversation: %v", err)
+	}
+	t.Cleanup(func() { conversation.Close() })
+	if err := conversation.Session.AppendAll(
+		ai.Message{Role: ai.RoleUser, Content: "first question"},
+		ai.Message{Role: ai.RoleAssistant, Content: "first answer"},
+	); err != nil {
+		t.Fatalf("seeding the record: %v", err)
+	}
+	return cli.Runtime{
+		Model: scripted("unused"), ModelName: "scripted-1", Tools: registry,
+		System: cli.DefaultSystemPrompt, Provider: "scripted", Conversation: conversation,
+		Args: cli.Args{SessionDir: dir}, WorkingDir: work,
+	}, conversation.ID
+}
+
+func runRPCWith(t *testing.T, rt cli.Runtime, commands ...string) []map[string]any {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	cli.RunRPC(context.Background(), rt,
+		cli.Streams{In: strings.NewReader(strings.Join(commands, "\n") + "\n"), Out: &out, Err: &errOut})
+	var lines []map[string]any
+	scanner := bufio.NewScanner(&out)
+	for scanner.Scan() {
+		var m map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
+			t.Fatalf("stdout carries a non-JSON line: %q", scanner.Text())
+		}
+		lines = append(lines, m)
+	}
+	return responses(lines[1:])
+}
+
+// TestTheRecordedConversationCanBeWalkedForkedAndLeft, end to end against a
+// real file store: get_tree shows the seeded exchange, fork at its first entry
+// opens a NEW conversation holding only that much, and switch_session returns
+// to the original with everything. The original file is never changed.
+func TestTheRecordedConversationCanBeWalkedForkedAndLeft(t *testing.T) {
+	rt, originalID := recordedRuntime(t)
+
+	// First pass: read the tree to learn the entry ids.
+	got := runRPCWith(t, rt, `{"id":"1","command":"get_tree"}`)
+	tree := got[0]["data"].(map[string]any)
+	entries := tree["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("the seeded exchange is not two entries: %v", entries)
+	}
+	firstID := entries[0].(map[string]any)["id"].(string)
+
+	// Second pass on the same record: fork at the first entry, then come back.
+	got = runRPCWith(t, rt,
+		`{"id":"2","command":"fork","entry_id":"`+firstID[:20]+`"}`,
+		`{"id":"3","command":"get_state"}`,
+		`{"id":"4","command":"switch_session","session":"`+originalID+`"}`,
+		`{"id":"5","command":"get_state"}`,
+		`{"id":"6","command":"new_session"}`,
+		`{"id":"7","command":"get_commands"}`,
+	)
+	forked := got[0]
+	if forked["ok"] != true {
+		t.Fatalf("fork failed: %v", forked["error"])
+	}
+	forkData := forked["data"].(map[string]any)
+	if forkData["session"] == originalID {
+		t.Fatal("fork did not open a new conversation")
+	}
+	if forkData["message_count"] != float64(1) {
+		t.Fatalf("the fork holds %v messages, not the one up to the fork point", forkData["message_count"])
+	}
+	afterFork := got[1]["data"].(map[string]any)
+	if afterFork["message_count"] != float64(1) {
+		t.Fatalf("get_state after fork does not describe the fork: %v", afterFork)
+	}
+	switched := got[2]
+	if switched["ok"] != true {
+		t.Fatalf("switch_session back to the original failed: %v", switched["error"])
+	}
+	if switched["data"].(map[string]any)["message_count"] != float64(2) {
+		t.Fatalf("the original lost messages: %v", switched["data"])
+	}
+	if got[3]["data"].(map[string]any)["message_count"] != float64(2) {
+		t.Fatalf("get_state after switching back is wrong: %v", got[3]["data"])
+	}
+	fresh := got[4]["data"].(map[string]any)
+	if fresh["message_count"] != float64(0) || fresh["session"] == originalID {
+		t.Fatalf("new_session did not start empty and new: %v", fresh)
+	}
+	cmds := got[5]["data"].(map[string]any)
+	if len(cmds["commands"].([]any)) == 0 || len(cmds["not_here"].([]any)) == 0 {
+		t.Fatalf("get_commands did not report both halves: %v", cmds)
+	}
+}
+
+// TestAnUnrecordedRunAnswersUnavailableNotInternalError: NoSession keeps the
+// conversation in memory, and the store-backed commands must say that is why.
+func TestAnUnrecordedRunAnswersUnavailableNotInternalError(t *testing.T) {
+	got := runRPC(t, scripted("unused"),
+		`{"id":"1","command":"get_tree"}`, `{"id":"2","command":"clone"}`)
+	for _, r := range responses(got) {
+		errObj, _ := r["error"].(map[string]any)
+		if r["ok"] != false || errObj["kind"] != "unavailable" {
+			t.Fatalf("%s on an unrecorded run was not unavailable: %v", r["command"], r)
+		}
 	}
 }

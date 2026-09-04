@@ -6,16 +6,51 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
-// Runner starts a prompt and hands back the live run. It is the runtime's
-// Agent narrowed to what the channel drives, so the channel is tested against
-// a fake rather than a model.
-type Runner interface {
+// Host is what the channel drives: the conversation as it stands, the agent
+// that answers in it, and the operations that change either. It is the
+// interactive session's own set of abilities, narrowed to what a command needs
+// and read through methods rather than fields because most of them change —
+// switching conversations swaps the session, switching models swaps the port —
+// and the channel must always see the current one.
+type Host interface {
+	// Session is the conversation as it stands now.
+	Session() *session.Session
+	Provider() string
+	ModelName() string
+
+	// Start submits a prompt to the current agent and hands back the live run.
 	Start(ctx context.Context, prompt string) (Run, error)
+
+	// Tree is the whole recorded conversation, branches included. ErrNotRecorded
+	// when this run keeps nothing.
+	Tree() ([]session.Node, error)
+
+	// Fork copies the conversation up to an entry into a new one and moves
+	// there; Clone does the same from where it stands. Switch reopens another
+	// recorded conversation by id or path; New starts an empty one. Each
+	// returns what was opened.
+	Fork(entryID string) (Opened, error)
+	Clone() (Opened, error)
+	Switch(session string) (Opened, error)
+	New() (Opened, error)
+
+	// SetModel points the conversation at a different model from the next turn.
+	SetModel(provider, model string) error
+
+	// Compact shortens what the model sees. ErrNothingToCompact from the
+	// compaction package is the ordinary "too short to bother" answer.
+	Compact(instructions string) error
+
+	// Commands lists what the session accepts as commands, and the Pi commands
+	// it names as absent.
+	Commands() (have []CommandInfo, absent []string)
 }
 
 // Run is a prompt in flight: the two ways to add to it, and the way to wait for
@@ -28,18 +63,22 @@ type Run interface {
 	Wait() error
 }
 
-// State reports what a session and its model are, for a client that asks
-// before or between prompts. It is the read side of the channel.
-type State struct {
-	sess      *session.Session
-	modelName string
-	provider  string
+// Opened describes a conversation a command just opened.
+type Opened struct {
+	ID           string `json:"session"`
+	Path         string `json:"path,omitempty"`
+	MessageCount int    `json:"message_count"`
 }
 
-// NewState pairs a session with the model facts the runtime holds outside it.
-func NewState(sess *session.Session, provider, modelName string) State {
-	return State{sess: sess, modelName: modelName, provider: provider}
+// CommandInfo is one slash command, for get_commands.
+type CommandInfo struct {
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
 }
+
+// ErrNotRecorded is what a Host reports when a command needs the durable
+// record and this run keeps none.
+var ErrNotRecorded = errors.New("this conversation is not recorded")
 
 // Channel dispatches commands, and owns the one prompt that may be running.
 //
@@ -48,8 +87,7 @@ func NewState(sess *session.Session, provider, modelName string) State {
 // since each is a command that arrives DURING a run. The channel therefore has
 // exactly one piece of state: the active run, or none.
 type Channel struct {
-	runner Runner
-	state  State
+	host Host
 
 	mu     sync.Mutex
 	active *activeRun
@@ -63,10 +101,9 @@ type activeRun struct {
 	err    error
 }
 
-// NewChannel builds a channel over a runner. The runner may be nil for a
-// read-only channel; prompt then fails as unimplemented rather than panicking.
-func NewChannel(runner Runner, state State) *Channel {
-	return &Channel{runner: runner, state: state}
+// NewChannel builds a channel over a host.
+func NewChannel(host Host) *Channel {
+	return &Channel{host: host}
 }
 
 // stateData is the get_state payload.
@@ -94,6 +131,17 @@ type statsData struct {
 	UsageReported   bool   `json:"usage_reported"`
 }
 
+// entryData is one node of the conversation on the wire.
+type entryData struct {
+	ID       string    `json:"id"`
+	ParentID string    `json:"parent_id,omitempty"`
+	Kind     string    `json:"kind"`
+	At       time.Time `json:"at"`
+	Summary  string    `json:"summary"`
+	OnPath   bool      `json:"on_path"`
+	IsLeaf   bool      `json:"is_leaf"`
+}
+
 // Dispatch executes one command and returns its response, minus the sequence
 // the writer stamps.
 //
@@ -101,8 +149,14 @@ type statsData struct {
 // started, and the outcome — the reply, a failure, an abort — arrives as events,
 // with agent_end saying how it ended. A client that reads the ack as completion
 // is wrong here for the same reason it is wrong in Pi.
+//
+// Anything that swaps the conversation or the model — fork, clone, switch,
+// new, set_model, compact — is refused as busy while a prompt runs. The agent
+// holds the session and port it was built with, and swapping either under a
+// live run would write its next turn into a conversation the client just left.
 func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 	resp := Response{Family: "response", ID: cmd.ID, Command: cmd.Command}
+	sess := c.host.Session()
 
 	switch cmd.Command {
 	case "prompt":
@@ -132,18 +186,18 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "get_state":
 		return okData(resp, stateData{
-			Provider:     c.state.provider,
-			Model:        c.state.modelName,
-			SessionName:  c.state.sess.Name(),
-			MessageCount: len(c.state.sess.Snapshot().Messages),
+			Provider:     c.host.Provider(),
+			Model:        c.host.ModelName(),
+			SessionName:  sess.Name(),
+			MessageCount: len(sess.Snapshot().Messages),
 			Running:      c.running() != nil,
 		})
 
 	case "get_messages":
-		return okData(resp, map[string]any{"messages": c.state.sess.Snapshot().Messages})
+		return okData(resp, map[string]any{"messages": sess.Snapshot().Messages})
 
 	case "get_last_assistant_text":
-		text, found := lastAssistant(c.state.sess)
+		text, found := lastAssistant(sess)
 		var value *string
 		if found {
 			value = &text
@@ -151,13 +205,66 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		return okData(resp, map[string]any{"text": value})
 
 	case "get_session_stats":
-		return okData(resp, statsFrom(c.state))
+		return okData(resp, statsFrom(c.host, sess))
 
 	case "set_session_name":
-		if err := c.state.sess.SetName(cmd.Name); err != nil {
+		if err := sess.SetName(cmd.Name); err != nil {
 			return fail(resp, FailInternal, err.Error())
 		}
-		return okData(resp, map[string]any{"name": c.state.sess.Name()})
+		return okData(resp, map[string]any{"name": sess.Name()})
+
+	case "get_tree", "get_entries":
+		return c.entries(cmd, resp)
+
+	case "fork":
+		if strings.TrimSpace(cmd.EntryID) == "" {
+			return fail(resp, FailBadArgument, "fork needs the entry_id of the point to fork at; get_tree lists them")
+		}
+		return c.reopen(resp, func() (Opened, error) { return c.host.Fork(cmd.EntryID) })
+
+	case "clone":
+		return c.reopen(resp, c.host.Clone)
+
+	case "switch_session":
+		if strings.TrimSpace(cmd.Session) == "" {
+			return fail(resp, FailBadArgument, "switch_session needs a session id or path")
+		}
+		return c.reopen(resp, func() (Opened, error) { return c.host.Switch(cmd.Session) })
+
+	case "new_session":
+		return c.reopen(resp, c.host.New)
+
+	case "set_model":
+		if strings.TrimSpace(cmd.Model) == "" {
+			return fail(resp, FailBadArgument, "set_model needs a model")
+		}
+		if c.running() != nil {
+			return fail(resp, FailBusy, "a prompt is running; the model changes between turns, not during one")
+		}
+		if err := c.host.SetModel(cmd.Provider, cmd.Model); err != nil {
+			return failFromRun(resp, err)
+		}
+		return okData(resp, map[string]any{"provider": c.host.Provider(), "model": c.host.ModelName()})
+
+	case "compact":
+		if c.running() != nil {
+			return fail(resp, FailBusy, "a prompt is running; compact between turns")
+		}
+		before := len(sess.Snapshot().Messages)
+		if err := c.host.Compact(cmd.Instructions); err != nil {
+			var nothing *compaction.ErrNothingToCompact
+			if errors.As(err, &nothing) {
+				// Completing by doing nothing is a success that says so, the
+				// same shape as aborting when nothing runs.
+				return okData(resp, map[string]any{"compacted": false, "detail": err.Error()})
+			}
+			return failFromRun(resp, err)
+		}
+		return okData(resp, map[string]any{"compacted": true, "messages_before": before})
+
+	case "get_commands":
+		have, absent := c.host.Commands()
+		return okData(resp, map[string]any{"commands": have, "not_here": absent})
 
 	case "":
 		return fail(resp, FailMalformed, "a command carried no verb")
@@ -171,15 +278,72 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 	}
 }
 
+// entries answers get_tree and get_entries from one read of the record.
+//
+// get_tree is everything, branches included; get_entries is the conversation
+// as it stands — the entries on the current path — optionally only those after
+// a given one. Both name the leaf, which is where the next turn attaches.
+func (c *Channel) entries(cmd Command, resp Response) Response {
+	nodes, err := c.host.Tree()
+	if errors.Is(err, ErrNotRecorded) {
+		return fail(resp, FailUnavailable, err.Error())
+	}
+	if err != nil {
+		return fail(resp, FailInternal, err.Error())
+	}
+
+	out := make([]entryData, 0, len(nodes))
+	leaf := ""
+	after := cmd.Command == "get_entries" && cmd.Since != ""
+	skipping := after
+	for _, n := range nodes {
+		if n.OnPath && n.IsLeaf {
+			leaf = n.ID
+		}
+		if cmd.Command == "get_entries" && !n.OnPath {
+			continue
+		}
+		if skipping {
+			if n.ID == cmd.Since {
+				skipping = false
+			}
+			continue
+		}
+		out = append(out, entryData{ID: n.ID, ParentID: n.ParentID, Kind: n.Kind, At: n.At,
+			Summary: n.Summary, OnPath: n.OnPath, IsLeaf: n.IsLeaf})
+	}
+	if after && skipping {
+		return fail(resp, FailBadArgument, "no entry on the current path has the id "+cmd.Since)
+	}
+	var leafValue *string
+	if leaf != "" {
+		leafValue = &leaf
+	}
+	return okData(resp, map[string]any{"entries": out, "leaf": leafValue})
+}
+
+// reopen runs one of the conversation-swapping operations, refusing it while a
+// prompt runs.
+func (c *Channel) reopen(resp Response, open func() (Opened, error)) Response {
+	if c.running() != nil {
+		return fail(resp, FailBusy, "a prompt is running; abort it or wait for it before changing conversation")
+	}
+	opened, err := open()
+	if errors.Is(err, ErrNotRecorded) {
+		return fail(resp, FailUnavailable, err.Error())
+	}
+	if err != nil {
+		return fail(resp, FailInternal, err.Error())
+	}
+	return okData(resp, opened)
+}
+
 // prompt starts a run and acknowledges it.
 //
 // One at a time: a second prompt while one runs is refused as busy rather than
 // queued, because a queue the client cannot see into is a prompt it believes is
 // running. Steer and follow_up are how a client adds to work in flight.
 func (c *Channel) prompt(ctx context.Context, cmd Command, resp Response) Response {
-	if c.runner == nil {
-		return fail(resp, FailUnimplemented, "this channel has no agent to prompt")
-	}
 	if strings.TrimSpace(cmd.Message) == "" {
 		return fail(resp, FailBadArgument, "prompt needs a message")
 	}
@@ -191,7 +355,7 @@ func (c *Channel) prompt(ctx context.Context, cmd Command, resp Response) Respon
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
-	run, err := c.runner.Start(runCtx, cmd.Message)
+	run, err := c.host.Start(runCtx, cmd.Message)
 	if err != nil {
 		cancel()
 		return failFromRun(resp, err)
@@ -250,12 +414,12 @@ func (a *activeRun) finished() bool {
 	}
 }
 
-func statsFrom(state State) statsData {
-	usage := state.sess.Usage()
+func statsFrom(host Host, sess *session.Session) statsData {
+	usage := sess.Usage()
 	data := statsData{
-		Provider:      state.provider,
-		Model:         state.modelName,
-		MessageCount:  len(state.sess.Snapshot().Messages),
+		Provider:      host.Provider(),
+		Model:         host.ModelName(),
+		MessageCount:  len(sess.Snapshot().Messages),
 		InputTokens:   usage.InputTokens,
 		OutputTokens:  usage.OutputTokens,
 		UsageReported: usage.Reported,
@@ -320,14 +484,11 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // here fails as unimplemented; one not here fails as unknown. The list is the
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
-	"new_session": true,
-	"set_model":   true, "cycle_model": true, "get_available_models": true,
+	"cycle_model": true, "get_available_models": true,
 	"set_thinking_level": true, "cycle_thinking_level": true, "get_available_thinking_levels": true,
 	"set_steering_mode": true, "set_follow_up_mode": true,
-	"compact": true, "set_auto_compaction": true,
-	"set_auto_retry": true, "abort_retry": true,
+	"set_auto_compaction": true,
+	"set_auto_retry":      true, "abort_retry": true,
 	"bash": true, "abort_bash": true,
-	"export_html": true, "switch_session": true, "fork": true, "clone": true,
-	"get_fork_messages": true, "get_entries": true, "get_tree": true,
-	"get_commands": true,
+	"export_html": true, "get_fork_messages": true,
 }

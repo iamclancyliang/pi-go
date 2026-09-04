@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/compaction"
@@ -191,14 +195,234 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 	return code
 }
 
-// agentRunner narrows the runtime's Agent to what the channel drives. Start
-// returns the runtime's own *Run, which already has the channel's contract;
-// the adapter exists only because Go does not let a concrete return type
-// satisfy an interface's.
-type agentRunner struct{ agent *runtime.Agent }
+// rpcHost is the command channel's view of a run: the conversation and agent
+// as they stand, and the operations that change them. The same abilities the
+// interactive loop wires into its commands, with the same reasons — a swapped
+// conversation rebuilds the agent, because a loop holds the session it was
+// built with, and a swapped model reopens the port before anything is pointed
+// at it.
+type rpcHost struct {
+	mu      sync.Mutex
+	rt      Runtime
+	writer  *jsonstream.Writer
+	current *Conversation
+	agent   *runtime.Agent
+	port    ai.Port
+	prov    string
+	model   string
+}
 
-func (a agentRunner) Start(ctx context.Context, prompt string) (rpc.Run, error) {
-	return a.agent.Start(ctx, prompt)
+func newRPCHost(rt Runtime, writer *jsonstream.Writer) (*rpcHost, error) {
+	h := &rpcHost{rt: rt, writer: writer, current: rt.Conversation,
+		port: rt.Model, prov: rt.Provider, model: rt.ModelName}
+	if err := h.build(); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+// build makes the agent for the current conversation and model. The writer is
+// wired as both observers, which is how the run's events reach the stream.
+func (h *rpcHost) build() error {
+	next, err := runtime.New(runtime.Config{
+		Model:          h.port,
+		ModelName:      h.model,
+		Tools:          h.rt.Tools,
+		Session:        h.current.Session,
+		Thinking:       h.rt.Thinking,
+		Summarize:      (&compaction.Compactor{Model: h.port, ModelName: h.model}).Summarize,
+		Observers:      []events.Observer{h.writer},
+		ReplyObservers: []runtime.ReplyObserver{h.writer},
+	})
+	if err != nil {
+		return err
+	}
+	h.agent = next
+	return nil
+}
+
+func (h *rpcHost) Session() *session.Session {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.current.Session
+}
+
+func (h *rpcHost) Provider() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.prov
+}
+
+func (h *rpcHost) ModelName() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.model
+}
+
+func (h *rpcHost) Start(ctx context.Context, prompt string) (rpc.Run, error) {
+	h.mu.Lock()
+	agent := h.agent
+	h.mu.Unlock()
+	return agent.Start(ctx, prompt)
+}
+
+func (h *rpcHost) Tree() ([]session.Node, error) {
+	h.mu.Lock()
+	store := h.current.Store
+	h.mu.Unlock()
+	if store == nil {
+		return nil, rpc.ErrNotRecorded
+	}
+	return store.Tree(context.Background())
+}
+
+// opened reports the conversation now current.
+func (h *rpcHost) opened() rpc.Opened {
+	return rpc.Opened{ID: h.current.ID, Path: h.current.Path,
+		MessageCount: len(h.current.Session.Snapshot().Messages)}
+}
+
+// reopen swaps in another conversation. The old one is closed only once the
+// new one is open, so a failure leaves the client in the session it was in
+// rather than in none at all.
+func (h *rpcHost) reopen(args Args) (rpc.Opened, error) {
+	next, err := OpenConversation(args, h.rt.WorkingDir, h.rt.System)
+	if err != nil {
+		return rpc.Opened{}, err
+	}
+	_ = h.current.Close()
+	h.current = next
+	if err := h.build(); err != nil {
+		return rpc.Opened{}, err
+	}
+	return h.opened(), nil
+}
+
+func (h *rpcHost) Fork(entryID string) (rpc.Opened, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.current.Store == nil {
+		return rpc.Opened{}, rpc.ErrNotRecorded
+	}
+	full, err := resolveEntryIn(h.current.Store, entryID)
+	if err != nil {
+		return rpc.Opened{}, err
+	}
+	return h.branch(full)
+}
+
+func (h *rpcHost) Clone() (rpc.Opened, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.current.Store == nil {
+		return rpc.Opened{}, rpc.ErrNotRecorded
+	}
+	return h.branch(h.current.Store.Leaf())
+}
+
+// branch copies the conversation up to an entry into a new file and reopens
+// there, through the ordinary resume path so a fork lands in the same state a
+// resumed conversation does.
+func (h *rpcHost) branch(leaf string) (rpc.Opened, error) {
+	now := time.Now()
+	id := session.NewSessionID(now)
+	path := filepath.Join(session.DirFor(h.current.Dir, h.rt.WorkingDir), session.FileName(id, now))
+	forked, err := h.current.Store.BranchInto(context.Background(), path, h.rt.WorkingDir, id, leaf)
+	if err != nil {
+		return rpc.Opened{}, err
+	}
+	forked.Close()
+	next := h.rt.Args
+	next.Continue, next.Resume = false, path
+	return h.reopen(next)
+}
+
+func (h *rpcHost) Switch(which string) (rpc.Opened, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	next := h.rt.Args
+	next.Continue, next.Resume = false, which
+	return h.reopen(next)
+}
+
+func (h *rpcHost) New() (rpc.Opened, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	fresh := h.rt.Args
+	fresh.Continue, fresh.Resume = false, ""
+	return h.reopen(fresh)
+}
+
+func (h *rpcHost) SetModel(toProvider, toModel string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	next := h.rt.Args
+	next.Model = toModel
+	if toProvider != "" {
+		next.Provider = toProvider
+	} else {
+		// No provider named means the one already answering, not whichever
+		// credential happens to be found first.
+		next.Provider = h.prov
+	}
+	opened, openedProvider, openedModel, err := Open(next, h.rt.Transport)
+	if err != nil {
+		return err
+	}
+	h.port, h.prov, h.model = opened, openedProvider, openedModel
+	return h.build()
+}
+
+func (h *rpcHost) Compact(instructions string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := &compaction.Compactor{
+		Model: h.port, ModelName: h.model, Instructions: instructions,
+		KeepRecentTokens: h.rt.Config.Effective.Compaction.KeepRecentTokens,
+	}
+	summary, kept, err := c.Summarize(context.Background(), h.current.Session.Truth())
+	if err != nil {
+		return err
+	}
+	return h.current.Session.Compact(summary, kept)
+}
+
+func (h *rpcHost) Commands() ([]rpc.CommandInfo, []string) {
+	have := make([]rpc.CommandInfo, 0, len(commands))
+	for name, cmd := range commands {
+		have = append(have, rpc.CommandInfo{Name: name, Summary: cmd.Summary})
+	}
+	sort.Slice(have, func(i, j int) bool { return have[i].Name < have[j].Name })
+	absent := make([]string, 0, len(notImplemented))
+	for name := range notImplemented {
+		absent = append(absent, "/"+name)
+	}
+	sort.Strings(absent)
+	return have, absent
+}
+
+// resolveEntryIn turns a prefix into an entry id, refusing ambiguity: standing
+// at the wrong point is not something to discover from the conversation
+// afterwards.
+func resolveEntryIn(store *session.FileStore, prefix string) (string, error) {
+	nodes, err := store.Tree(context.Background())
+	if err != nil {
+		return "", err
+	}
+	var matched []string
+	for _, n := range nodes {
+		if strings.HasPrefix(n.ID, prefix) {
+			matched = append(matched, n.ID)
+		}
+	}
+	switch len(matched) {
+	case 0:
+		return "", fmt.Errorf("no entry here starts with %q; get_tree lists them", prefix)
+	case 1:
+		return matched[0], nil
+	default:
+		return "", fmt.Errorf("%q matches more than one entry", prefix)
+	}
 }
 
 // RunRPC drives the command channel: commands on stdin, responses and events on
@@ -219,25 +443,14 @@ func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 	}
 
 	writer := jsonstream.NewWriter(streams.Out)
-
-	sess := rt.Conversation.Session
-	agent, err := runtime.New(runtime.Config{
-		Model:          rt.Model,
-		ModelName:      rt.ModelName,
-		Tools:          rt.Tools,
-		Session:        sess,
-		Thinking:       rt.Thinking,
-		Summarize:      (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
-		Observers:      []events.Observer{writer},
-		ReplyObservers: []runtime.ReplyObserver{writer},
-	})
+	host, err := newRPCHost(rt, writer)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
+	defer func() { _ = host.current.Close() }()
 
-	channel := rpc.NewChannel(agentRunner{agent}, rpc.NewState(sess, rt.Provider, rt.ModelName))
-	if err := rpc.Loop(ctx, streams.In, writer, channel); err != nil {
+	if err := rpc.Loop(ctx, streams.In, writer, rpc.NewChannel(host)); err != nil {
 		if err == context.Canceled {
 			return 0
 		}

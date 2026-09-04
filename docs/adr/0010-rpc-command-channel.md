@@ -164,3 +164,15 @@ work to be thrown away. The one-order guarantee moved with it: it no longer rest
 synchronous, but on the stream writer allocating every line's number under its own write lock —
 see ADR-0009's amendment. Every other command still fails with a typed kind that separates unknown
 from unbuilt, and those are the feature gaps this table already named.
+
+**The cheap half of the table, filled the same day.** Nine more commands answer from abilities the
+interactive session already had — the store's tree (`get_tree`, `get_entries`), branching (`fork`,
+`clone`), reopening (`switch_session`, `new_session`), the model switch (`set_model`), the summariser
+(`compact`) and the command table (`get_commands`) — through a `Host` seam the channel reads by
+method, because switching a conversation swaps the session and switching a model swaps the port, and
+the channel must always see the current one. Eighteen of thirty-two answer natively. Two rules came
+with them: anything that swaps the conversation or the model is `busy` while a prompt runs, since the
+agent holds the session and port it was built with; and a run kept in memory answers `unavailable`
+to the store-backed commands, which is a state of that run rather than a bug in it. The fourteen that
+remain are the feature gaps this table named, plus `get_fork_messages`, which is the fork picker's
+listing and waits on the picker (#28).
