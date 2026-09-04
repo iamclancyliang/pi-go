@@ -19,6 +19,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/events"
+	"github.com/iamclancyliang/pi-go/internal/rpc"
 )
 
 // Version is the stream protocol version, named on the first line so a
@@ -156,6 +157,19 @@ func (w *Writer) Reply(e ai.StreamEvent) {
 	}
 
 	w.write(line)
+}
+
+// WriteResponse writes one command response, its sequence already allocated
+// from the shared counter. It is how the RPC channel joins this stream: the
+// response family lands in the one order among the run and reply families.
+//
+// The seq is set here rather than trusted from the caller's struct so the wire
+// number is the one the shared counter handed out — the same discipline the
+// events go through.
+func (w *Writer) WriteResponse(seq int, resp rpc.Response) error {
+	resp.Seq = seq
+	w.write(resp)
+	return w.Err()
 }
 
 // Err reports the first write failure, or nil.

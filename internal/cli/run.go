@@ -13,6 +13,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/events"
 	"github.com/iamclancyliang/pi-go/internal/jsonstream"
+	"github.com/iamclancyliang/pi-go/internal/rpc"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
@@ -188,6 +189,55 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 		return 1
 	}
 	return code
+}
+
+// RunRPC drives the command channel: commands on stdin, responses and events on
+// stdout, one JSON object per line.
+//
+// The run's events and the command responses share one sequence counter, so a
+// consumer reconstructs the true order of everything on stdout. Commands are
+// handled one at a time in order — a prompt runs to completion, its events
+// written, before the next command is read — which is what makes the one
+// counter honest without a lock between the two producers.
+//
+// It returns when stdin reaches EOF. A command that fails is answered with a
+// typed failure and the loop continues; only a broken stdout stream, or stdin
+// itself failing, ends the run.
+func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
+	if rt.Conversation == nil || rt.Conversation.Session == nil {
+		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
+		return 1
+	}
+
+	seq := &events.Sequence{}
+	writer := jsonstream.NewWriter(streams.Out)
+
+	sess := rt.Conversation.Session
+	agent, err := runtime.New(runtime.Config{
+		Model:          rt.Model,
+		ModelName:      rt.ModelName,
+		Tools:          rt.Tools,
+		Session:        sess,
+		Thinking:       rt.Thinking,
+		Summarize:      (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
+		Sequence:       seq,
+		Observers:      []events.Observer{writer},
+		ReplyObservers: []runtime.ReplyObserver{writer},
+	})
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+
+	state := rpc.NewState(sess, rt.Provider, rt.ModelName)
+	if err := rpc.Loop(ctx, streams.In, writer, seq, agent, state); err != nil {
+		if err == context.Canceled {
+			return 0
+		}
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // RunInteractive reads prompts a line at a time and answers each in turn.

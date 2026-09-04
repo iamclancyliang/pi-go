@@ -1,7 +1,7 @@
 # pi-go parity matrix
 
 **Status:** implementation active · this matrix is the parity audit, not a precondition for it
-**Last reconciled against the code:** 2026-09-04 (json/rpc mode and model-listing rows, deviations D-15–D-17, `--mode json` shipping); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
+**Last reconciled against the code:** 2026-09-04 (json/rpc mode and model-listing rows, deviations D-15–D-17, `--mode json` and the `--mode rpc` channel shipping); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
@@ -135,7 +135,7 @@ Pi source: `src/main.ts:118-133`, `src/cli/args.ts`. Class B. Target v1.
 | `coding-agent.mode.interactive` | `internal/cli/run.go` `RunInteractive` | `TestInteractiveAnswersEachLineAndEndsAtEOF` | compatible, less D-7 |
 | `coding-agent.mode.print` | `internal/cli/run.go` `RunPrint` | `TestPrintWritesTheAnswerToStdoutAndNothingElse`, `TestPrintReportsAFailureOnStderrAndInTheExitCode` | compatible |
 | `coding-agent.mode.json` | `internal/cli/run.go` `RunJSON`, `internal/jsonstream/` | `TestOneCounterSpansBothFamilies` (confirmed to fail with a second counter), `TestTheStreamCarriesTheReplyAndItsLifecycle`, `TestAReplyLineNeverCarriesTheSnapshot`, `TestJSONModeWritesOnlyTheStreamToStdout` | partial — the stream ships per ADR-0009 (D-16): version line, both families, one `seq`. **Not Pi's shape and not its coverage**: 8 of Pi's 24 event capabilities have native equivalents; the missing 15 are the features' own gaps (#28, #32, #36, #39, extensions), enumerated in ADR-0009's table |
-| `coding-agent.mode.rpc` | — | — | **incomplete** (#31) — protocol decided: ADR-0010 (accepted 2026-09-04): required ids (D-17), responses on the same `seq`-ordered stdout, typed failures from the existing taxonomy. 17 of Pi's 32 commands have native equivalents today; every incomplete one is tracked (#28, #30, #32, #36, #39, #40, #41). Implementation not started |
+| `coding-agent.mode.rpc` | `internal/cli/run.go` `RunRPC`, `internal/rpc/` | `TestACommandWithoutAnIdIsRefused`, `TestAPromptsResponseAndItsEventsShareOneOrder`, `TestAnUnbuiltCommandFailsWithATypedKind`, `TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers`, `TestAProviderFailureKeepsItsClassification` | partial — the channel ships per ADR-0010 (D-17): required ids, responses on the stream's one `seq`, typed failures. Six commands answer natively — `prompt`, `get_state`, `get_messages`, `get_session_stats`, `get_last_assistant_text`, `set_session_name`; the rest fail with a typed kind that separates unknown from unbuilt, each unbuilt one tracked (#28, #30, #32, #36, #39, #40, #41) |
 | mode resolution (§2.1) | `internal/cli/mode.go` | `TestTheTerminalIsHalfTheDecision`, `TestModeTextMeansLetTheEnvironmentDecide` | compatible |
 | CLI flags | `internal/cli/args.go` | `TestTheFlagsThisBuildActsOn`, `TestAPiFlagThisBuildLacksIsSaidAloud` | partial — 13 of 40 acted on; the rest warn rather than being silently ignored |
 

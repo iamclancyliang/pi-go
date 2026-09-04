@@ -144,11 +144,18 @@ commands and names why it cannot answer twelve is more useful than exit 2.
 
 ## What this needs before it is code
 
-1. The request and response serialisation, with `id` required, `seq` on every response, and the
-   failure kinds closed and tested.
-2. A golden transcript test — commands in, ordered stdout out — beside ADR-0009's stream test.
+1. ~~The request and response serialisation~~ — `internal/rpc`, `id` required, `seq` on every
+   response from the shared counter, failure kinds closed and tested.
+2. ~~A golden transcript test~~ — `TestAPromptsResponseAndItsEventsShareOneOrder` (the one order),
+   plus the channel's refusal and dispatch tests.
 3. ~~The deviation registered~~ — done on acceptance: **D-17**.
 4. ~~Issues for the two gaps this table surfaced~~ — filed on acceptance: #40, #41.
-5. The parity matrix updated when the channel ships: `coding-agent.mode.rpc` moves to `partial`
-   with this table as evidence, each incomplete command pointing at the issue that owns it. (On
-   acceptance the row already names this ADR as the decision; the move waits for the code.)
+5. ~~The parity matrix updated~~ — shipped 2026-09-04; the row reads `partial`, six commands
+   answered natively, each unbuilt one pointing at its issue.
+
+**Shipped as a first slice.** Six commands answer — `prompt`, `get_state`, `get_messages`,
+`get_session_stats`, `get_last_assistant_text`, `set_session_name` — the framing is complete, and
+every other command fails with a typed kind that separates unknown from unbuilt. The rest arrive as
+their features do: `abort` and `steer`/`follow_up` need a prompt running while stdin is read
+concurrently, which the synchronous loop deliberately does not yet do, and the rest are the
+feature gaps this table already named.

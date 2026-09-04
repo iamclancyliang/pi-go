@@ -15,18 +15,21 @@ import (
 // independently, "before" would stop meaning anything.
 type emitter struct {
 	mu             sync.Mutex
-	seq            int
+	seq            *events.Sequence
 	turn           int
 	observers      []events.Observer
 	replyObservers []ReplyObserver
 	now            func() time.Time
 }
 
-func newEmitter(now func() time.Time, observers []events.Observer, replyObservers []ReplyObserver) *emitter {
+func newEmitter(now func() time.Time, seq *events.Sequence, observers []events.Observer, replyObservers []ReplyObserver) *emitter {
 	if now == nil {
 		now = time.Now
 	}
-	return &emitter{observers: observers, replyObservers: replyObservers, now: now}
+	if seq == nil {
+		seq = &events.Sequence{}
+	}
+	return &emitter{seq: seq, observers: observers, replyObservers: replyObservers, now: now}
 }
 
 // emit publishes an event, filling in Seq, Time and the current turn.
@@ -38,9 +41,8 @@ func (e *emitter) emit(kind events.Kind, mutate func(*events.Event)) events.Even
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.seq++
 	ev := events.Event{
-		Seq:       e.seq,
+		Seq:       e.seq.Next(),
 		Kind:      kind,
 		Time:      e.now(),
 		TurnIndex: e.turn,
@@ -68,8 +70,7 @@ func (e *emitter) emitReply(event ai.StreamEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.seq++
-	event.Seq = e.seq
+	event.Seq = e.seq.Next()
 	for _, o := range e.replyObservers {
 		if o != nil {
 			o.Reply(event)
