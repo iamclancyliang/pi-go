@@ -98,7 +98,7 @@ ADR-0006 requires each remote capability to end as `native-equivalent`, `accepte
 | --- | --- | --- |
 | `agent_start` · `turn_start` | `agent_start` · `turn_start` | native-equivalent |
 | `turn_end` | `turn_end` — carries a reason; Pi's carries the message and its tool results | native-equivalent, shape differs |
-| `agent_end` | `agent_end` — without `willRetry`, because pi-go has no session-level auto-retry to report | **incomplete** — and nothing tracks that absence yet |
+| `agent_end` | `agent_end` — without `willRetry`, because pi-go has no session-level auto-retry to report | **incomplete** (#39) |
 | `message_start` · `message_end` | `model_request` · `model_response` | native-equivalent, **decomposed differently**: Pi's are per message (user, assistant, tool result), pi-go's are per model call |
 | `message_update` | the `ReplyObserver` stream, twelve variants | native-equivalent, and unmerged |
 | `tool_execution_start` · `tool_execution_end` | `tool_start` · `tool_end` | native-equivalent |
@@ -110,8 +110,8 @@ ADR-0006 requires each remote capability to end as `native-equivalent`, `accepte
 | `compaction_start` · `compaction_end` | — | **incomplete** — `internal/compaction` runs and emits nothing |
 | `entry_appended` · `session_info_changed` | — | **incomplete** — the session store appends without publishing |
 | `thinking_level_changed` | — | **incomplete** (#36) — nothing writes a thinking level at all |
-| `auto_retry_start` · `auto_retry_end` | — | **incomplete** — no auto-retry; untracked, see below |
-| `summarization_retry_scheduled` · `_attempt_start` · `_finished` | — | **incomplete** — needs retry and branch summarization (#32) |
+| `auto_retry_start` · `auto_retry_end` | — | **incomplete** (#39) — no auto-retry |
+| `summarization_retry_scheduled` · `_attempt_start` · `_finished` | — | **incomplete** — needs retry (#39) and branch summarization (#32) |
 | `bash_execution_update` | — | **incomplete** (#28) — Pi's `!` execution is a full-screen-mode surface |
 | `extension_error` | — | **incomplete** — no extension host; the parity matrix records that surface as architecture-risk |
 
@@ -135,11 +135,11 @@ should be registered as one when this is accepted.
 **One counter across two families is a constraint on the emitters**, not just the writer: both seams
 must draw from the same sequence, or the interleaving the wire promises is not real. That is a test.
 
-**The absence of session-level auto-retry now has a name and no issue.** Two of Pi's events and three
-more retry-adjacent ones exist only because Pi retries a failed turn. pi-go does not, anywhere — the
-provider ports switch SDK retries *off* by design, which is a different question. Whether pi-go
-should retry a turn is a product decision nobody has made, and this ADR's accounting is what surfaced
-it. It needs an issue before the parity release, not before this ADR.
+**The absence of session-level auto-retry now has a name and an issue: #39.** Five of Pi's events
+exist only because Pi retries a failed turn. pi-go does not, anywhere — the provider ports switch SDK
+retries *off* by design, which is a different question. Whether pi-go should retry a turn is a
+product decision nobody has made; this ADR's accounting is what surfaced it, and #39 is where it gets
+made.
 
 **pi-go's stream carries two events Pi has no counterpart for** — `tool_result` and `model_changed`.
 Both are already justified where they are declared. They make the stream not a subset of Pi's in
@@ -177,7 +177,7 @@ that changes what a client should do. pi-go's names are its own, and the mapping
 5. **The parity matrix updated**: `coding-agent.mode.json` moves from `incomplete` to `partial` with
    this table as its evidence, and `coding-agent.mode.rpc` stays `incomplete` naming the command
    channel.
-6. **An issue for session-level auto-retry**, which this accounting found unowned.
+6. ~~An issue for session-level auto-retry~~ — filed as #39.
 
 The command channel — 32 commands, their request fields and response payloads all recorded in §21.1
 and §21.2 — needs its own decision covering ownership and contention, cancellation, correlation of a
