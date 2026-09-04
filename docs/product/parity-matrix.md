@@ -1,7 +1,7 @@
 # pi-go parity matrix
 
 **Status:** implementation active · this matrix is the parity audit, not a precondition for it
-**Last reconciled against the code:** 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
+**Last reconciled against the code:** 2026-09-04 (json/rpc mode rows); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
@@ -134,8 +134,8 @@ Pi source: `src/main.ts:118-133`, `src/cli/args.ts`. Class B. Target v1.
 | --- | --- | --- | --- |
 | `coding-agent.mode.interactive` | `internal/cli/run.go` `RunInteractive` | `TestInteractiveAnswersEachLineAndEndsAtEOF` | compatible, less D-7 |
 | `coding-agent.mode.print` | `internal/cli/run.go` `RunPrint` | `TestPrintWritesTheAnswerToStdoutAndNothingElse`, `TestPrintReportsAFailureOnStderrAndInTheExitCode` | compatible |
-| `coding-agent.mode.json` | — | — | **incomplete** (#31) — event schema is `schema-needed`; the mode resolves and refuses rather than emitting an invented shape |
-| `coding-agent.mode.rpc` | — | — | **incomplete** (#31), same reason |
+| `coding-agent.mode.json` | — | — | **incomplete** (#31) — the mode resolves and refuses rather than emitting an invented shape. The schema is no longer what blocks it: Pi's 24 event payloads were expanded field by field on 2026-09-04 (inventory §6.1, §21.3). What remains is the decision ADR-0006 forces — Pi's wire is explicitly not the target, so pi-go's native equivalent has to be designed rather than copied |
+| `coding-agent.mode.rpc` | — | — | **incomplete** (#31), same reason. Its 32 command response payloads are recorded too (§21.3); RPC additionally emits `extension_error`, which the JSON stream does not |
 | mode resolution (§2.1) | `internal/cli/mode.go` | `TestTheTerminalIsHalfTheDecision`, `TestModeTextMeansLetTheEnvironmentDecide` | compatible |
 | CLI flags | `internal/cli/args.go` | `TestTheFlagsThisBuildActsOn`, `TestAPiFlagThisBuildLacksIsSaidAloud` | partial — 13 of 40 acted on; the rest warn rather than being silently ignored |
 

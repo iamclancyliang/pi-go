@@ -32,7 +32,7 @@ always get distinct IDs.
 | Slash commands | `enumerated` (22) · semantics from descriptions, plus handler semantics for 7 read at the pin (§27.1); the rest open selector UIs whose behaviour is TUI and unread |
 | Wire protocol (CBOR) | `enumerated` |
 | coding-agent RPC commands | discriminant set **closed** (§21); request top-level fields **enumerated** (§21.1); response payload schemas **`enumerated`** — the nine referenced types expanded field by field on 2026-09-04 (§21.3) |
-| coding-agent RPC events | `enumerated` (**24**, source union; 3 `source-only`; every `output(` call classified) |
+| coding-agent RPC events | `enumerated` (**24**, source union; 3 `source-only`; every `output(` call classified) · payload fields expanded 2026-09-04 (§6.1), including the wire transform that makes the emitted `message_update` differ from the union and the JSON stream one event smaller than RPC's |
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | **closed** — coding-agent 7 (§15), harness 4 (§8.2), both with input schemas |
 | Providers | `enumerated` (**42** IDs = 40 text + 1 image + 1 fake; registry-derived) |
@@ -235,7 +235,7 @@ sources, and RPC session subscription forwards session events straight to stdout
 | Layer | Evidence | Unique types |
 | --- | --- | --- |
 | `AgentEvent` | `packages/agent/src/types.ts:428-443` | 10 |
-| `AgentSessionEvent` adds | `packages/coding-agent/src/core/agent-session.ts:141-185` | +13 |
+| `AgentSessionEvent` adds | `packages/coding-agent/src/core/agent-session.ts:141-183` | +13 |
 | RPC adds | `extension_error` | +1 |
 | **Total** | | **24** |
 
@@ -272,6 +272,134 @@ Added by RPC: `extension_error`
 > **`agent_end` and `agent_settled` are separate features and must not be merged.** `agent_end` is
 > one low-level run finishing; `agent_settled` means no automatic retry, compaction retry **or**
 > queued continuation remains. Only the latter is safe for a client to wait on.
+
+### 6.1 Event payloads, expanded field by field — and the wire is not the union
+
+Read from the pinned tree on **2026-09-04**. The membership above is the union of three sources; the
+fields below are what each member actually carries. Two structural facts come first, because both
+change what a port must emit and neither is visible from the union.
+
+#### ⚠ `toJsonEvent` is not a pass-through
+
+`modes/json-event.ts`. It rewrites exactly one event and returns the other 23 unchanged — but that
+one is the highest-frequency event in any stream.
+
+| `message_update` | In process | On the wire |
+| --- | --- | --- |
+| `message` | `AgentMessage` | **dropped** |
+| `usage` | — | `Usage`, lifted from `event.message.usage` |
+| `assistantMessageEvent` | `AssistantMessageEvent` | the same, with **`partial` stripped** |
+
+It also throws when `message.role !== "assistant"` (`:35-37`), so a non-assistant `message_update` is
+a programming error rather than a wire case.
+
+The reason is in the function's own comment: "Remove cumulative assistant snapshots from streaming
+wire events. `message_start` provides the initial message, deltas build it, and `message_end`
+provides the final authoritative message. Cumulative usage remains available because its size is
+constant."
+
+**A port that serialised `AgentSessionEvent` directly would send a full cumulative copy of the
+assistant message with every delta** — output quadratic in the length of a reply, for data the client
+already has.
+
+#### ⚠ The JSON stream and the RPC stream are not the same size
+
+`--mode json` has no file of its own: it is print mode with `mode === "json"` (`print-mode.ts:6`),
+writing `JSON.stringify(toJsonEvent(event))` and a newline per session event (`:108-112`).
+
+| | Session events | `extension_error` | Total |
+| --- | --- | --- | --- |
+| `--mode json` | yes | **no** — extension failures go to `console.error` (`print-mode.ts:101-103`) | **23** |
+| RPC | yes, via `output(toJsonEvent(event))` (`rpc-mode.ts:356`) | yes (`:349`) | **24** |
+
+Both also subscribe to the agent for backpressure — `await waitForRawStdoutBackpressure()`
+(`print-mode.ts:113-116`, `rpc-mode.ts:361-363`) — so the producer yields to a slow reader. A port
+that writes without that can outrun a pipe.
+
+#### The 10 from `AgentEvent`
+
+`packages/agent/src/types.ts:428-443`.
+
+| Event | Fields |
+| --- | --- |
+| `agent_start` | — |
+| `agent_end` | `messages: AgentMessage[]` — **overridden at session level, see below** |
+| `turn_start` | — |
+| `turn_end` | `message: AgentMessage`, `toolResults: ToolResultMessage[]` |
+| `message_start` | `message: AgentMessage` |
+| `message_update` | `message`, `assistantMessageEvent` — **reshaped on the wire, above**; emitted only for assistant messages during streaming |
+| `message_end` | `message: AgentMessage` |
+| `tool_execution_start` | `toolCallId: string`, `toolName: string`, `args: any` |
+| `tool_execution_update` | `toolCallId`, `toolName`, `args: any`, `partialResult: any` |
+| `tool_execution_end` | `toolCallId`, `toolName`, `result: any`, `isError: boolean` |
+
+`args`, `partialResult` and `result` are `any` at this boundary and stay unschematised: the only
+description of their shape is the tool's own input schema (§15) and whatever the tool returns. A port
+must carry them opaquely rather than typing them here.
+
+#### The 13 added by `AgentSessionEvent`
+
+`packages/coding-agent/src/core/agent-session.ts:141-183`.
+
+| Event | Fields |
+| --- | --- |
+| `agent_end` **(redefined)** | `messages: AgentMessage[]`, `willRetry: boolean` |
+| `agent_settled` | — |
+| `queue_update` | `steering: readonly string[]`, `followUp: readonly string[]` |
+| `compaction_start` | `reason: "manual" \| "threshold" \| "overflow"` |
+| `compaction_end` | `reason` (same union), `result: CompactionResult \| undefined`, `aborted: boolean`, `willRetry: boolean`, `errorMessage?: string` |
+| `entry_appended` | `entry: SessionEntry` (§21.3) |
+| `session_info_changed` | `name: string \| undefined` — undefined is the cleared name, not a missing field |
+| `thinking_level_changed` | `level: ThinkingLevel` (the 7-member one, §21.3) |
+| `auto_retry_start` | `attempt: number`, `maxAttempts: number`, `delayMs: number`, `errorMessage: string` |
+| `auto_retry_end` | `success: boolean`, `attempt: number`, `finalError?: string` |
+| `summarization_retry_scheduled` | `attempt`, `maxAttempts`, `delayMs`, `errorMessage` — same four as `auto_retry_start` |
+| `summarization_retry_attempt_start` | **two variants**, see below |
+| `summarization_retry_finished` | — |
+| `bash_execution_update` | `id?: string`, `delta: string` |
+
+⚠ **`agent_end` is replaced, not extended.** The union opens with
+`Exclude<AgentEvent, { type: "agent_end" }>` and then declares its own, adding `willRetry`. A port
+reading the field list from `AgentEvent` gets a valid-looking `agent_end` that has lost the flag
+saying whether the run is actually over — and "the agent stopped" versus "the agent will try again"
+is the difference between a client rendering a result and a client waiting.
+
+⚠ **`summarization_retry_attempt_start` is declared twice with DIFFERENT shapes.** It is a sub-union
+on `source`: `{ source: "branchSummary" }` and `{ source: "compaction"; reason: "manual" |
+"threshold" | "overflow" }`. This is unlike `auto_retry_end`, whose two declarations are identical
+and harmless; collapsing this pair into one shape loses `reason` for the compaction case.
+
+#### The 1 added by RPC
+
+`rpc-mode.ts:349` emits `{ type: "extension_error", extensionPath, event, error }`.
+
+⚠ **The wire event has four fields; the source type has five.** `ExtensionError`
+(`core/extensions/types.ts:1723`) is `{ extensionPath: string; event: string; error: string; stack?:
+string }`, and the emission does not carry `stack`. `event` is the extension hook's name as a string,
+not a nested event object.
+
+#### `AssistantMessageEvent` — 12 members, nested inside `message_update`
+
+`packages/ai/src/types.ts:523-539`. Every member except the last two carries
+`partial: AssistantMessage`, which is exactly what the wire strips.
+
+| Member | Fields besides `partial` |
+| --- | --- |
+| `start` | — |
+| `text_start` · `thinking_start` · `toolcall_start` | `contentIndex: number` |
+| `text_delta` · `thinking_delta` · `toolcall_delta` | `contentIndex`, `delta: string` |
+| `text_end` · `thinking_end` | `contentIndex`, `content: string` |
+| `toolcall_end` | `contentIndex`, `toolCall: ToolCall` |
+| `done` | `reason: Extract<StopReason, "stop" \| "length" \| "toolUse" \| "deferred">`, `message: AssistantMessage` — **no `partial`** |
+| `error` | `reason: Extract<StopReason, "aborted" \| "error">`, `error: AssistantMessage` — **no `partial`** |
+
+⚠ **On the `error` member, the field named `error` holds an `AssistantMessage`, not an error object
+or a string.** The failure arrives as the message that failed, with its own `errorMessage`,
+`stopReason` and `usage` — which is how a failed attempt still reports what it spent.
+
+⚠ **`done` and `error` are the two members the wire transform leaves alone**, because neither has
+`partial`. So 10 of the 12 shrink on the wire and 2 do not, and a port cannot apply one rule to all.
+
 
 ## 7. Models, providers, auth
 
