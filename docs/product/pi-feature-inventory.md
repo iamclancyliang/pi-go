@@ -31,7 +31,7 @@ always get distinct IDs.
 | CLI flags | `enumerated` (40) · semantics per flag `semantics-needed` |
 | Slash commands | `enumerated` (22) · semantics from descriptions, plus handler semantics for 7 read at the pin (§27.1); the rest open selector UIs whose behaviour is TUI and unread |
 | Wire protocol (CBOR) | `enumerated` |
-| coding-agent RPC commands | discriminant set **closed** (§21); request top-level fields **enumerated** (§21.1); response payload schemas **`schema-needed`** (§21.3) |
+| coding-agent RPC commands | discriminant set **closed** (§21); request top-level fields **enumerated** (§21.1); response payload schemas **`enumerated`** — the nine referenced types expanded field by field on 2026-09-04 (§21.3) |
 | coding-agent RPC events | `enumerated` (**24**, source union; 3 `source-only`; every `output(` call classified) |
 | RPC UI-dialog requests | `enumerated` (9, from source type) |
 | Built-in tools ×2 sets | **closed** — coding-agent 7 (§15), harness 4 (§8.2), both with input schemas |
@@ -198,7 +198,7 @@ All from `packages/coding-agent/src/cli/args.ts`. Coverage `enumerated`; per-fla
 ## 6. coding-agent RPC mode — `coding-agent.rpc.*`
 
 `packages/coding-agent/docs/rpc.md`. **A DIFFERENT SURFACE from §5 — never merge the two.**
-Per-command request/response payloads are `schema-needed`.
+Per-command request fields are enumerated in §21.1 and response payload schemas in §21.3.
 
 **Commands — 32, RE-DERIVED FROM SOURCE.** Authority is the `RpcCommand` union,
 `packages/coding-agent/src/modes/rpc/rpc-types.ts:20-73` (responses: `:117-231`, see section 21). The docs-derived
@@ -1066,14 +1066,221 @@ The other **15** commands take no fields beyond the optional `id`: `abort` · `a
 the ones lost — and a truncated result is indistinguishable from a complete one. The range is a
 proxy; the union is the authority.
 
-### 21.3 Referenced types are NAMES, not schemas — this axis is `schema-needed`
+### 21.3 Referenced types, expanded field by field — this axis is `enumerated`
 
-`RpcSessionState` · `Model` · `CompactionResult` · `BashResult` · `SessionStats` · `SessionEntry` ·
-`SessionTreeNode` · `AgentMessage` · `RpcSlashCommand`
+Read from the pinned tree on **2026-09-04**. The nine names below were recorded as names only, which
+left every data-carrying RPC response a shape a port could not build. Each is now expanded with its
+authority, and the leaf types they reach are expanded under them.
 
-None of these are expanded here. Naming a type is not recording its schema, so the response payload
-schemas remain **`schema-needed`** until each is either expanded field-by-field or linked to a closed
-data-format feature ID.
+**Resolving the names is the first hazard.** `rpc-types.ts:8-14` imports across four packages, and
+two of the nine names have a **second, unrelated definition** elsewhere in the tree:
+
+| Name | Authority for RPC | The other one, which is NOT this |
+| --- | --- | --- |
+| `RpcSessionState` | `modes/rpc/rpc-types.ts:95` | — |
+| `Model<TApi>` | `packages/ai/src/types.ts:794` (via `@earendil-works/pi-ai`) | — |
+| `CompactionResult<T>` | `core/compaction/compaction.ts:88`, reached through `compaction/index.ts`'s `export *` | `packages/agent/src/harness/agent-harness.ts:114` — a `ResultValue<…, CompactionRejected>`, an entirely different shape |
+| `BashResult` | `core/bash-executor.ts:29` | — |
+| `SessionStats` | `core/agent-session.ts:262` | `packages/agent/src/harness/session/types.ts:265` |
+| `SessionEntry` | `core/session-manager.ts:144` | — |
+| `SessionTreeNode` | `core/session-manager.ts:159` | — |
+| `AgentMessage` | `packages/agent/src/types.ts:325` **plus declaration merging** — see below | — |
+| `RpcSlashCommand` | `modes/rpc/rpc-types.ts:79` | — |
+
+⚠ **`ThinkingLevel` has two definitions and the RPC one is the larger.** `packages/agent/src/types.ts:300`
+is 7 members — `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` — and `packages/ai/src/types.ts:82`
+is the same list **without `off`** (6), with `ModelThinkingLevel = "off" | ThinkingLevel` (`:83`)
+restoring it. `rpc-types.ts` imports from `@earendil-works/pi-agent-core`, so the RPC vocabulary is
+the 7-member one. A port that took the `pi-ai` union would reject `off`, which is the level `/thinking`
+users set most.
+
+#### `RpcSessionState` — `get_state`, 12 fields
+
+| Field | Type | Note |
+| --- | --- | --- |
+| `model?` | `Model<any>` | **optional** — a session can be running with no model resolved |
+| `thinkingLevel` | `ThinkingLevel` | required, 7-member union |
+| `isStreaming` | `boolean` | |
+| `isCompacting` | `boolean` | separate from `isStreaming`; both can matter to a client's idle check |
+| `steeringMode` | `"all" \| "one-at-a-time"` | |
+| `followUpMode` | `"all" \| "one-at-a-time"` | |
+| `sessionFile?` | `string` | absent for a session never written to disk |
+| `sessionId` | `string` | always present, unlike `sessionFile` |
+| `sessionName?` | `string` | |
+| `autoCompactionEnabled` | `boolean` | |
+| `messageCount` | `number` | |
+| `pendingMessageCount` | `number` | queued input, not yet sent |
+
+#### `Model<TApi>` — `set_model` data, and the element of `get_available_models`
+
+`packages/ai/src/types.ts:794-822`. `get_available_models` returns `{ models }` where models is
+`readonly Model<Api>[]` (`core/model-runtime.ts:422`, returned verbatim by `rpc-mode.ts:486-488`).
+
+| Field | Type |
+| --- | --- |
+| `id`, `name` | `string` |
+| `api` | `TApi` (an `Api` literal) |
+| `provider` | `ProviderId` |
+| `baseUrl` | `string` |
+| `reasoning` | `boolean` |
+| `thinkingLevelMap?` | `ThinkingLevelMap` — **missing key = provider default, `null` = level UNSUPPORTED** |
+| `input` | `("text" \| "image")[]` |
+| `cost` | `ModelCost` — `input`/`output`/`cacheRead`/`cacheWrite` in $/million, plus optional `tiers[]` of `ModelCostTier` (`inputTokensAbove`); the highest matching threshold applies to the whole request |
+| `contextWindow`, `maxTokens` | `number` |
+| `samplingParams?` | `Record<string, unknown>` — per-request keys override |
+| `headers?` | `Record<string, string>` |
+| `compat?` | conditional on `TApi`: `OpenAICompletionsCompat`, `OpenAIResponsesCompat`, `AnthropicMessagesCompat`, `BedrockCompat`, else `never` |
+
+**The shape is recorded here; the CONTENT is still `source-gap` (§7.2).** A port can build a valid
+`Model` object. It cannot populate one for any real model from the pinned tree, because the catalogue
+data is gitignored and absent. Those are separate gaps and only the first is closed by this section.
+
+#### `CompactionResult<T>` — `compact`
+
+`core/compaction/compaction.ts:88`. Six fields: `summary` (string), `firstKeptEntryId` (string),
+`tokensBefore` (number), `estimatedTokensAfter?` (number), `usage?` (`Usage`, "from the LLM call(s)
+that generated this summary"), `details?` (`T`, extension-specific).
+
+The comment above it is load-bearing: "SessionManager adds uuid/parentUuid when saving" — the RPC
+payload is **not** the persisted entry. The stored `CompactionEntry` (below) carries the same
+`summary`/`firstKeptEntryId`/`tokensBefore`/`details`/`usage` plus the entry base and `fromHook`, and
+does **not** carry `estimatedTokensAfter`.
+
+#### `BashResult` — `bash`
+
+`core/bash-executor.ts:29`. Five fields:
+
+| Field | Type | Note |
+| --- | --- | --- |
+| `output` | `string` | **combined stdout + stderr**, sanitized, possibly truncated — not two streams |
+| `exitCode` | `number \| undefined` | undefined when killed or cancelled |
+| `cancelled` | `boolean` | |
+| `truncated` | `boolean` | |
+| `fullOutputPath?` | `string` | temp file with the untruncated output, when the threshold was passed |
+
+⚠ **A command can end three ways and two of them share `exitCode: undefined`.** Cancelled is the flag,
+not the missing code; a port keying on the code alone cannot separate "cancelled" from "killed".
+
+#### `SessionStats` — `get_session_stats`
+
+`core/agent-session.ts:262`. `sessionFile` (`string | undefined`), `sessionId`, four counters —
+`userMessages`, `assistantMessages`, `toolCalls`, `toolResults` — plus `totalMessages`, a nested
+`tokens: { input, output, cacheRead, cacheWrite, total }`, `cost: number` (a single number, unlike
+`Usage.cost` which is an object), and `contextUsage?: ContextUsage`.
+
+#### `SessionEntry` — the element of `get_entries`, and of every tree node
+
+`core/session-manager.ts:144`, a nine-member union over `SessionEntryBase` (`:46`) =
+`{ type, id, parentId: string | null, timestamp }`. §27.2 recorded the union's membership and the
+file format; the member fields are recorded here, which closes most of what §27.2 listed as not read.
+
+| `type` | Added fields | Authority |
+| --- | --- | --- |
+| `message` | `message: AgentMessage` | `:53` |
+| `thinking_level_change` | `thinkingLevel: string` — **a plain string, not `ThinkingLevel`** | `:58` |
+| `model_change` | `provider: string`, `modelId: string` | `:63` |
+| `compaction` | `summary`, `firstKeptEntryId`, `tokensBefore`, `details?: T`, `usage?: Usage`, `fromHook?: boolean` ("true if generated by an extension, undefined/false if pi-generated") | `:69` |
+| `branch_summary` | `fromId: string`, `summary: string`, `details?: T` (**not sent to the LLM**), `usage?: Usage`, `fromHook?: boolean` | `:82` |
+| `custom` | `customType: string`, `data?: T` — **does NOT participate in LLM context** | `:104` |
+| `custom_message` | `customType: string`, `content: string \| (TextContent \| ImageContent)[]`, `details?: T`, `display: boolean` — **DOES participate in context**, converted to a user message; `display` false hides it, true renders it with distinct styling | `:135` |
+| `label` | `targetId: string`, `label: string \| undefined` | `:111` |
+| `session_info` | `name?: string` | `:118` |
+
+⚠ **`custom` and `custom_message` differ only in whether the model sees them.** Same-looking pair,
+opposite context semantics, each stated in the doc comment above its declaration (`:104`, `:135`).
+
+#### `SessionTreeNode` — `get_tree`
+
+`core/session-manager.ts:159`, "defensive copy of session structure": `entry: SessionEntry`,
+`children: SessionTreeNode[]`, `label?: string` ("resolved label for this entry"),
+`labelTimestamp?: string`. The label is **resolved onto the node**, so a consumer of the tree does not
+replay `label` entries itself.
+
+#### `AgentMessage` — `get_messages`, and every `message` entry
+
+⚠ **This is the one the name hides completely.** `packages/agent/src/types.ts:325` reads
+`AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages]`, and `CustomAgentMessages`
+is declared **empty** at `:316` — so read alone, `AgentMessage` ≡ `Message`, three roles.
+
+`core/messages.ts:69-77` then extends it by **declaration merging**:
+
+```ts
+declare module "@earendil-works/pi-agent-core" {
+    interface CustomAgentMessages {
+        bashExecution: BashExecutionMessage;
+        custom: CustomMessage;
+        branchSummary: BranchSummaryMessage;
+        compactionSummary: CompactionSummaryMessage;
+    }
+}
+```
+
+So in the coding agent — which is what RPC serves — `AgentMessage` has **seven** members, not three.
+A port built from the type declaration would drop four message kinds that `get_messages` really
+returns, and TypeScript would not have complained on either side.
+
+| `role` | Fields | Authority |
+| --- | --- | --- |
+| `user` | `content: string \| (TextContent \| ImageContent)[]`, `timestamp` | `ai/types.ts:409` |
+| `assistant` | `content: (TextContent \| ThinkingContent \| ToolCall)[]`, `api`, `provider`, `model`, `responseModel?` (the concrete model when it differs from the requested one), `responseId?`, `diagnostics?`, `usage: Usage`, `stopReason: StopReason`, `deferred?`, `errorMessage?`, `rawStopReason?`, `endTurn?`, `timestamp` | `:415` |
+| `toolResult` | `toolCallId`, `toolName`, `content: (TextContent \| ImageContent)[]`, `details?`, `usage?` (**the tool's own, not part of context accounting**), `addedToolNames?`, `isError: boolean`, `timestamp` | `:437` |
+| `bashExecution` | `command`, `output`, `exitCode: number \| undefined`, `cancelled`, `truncated`, `fullOutputPath?`, `timestamp`, `excludeFromContext?` (the `!!` prefix) | `messages.ts:29` |
+| `custom` | `customType`, `content: string \| (TextContent \| ImageContent)[]`, `display: boolean`, `details?`, `timestamp` | `messages.ts:46` |
+| `branchSummary` | `summary`, `fromId`, `timestamp` | `messages.ts:55` |
+| `compactionSummary` | `summary`, `tokensBefore`, `timestamp` | `messages.ts:62` |
+
+`bashExecution` mirrors `BashResult` field for field plus `command`, `timestamp` and
+`excludeFromContext` — the same data in two shapes, which a port should map rather than re-derive.
+
+#### `RpcSlashCommand` — `get_commands`
+
+`rpc-types.ts:79`: `name` (without the leading slash), `description?`, `source:
+"extension" | "prompt" | "skill"`, and `sourceInfo: SourceInfo`.
+
+`SourceInfo` (`core/source-info.ts:6`): `path`, `source`, `scope: "user" | "project" | "temporary"`,
+`origin: "package" | "top-level"`, `baseDir?`. The synthetic constructor (`:24`) defaults `scope` to
+`temporary` and `origin` to `top-level`.
+
+#### Leaf types these reach
+
+**`Usage`** (`ai/types.ts:370`) — `input`, `output`, `cacheRead`, `cacheWrite`, `cacheWrite1h?`,
+`reasoning?`, `totalTokens`, and `cost: { input, output, cacheRead, cacheWrite, total }`.
+⚠ **Two fields are subsets, not additions.** `reasoning` is already inside `output`, and `cacheWrite1h`
+is the 1-hour-retention part of `cacheWrite` (Anthropic only). Summing them into a total double-counts.
+Both are optional in the sense that matters: a provider that reports no breakdown leaves them
+undefined, which is not zero.
+
+**`ContextUsage`** (`core/extensions/types.ts:288`) — `tokens: number | null`, `contextWindow: number`,
+`percent: number | null`. ⚠ **`null` is the documented state right after compaction**, before the next
+LLM response; a port treating it as 0 would show a freshly compacted session as empty.
+
+**Content blocks** (`ai/types.ts:338-368`), the last layer:
+
+| Type | Fields |
+| --- | --- |
+| `TextContent` | `type:"text"`, `text`, `textSignature?` |
+| `ThinkingContent` | `type:"thinking"`, `thinking`, `thinkingSignature?`, `redacted?` — when redacted, the opaque payload lives in the signature and must be passed back for multi-turn continuity |
+| `ImageContent` | `type:"image"`, `data` (base64), `mimeType` |
+| `ToolCall` | `type:"toolCall"`, `id`, `name`, `arguments: Record<string, any>`, `thoughtSignature?` (Google), `namespace?` (OpenAI Responses) |
+
+`StopReason` is closed separately as `ai.stop-reason` — 7 members.
+
+#### Two payloads §21.2 could only name
+
+- **`get_available_models` → `{ models }`** is `readonly Model<Api>[]`, the model runtime's snapshot
+  returned unchanged (`model-runtime.ts:422`, `rpc-mode.ts:486-488`).
+- **`get_available_thinking_levels` → `{ levels }`** is ⚠ **not the 7-member union**.
+  `agent-session.ts:1729` returns the module constant `["off","minimal","low","medium","high"]` — five —
+  **only when no model is set**. With a model it returns `getSupportedThinkingLevels(model)`
+  (`ai/models.ts:902`), which is:
+  - `["off"]` **exactly**, when `model.reasoning` is false;
+  - otherwise `["off","minimal","low","medium","high","xhigh","max"]` filtered by the model's
+    `thinkingLevelMap`: a `null` mapping removes the level, and `xhigh`/`max` are included **only if
+    the map names them at all**.
+
+  So the answer is per-model and usually shorter than the type. A port returning the union would offer
+  levels the model will not honour, and one returning the five-member constant would offer them for
+  every model rather than only the model-less case.
 
 ### 21.4 `prompt`, `steer` and `follow_up` acknowledge — they do not report results
 
@@ -2617,9 +2824,13 @@ Authority `src/core/session-manager.ts`.
   first `session_info` entry's trimmed name — so the latest wins and an empty
   name clears the title.
 
-**Not read:** label entries and their re-chaining rules in full, branch summary
-entries, `custom`/`custom_message` payload contracts, migration between
-versions.
+**Field shapes for all nine members are now recorded in §21.3** (read 2026-09-04),
+including the `label`, `branch_summary`, `custom` and `custom_message` entries
+this line previously listed as unread.
+
+**Still not read:** the re-chaining rules that drop label entries on fork in
+full, and migration between session versions. Both are behaviour rather than
+shape, which is why expanding the entry union did not close them.
 
 ### 27.3 Project trust — `coding-agent.setting.defaultProjectTrust`, `/trust`
 
@@ -2743,8 +2954,8 @@ satisfy itself that it is already following the rule while counting the proxy.
 
 **Remaining work:**
 
-- **`schema-needed`:** per-command RPC
-  response payload internals; the SDK's own API surface.
+- **`schema-needed`:** the SDK's own API surface. (Per-command RPC response payload internals were
+  closed on 2026-09-04 — §21.3.)
 - **`source-gap`:** the model catalogue, which is generated at build time and absent from the pinned
   commit.
 - **Open by decision:** the environment-variable family, where a literal search cannot establish
