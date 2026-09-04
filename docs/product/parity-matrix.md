@@ -1,7 +1,7 @@
 # pi-go parity matrix
 
 **Status:** implementation active · this matrix is the parity audit, not a precondition for it
-**Last reconciled against the code:** 2026-09-04 (json/rpc mode rows); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
+**Last reconciled against the code:** 2026-09-04 (json/rpc mode and model-listing rows, deviations D-15–D-17); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
@@ -134,8 +134,8 @@ Pi source: `src/main.ts:118-133`, `src/cli/args.ts`. Class B. Target v1.
 | --- | --- | --- | --- |
 | `coding-agent.mode.interactive` | `internal/cli/run.go` `RunInteractive` | `TestInteractiveAnswersEachLineAndEndsAtEOF` | compatible, less D-7 |
 | `coding-agent.mode.print` | `internal/cli/run.go` `RunPrint` | `TestPrintWritesTheAnswerToStdoutAndNothingElse`, `TestPrintReportsAFailureOnStderrAndInTheExitCode` | compatible |
-| `coding-agent.mode.json` | — | — | **incomplete** (#31) — the mode resolves and refuses rather than emitting an invented shape. The schema is no longer what blocks it: Pi's 24 event payloads were expanded field by field on 2026-09-04 (inventory §6.1, §21.3). What remains is the decision ADR-0006 forces — Pi's wire is explicitly not the target, so pi-go's native equivalent has to be designed rather than copied |
-| `coding-agent.mode.rpc` | — | — | **incomplete** (#31), same reason. Its 32 command response payloads are recorded too (§21.3); RPC additionally emits `extension_error`, which the JSON stream does not |
+| `coding-agent.mode.json` | — | — | **incomplete** (#31) — the mode resolves and refuses rather than emitting an invented shape. The protocol is now decided: ADR-0009 (accepted 2026-09-04) — both streams on one stdout, unmerged, one `seq` counter, a version line first, D-16 registered. What remains is the implementation and its tests; the row moves to `partial` when the stream ships |
+| `coding-agent.mode.rpc` | — | — | **incomplete** (#31) — protocol decided: ADR-0010 (accepted 2026-09-04): required ids (D-17), responses on the same `seq`-ordered stdout, typed failures from the existing taxonomy. 17 of Pi's 32 commands have native equivalents today; every incomplete one is tracked (#28, #30, #32, #36, #39, #40, #41). Implementation not started |
 | mode resolution (§2.1) | `internal/cli/mode.go` | `TestTheTerminalIsHalfTheDecision`, `TestModeTextMeansLetTheEnvironmentDecide` | compatible |
 | CLI flags | `internal/cli/args.go` | `TestTheFlagsThisBuildActsOn`, `TestAPiFlagThisBuildLacksIsSaidAloud` | partial — 13 of 40 acted on; the rest warn rather than being silently ignored |
 
@@ -153,14 +153,14 @@ Pi source: `src/core/slash-commands.ts:20-41` and the handlers in
 | `compact` | `internal/compaction/` | compatible, less D-3 |
 | `name`, `export`, `import`, `copy` | `internal/cli/commands.go` | compatible, less D-4 (import), D-5 (export/share format) |
 | `share` | `internal/cli/commands.go` | compatible, less D-5, D-6 |
-| `model` | `internal/cli/commands.go` | partial — the `<provider/model>` argument form; the catalogue-backed selector needs §7.2, a `source-gap` |
+| `model` | `internal/cli/commands.go` | partial — the `<provider/model>` argument form; the selector needs the provider-reported listing (ADR-0008, accepted, unimplemented) and the full-screen picker (#28). Accepting a name no listing contains is D-15, not a gap |
 | `login`, `logout` | `internal/auth/` | partial — API keys; Pi's OAuth flows are not ported |
 | `settings` | `internal/settings/` | partial — 9 keys, not Pi's 49; see D-8 |
 | `trust` | `internal/trust/` | compatible-via-adapter — the decision and its nearest-ancestor rule are Pi's; what it gates is pi-go's own resource set |
 | `reload` | `internal/cli/settings_cmd.go` | partial — settings only; Pi also reloads extensions, skills, prompts, themes, context files |
 | `hotkeys` | `internal/tui/bindings.go` | partial — the editor's keys; Pi's app-level chords need the full interface |
 | `changelog` | `CHANGELOG.md`, embedded | compatible |
-| `scoped-models` | — | **incomplete** (#30) — needs the model catalogue (§7.2, `source-gap`) |
+| `scoped-models` | — | **incomplete** (#30) — the data source is decided: ADR-0008, a provider-reported listing asked for on demand. What still blocks it: the listing is unimplemented, the selector is a full-screen surface (#28), and Pi's selector semantics were never read |
 
 ### Sessions — `coding-agent.session.*`
 
@@ -188,7 +188,7 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
 | context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
 | model facts (window, output cap, reasoning) | `internal/ai/catalogue.go` | `TestTheMeasuredDeepSeekFactsAreWhatWasMeasured`, `TestAnUnrecordedModelSaysSoRatherThanAnsweringZero` | accepted-deviation — ADR-0007: owned, sourced per entry, one model recorded. Pi's generated catalogue is a `source-gap` (§7.2) and is not reproduced |
-| full per-provider model list | — | — | **incomplete** (#30) — needs a source `GET /v1/models` cannot give |
+| full per-provider model list | — | — | **incomplete** (#30) — split by ADR-0008: identifiers come from the provider when a person asks (unimplemented), and the facts stay owned per ADR-0007, so a "full list with facts" is deliberately never reproduced |
 | OpenRouter, Ollama, Claude, Ark, Gemini, Qianfan ports | `internal/provider/{openrouter,ollama,claude,ark,gemini,qianfan}/` | `TestAModerationRefusalIsNotAnAuthenticationFailure`, `TestAModelThatWasNeverPulledSaysHowToFixIt`, `TestTheStatusesAndTypesThisProviderDocuments`, `TestTheStatusesThisPortClassifiesOn`, `TestTheCanonicalStatusNamesThisProviderSends`, `TestTheBackendIsNotChosenByTheEnvironment`, `TestTheCodesThisProvidersOwnSDKNames`, `TestOneCallSendsOneRequest` | partial — **unverified-against-provider** except Qianfan, which answered a live call on 2026-08-31: no credential exists for the others and no server for Ollama, so the wire semantics are this repository's reading of each vendor SDK's own types and of wordings pi recorded at the pin. A live test per provider is written and skips until a credential exists |
 | Qianfan reached without its component | `internal/provider/qianfan/` | `TestTheCompatibleEndpointIsWhatIsReached`, `TestAStreamThatRenumbersItsToolCallsIsRefused`, `TestAModelThisAccountCannotUseIsNotReportedAsABadCredential`, `TestAnAccountInArrearsIsNotReportedAsABadCredential`; **live** `TestLiveQianfanAnswersAndReportsWhatItSpent` ran against the provider on 2026-08-31 | accepted-deviation (#38) — eino-ext's Qianfan component builds its own HTTP client and keeps credentials in a process-wide singleton, so a port on it could not count its requests, classify a refusal from the body, or be tested without a credential. This port speaks the provider's OpenAI-compatible v2 endpoint through the shared dialect instead. ADR-0007 settles which providers are reached, not which component reaches them. **Partially verified**: one streamed completion answered with usage read off the wire; tool calling is untested because the account went into arrears |
 
@@ -210,9 +210,10 @@ Each is a place pi-go behaves differently from Pi. **@qy-liang decided these on
 permanent and its row may reach a final disposition; an `incomplete` is a gap
 that will be closed and blocks its row until it is.
 
-The split is not about how defensible each difference is — all twelve had a
-reason at the point they were made. It is about whether the difference is
-meant to last.
+The split is not about how defensible each difference is — each had a reason at
+the point it was made. It is about whether the difference is meant to last.
+D-15–D-17 were added on 2026-09-04, decided with ADR-0008, ADR-0009 and
+ADR-0010.
 
 ### Accepted deviations — permanent
 
@@ -226,6 +227,9 @@ meant to last.
 | D-10 | `read` | tries macOS filename fallbacks (NFD, curly quotes, narrow no-break space) | fails as a missing file | a path that quietly resolves to a different file is worse than one that fails |
 | D-11 | `--mode <invalid>` | ignored silently | ignored, with a warning | `--mode interactive` names the one mode the flag rejects and would otherwise look like it worked |
 | D-12 | unimplemented Pi flags and commands | — | warn, naming the reason | a flag a user believes took effect is the failure a parser must not have |
+| D-15 | `/model <name>` | an exact match against the catalogue sets the model; no match opens the selector filtered by the term | an exact name switches whether or not any listing contains it; the listing is discovery, not an allowlist | ADR-0008 — being unable to enumerate is not evidence a name is invalid, and a provider whose listing call fails must not take its working models with it |
+| D-16 | JSON event stream | one stream; content deltas arrive inside `message_update`, whose cumulative snapshot `toJsonEvent` strips on the way out | two families on one stdout — lifecycle and reply lines — correlated by a shared `seq` | ADR-0009 — pi-go never builds the cumulative snapshot, so there is nothing to strip; merging would add the round trip Pi's own source treats as overhead. Takes effect with `--mode json` |
+| D-17 | RPC requests | `id` optional; a response without one is attributable only by arrival order | `id` required, echoed on every response | ADR-0010 — correlation by position is a latent bug, not a convenience worth keeping. Takes effect with `--mode rpc` |
 
 
 

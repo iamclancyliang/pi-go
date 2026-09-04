@@ -1,6 +1,6 @@
 # ADR-0008: The model listing is asked of the provider; the model facts stay owned
 
-**Status:** proposed — awaiting @qy-liang
+**Status:** accepted — @qy-liang, 2026-09-04
 **Date:** 2026-09-04
 **Decision owner:** @qy-liang
 **Related:** ADR-0007 · `docs/product/pi-feature-inventory.md` §4, §7.2, §27.1 · issues #30, #33, #36 · `docs/product/parity-matrix.md`
@@ -96,8 +96,7 @@ not evidence that a name is invalid.
 
 Pi's rule is different — §27.1 records that `/model` with an argument takes "an exact match against
 the catalogue", and no match opens the selector filtered by the term. pi-go's is: an exact name
-switches, and a listing helps a person find one. That is a deviation, and it should be registered as
-such when this ADR is accepted.
+switches, and a listing helps a person find one. That deviation is registered as **D-15**.
 
 ### A port that cannot list says so, and that is an answer
 
@@ -183,8 +182,6 @@ evidence its own row will name:
    both stay offline. This is the one that fails silently if it is not written.
 3. **Per-port implementation with a per-port source**, recorded as ADR-0007 requires. The first
    should be one that costs nothing to call: Ollama runs on the developer's own machine.
-4. **The deviation registered** — `/model` accepting a name the catalogue does not contain, against
-   Pi's exact-match-then-filtered-selector rule.
-5. **The parity matrix updated**: the `scoped-models` and `full per-provider model list` rows stay
-   `incomplete`, with #28 and the unread selector semantics named as what now blocks them rather
-   than the data source.
+4. ~~The deviation registered~~ — done on acceptance: **D-15** in the parity matrix's register.
+5. ~~The parity matrix updated~~ — done on acceptance: both rows stay `incomplete`, now naming #28
+   and the unread selector semantics rather than the data source.

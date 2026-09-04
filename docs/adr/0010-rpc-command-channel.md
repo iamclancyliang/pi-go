@@ -1,6 +1,6 @@
 # ADR-0010: The command channel — required ids, one ordered stdout, typed failures
 
-**Status:** proposed — awaiting @qy-liang
+**Status:** accepted — @qy-liang, 2026-09-04
 **Date:** 2026-09-04
 **Decision owner:** @qy-liang
 **Related:** ADR-0006, ADR-0009 · `docs/product/pi-feature-inventory.md` §6, §21 · issues #31, #27, #28, #30, #32, #36, #39
@@ -36,7 +36,7 @@ Required, not optional. The ambiguity in fact 1 exists only for requests without
 protocol does not have requests without ids. A request missing one is answered by a failure that
 says so — correlated by position, the one place position is still needed.
 
-This is a deviation from Pi's optional `id` and is registered as such on acceptance.
+This deviation from Pi's optional `id` is registered as **D-17**.
 
 ### Responses join the event stream's single ordered stdout
 
@@ -87,9 +87,9 @@ runtime seams), with the parity matrix as the capability authority:
 | `cycle_model` | needs scoped models and a listing | **incomplete** (#30, ADR-0008) |
 | `get_available_models` | needs the listing | **incomplete** (#30, ADR-0008) |
 | `set_thinking_level` · `cycle_thinking_level` · `get_available_thinking_levels` | nothing writes a thinking level | **incomplete** (#36) |
-| `set_steering_mode` · `set_follow_up_mode` | steering and follow-up exist as delivery timing; the all / one-at-a-time selection does not | **incomplete** — mechanism without the mode switch |
+| `set_steering_mode` · `set_follow_up_mode` | steering and follow-up exist as delivery timing; the all / one-at-a-time selection does not | **incomplete** (#40) — mechanism without the mode switch |
 | `compact` | `/compact` | native-equivalent |
-| `set_auto_compaction` | overflow recovery is always on and has no toggle | **incomplete** — a toggle is a decision about recovery, not a flag to add casually |
+| `set_auto_compaction` | overflow recovery is always on and has no toggle | **incomplete** (#41) — a toggle is a decision about recovery, not a flag to add casually |
 | `set_auto_retry` · `abort_retry` | no session-level retry | **incomplete** (#39) |
 | `bash` · `abort_bash` | the bash *tool* exists; running a command outside the turn with `excludeFromContext` does not | **incomplete** — closest to #28's `!` surface |
 | `get_session_stats` | counts and token ledger; **no currency** — pi-go computes no cost (§7.2) | **partial** |
@@ -104,8 +104,8 @@ runtime seams), with the parity matrix as the capability authority:
 
 Of the thirty-two: seventeen have native equivalents today, two are partial, one is an already
 registered deviation (D-5), and twelve are incomplete — and every incomplete one was already
-incomplete somewhere else (#28, #30, #32, #36, #39, and the two this table itself surfaces:
-queue-mode selection and the auto-compaction toggle). The channel adds no new gaps; it inherits the
+incomplete somewhere else (#28, #30, #32, #36, #39, and the two this table itself surfaced, filed
+as #40 and #41: queue-mode selection and the auto-compaction toggle). The channel adds no new gaps; it inherits the
 ones the features have.
 
 ## Consequences accepted
@@ -121,8 +121,7 @@ and match by order — would need ids added. That client also could not tell Pi'
 the strictness is the protocol declining to reproduce a latent bug.
 
 **Two new unowned gaps get names.** Queue-mode selection and the auto-compaction toggle are
-mechanisms whose switches don't exist. Neither has an issue; both need one before the parity release,
-the way #39 got filed.
+mechanisms whose switches don't exist. Filed on acceptance: **#40** and **#41**.
 
 **The state object will grow field by field**, and `get_state`'s response is versioned by the
 protocol version line (ADR-0009), not by field presence guessing.
@@ -148,7 +147,8 @@ commands and names why it cannot answer twelve is more useful than exit 2.
 1. The request and response serialisation, with `id` required, `seq` on every response, and the
    failure kinds closed and tested.
 2. A golden transcript test — commands in, ordered stdout out — beside ADR-0009's stream test.
-3. The deviation registered: required ids against Pi's optional ones.
-4. Issues for the two gaps this table surfaced: queue-mode selection, auto-compaction toggle.
-5. The parity matrix updated on acceptance: `coding-agent.mode.rpc` moves to `partial` with this
-   table as evidence, each incomplete row pointing at the issue that owns it.
+3. ~~The deviation registered~~ — done on acceptance: **D-17**.
+4. ~~Issues for the two gaps this table surfaced~~ — filed on acceptance: #40, #41.
+5. The parity matrix updated when the channel ships: `coding-agent.mode.rpc` moves to `partial`
+   with this table as evidence, each incomplete command pointing at the issue that owns it. (On
+   acceptance the row already names this ADR as the decision; the move waits for the code.)

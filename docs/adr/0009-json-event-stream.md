@@ -1,6 +1,6 @@
 # ADR-0009: The JSON stream publishes pi-go's two event streams and does not merge them
 
-**Status:** proposed — awaiting @qy-liang
+**Status:** accepted — @qy-liang, 2026-09-04
 **Date:** 2026-09-04
 **Decision owner:** @qy-liang
 **Related:** ADR-0006, ADR-0001 · `docs/product/pi-feature-inventory.md` §6.1, §21.3 · `docs/specs/streaming-contract.md` · `docs/product/parity-matrix.md` · issues #31, #28, #32, #36
@@ -129,8 +129,7 @@ different reasons afterwards: json for the fifteen unemitted capabilities, rpc f
 command channel nobody has designed.
 
 **A client cannot reconstruct Pi's `message_update`.** It receives lifecycle and reply lines
-separately and correlates them by `seq`. That is a deviation from Pi's shape, deliberate, and it
-should be registered as one when this is accepted.
+separately and correlates them by `seq`. That deviation from Pi's shape is registered as **D-16**.
 
 **One counter across two families is a constraint on the emitters**, not just the writer: both seams
 must draw from the same sequence, or the interleaving the wire promises is not real. That is a test.
@@ -172,11 +171,10 @@ that changes what a client should do. pi-go's names are its own, and the mapping
 2. **A test that one counter spans both seams** — the interleaving is the wire's only ordering claim.
 3. **A golden-trace test for the stream**, the way `conformance/a1_trace_test.go` already asserts the
    lifecycle trace, so a shape change fails rather than ships.
-4. **The deviation registered**: a client correlates lifecycle and reply lines by `seq` instead of
-   receiving Pi's merged `message_update`.
-5. **The parity matrix updated**: `coding-agent.mode.json` moves from `incomplete` to `partial` with
-   this table as its evidence, and `coding-agent.mode.rpc` stays `incomplete` naming the command
-   channel.
+4. ~~The deviation registered~~ — done on acceptance: **D-16**.
+5. **The parity matrix updated when the stream ships**: `coding-agent.mode.json` moves from
+   `incomplete` to `partial` with this table as its evidence. (On acceptance the row already names
+   this ADR as the decision; the move waits for the code.)
 6. ~~An issue for session-level auto-retry~~ — filed as #39.
 
 The command channel — 32 commands, their request fields and response payloads all recorded in §21.1
