@@ -47,15 +47,18 @@ way out** in order to look like Pi.
 One JSONL stream on stdout, one object per line, every line naming which family it belongs to.
 Lifecycle lines are `events.Event` serialised; reply lines are `ai.StreamEvent` serialised.
 
-Not merging is the substance of this decision. Reproducing Pi's `message_update` would mean building
-a cumulative snapshot pi-go does not otherwise keep, purely to strip it again before writing —
-paying for the disadvantage without buying the compatibility, which ADR-0006 has already ruled out
-buying.
+Not merging is the substance of this decision. Merging would put thousands of reply lines between
+the lifecycle events a client watches for — the exact problem the two-seam architecture solved —
+and would buy nothing, since ADR-0006 has already ruled out buying the compatibility that is the
+shape's only value.
 
-**A reply line therefore never carries `partial`.** Pi's ten non-terminal stream events each carry
-the accumulated message and the wire transform removes it; pi-go never accumulates one at this seam,
-so there is nothing to remove. `message_start` opens, deltas build, the terminal event is
-authoritative — the same contract Pi's comment describes, reached without the round trip.
+**A reply line never carries the snapshot.** (Corrected 2026-09-04, before implementation: this ADR
+first claimed pi-go accumulates no snapshot at this seam. It does — `ai.StreamEvent.Partial` is a
+per-event copy of the reply so far, kept so a renderer never has to accumulate deltas itself. The
+premise was wrong; the decision is unchanged.) The wire serialisation omits `Partial` and keeps
+`Final` on the two terminal events — the same strip Pi's `toJsonEvent` performs, done at the one
+boundary where size on a pipe is the concern. What pi-go declines is Pi's *merge*, not its strip:
+the lifecycle stream here never carried the deltas in the first place.
 
 ### Every line carries `seq`, from one counter across both families
 
@@ -146,10 +149,11 @@ either direction, which is what ADR-0006 means by a native protocol rather than 
 
 ## Alternatives, and why not
 
-**Merge the two streams to match Pi's shape.** Rejected. It requires accumulating a cumulative
-message that nothing else in pi-go needs, so that the writer can strip it again — reproducing both
-halves of a round trip Pi's own source treats as overhead. And it buys nothing: ADR-0006 rules out
-the compatibility that would be the only reason to want the shape.
+**Merge the two streams to match Pi's shape.** Rejected. It would re-create inside one wire stream
+the drowning problem `loop.go:1205` keeps out of the architecture, and it buys nothing: ADR-0006
+rules out the compatibility that would be the only reason to want the shape. (An earlier version of
+this section also claimed the merge would require building a snapshot nothing else needs — wrong,
+see above; the snapshot exists for renderers. The rejection stands on the two real legs.)
 
 **Emit lifecycle only and drop the reply stream.** Simpler, and rejected: watching a reply form is
 the main reason to consume a JSON event stream. A mode that reports only that a turn started and
@@ -167,14 +171,13 @@ that changes what a client should do. pi-go's names are its own, and the mapping
 
 ## What this needs before it is code
 
-1. **A serialisation for both families** with `seq` on every line, and the version line first.
-2. **A test that one counter spans both seams** — the interleaving is the wire's only ordering claim.
-3. **A golden-trace test for the stream**, the way `conformance/a1_trace_test.go` already asserts the
-   lifecycle trace, so a shape change fails rather than ships.
+1. ~~A serialisation for both families~~ — `internal/jsonstream`, version line first.
+2. ~~A test that one counter spans both seams~~ — `TestOneCounterSpansBothFamilies`, confirmed to
+   fail when reply events are numbered apart.
+3. ~~A golden-trace test for the stream~~ — `TestTheStreamCarriesTheReplyAndItsLifecycle`.
 4. ~~The deviation registered~~ — done on acceptance: **D-16**.
-5. **The parity matrix updated when the stream ships**: `coding-agent.mode.json` moves from
-   `incomplete` to `partial` with this table as its evidence. (On acceptance the row already names
-   this ADR as the decision; the move waits for the code.)
+5. ~~The parity matrix updated when the stream ships~~ — shipped 2026-09-04; the row reads `partial`
+   with this ADR's table as its evidence.
 6. ~~An issue for session-level auto-retry~~ — filed as #39.
 
 The command channel — 32 commands, their request fields and response payloads all recorded in §21.1

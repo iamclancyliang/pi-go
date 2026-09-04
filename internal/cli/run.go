@@ -11,6 +11,8 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/compaction"
+	"github.com/iamclancyliang/pi-go/internal/events"
+	"github.com/iamclancyliang/pi-go/internal/jsonstream"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/tools"
@@ -124,6 +126,68 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 	}
 	fmt.Fprintln(streams.Out, answer)
 	return 0
+}
+
+// RunJSON sends each prompt in turn and writes the event stream to stdout.
+//
+// One-shot like RunPrint, but stdout carries the protocol rather than an
+// answer: the version line, then every lifecycle and reply event as JSON
+// lines. The answer is inside the stream — a model_response carries its text —
+// so nothing else is written there, and a consumer parses lines or nothing.
+//
+// Failures behave as in print mode — the reason on stderr, the exit code
+// non-zero — with one addition: the stream itself failing to write is a
+// failure of the run, because a consumer that got half a stream with no error
+// would read an interrupted run as a quiet one.
+func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string) int {
+	if len(prompts) == 0 {
+		fmt.Fprintln(streams.Err, "pi: no prompt given")
+		return 1
+	}
+	if rt.Conversation == nil || rt.Conversation.Session == nil {
+		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
+		return 1
+	}
+
+	// The writer opens the stream immediately: the version line precedes every
+	// event, including agent_start, so a consumer knows what it is reading
+	// before there is anything to read.
+	writer := jsonstream.NewWriter(streams.Out)
+
+	sess := rt.Conversation.Session
+	agent, err := runtime.New(runtime.Config{
+		Model:     rt.Model,
+		ModelName: rt.ModelName,
+		Tools:     rt.Tools,
+		Session:   sess,
+		Thinking:  rt.Thinking,
+		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
+		// The writer is both observers, which is the wiring the shared
+		// counter exists for: one consumer, two families, one order.
+		Observers:      []events.Observer{writer},
+		ReplyObservers: []runtime.ReplyObserver{writer},
+	})
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+
+	code := 0
+	for _, prompt := range prompts {
+		if err := agent.Run(ctx, prompt); err != nil {
+			// The stream already carries the failure — agent_end names it —
+			// but stderr and the exit code repeat it for the caller that
+			// checks status before parsing anything.
+			fmt.Fprintf(streams.Err, "pi: %v\n", err)
+			code = 1
+			break
+		}
+	}
+	if err := writer.Err(); err != nil {
+		fmt.Fprintf(streams.Err, "pi: the event stream broke: %v\n", err)
+		return 1
+	}
+	return code
 }
 
 // RunInteractive reads prompts a line at a time and answers each in turn.

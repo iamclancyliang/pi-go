@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/events"
 )
 
@@ -13,18 +14,19 @@ import (
 // authority for every ordering assertion. If two components numbered events
 // independently, "before" would stop meaning anything.
 type emitter struct {
-	mu        sync.Mutex
-	seq       int
-	turn      int
-	observers []events.Observer
-	now       func() time.Time
+	mu             sync.Mutex
+	seq            int
+	turn           int
+	observers      []events.Observer
+	replyObservers []ReplyObserver
+	now            func() time.Time
 }
 
-func newEmitter(now func() time.Time, observers ...events.Observer) *emitter {
+func newEmitter(now func() time.Time, observers []events.Observer, replyObservers []ReplyObserver) *emitter {
 	if now == nil {
 		now = time.Now
 	}
-	return &emitter{observers: observers, now: now}
+	return &emitter{observers: observers, replyObservers: replyObservers, now: now}
 }
 
 // emit publishes an event, filling in Seq, Time and the current turn.
@@ -52,6 +54,27 @@ func (e *emitter) emit(kind events.Kind, mutate func(*events.Event)) events.Even
 		}
 	}
 	return ev
+}
+
+// emitReply numbers one reply event and hands it to every reply observer.
+//
+// The counter is the same one emit uses, and the lock is held across the
+// callbacks for the same reason: Seq is the ordering authority across BOTH
+// families (ADR-0009), and a consumer holding lifecycle and reply lines must be
+// able to interleave them by number. Two counters, or one counter read outside
+// the delivery lock, would let a lower-numbered event arrive after a higher one
+// and the promise would be false exactly when it matters.
+func (e *emitter) emitReply(event ai.StreamEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.seq++
+	event.Seq = e.seq
+	for _, o := range e.replyObservers {
+		if o != nil {
+			o.Reply(event)
+		}
+	}
 }
 
 // beginTurn increments the turn counter and returns the new index.

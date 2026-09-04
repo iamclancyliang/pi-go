@@ -53,16 +53,14 @@ func run(argv []string) int {
 	}
 
 	mode := cli.ResolveAppMode(args, isTerminal(os.Stdin), isTerminal(os.Stdout))
-	switch mode {
-	case cli.AppJSON, cli.AppRPC:
-		// Refused rather than approximated, though no longer for the original
-		// reason: Pi's event and command payload schemas ARE now recorded from
-		// the pinned source. What is missing is the decision ADR-0006 forces —
-		// Pi's wire is explicitly not the target, so pi-go's equivalent has to
-		// be designed, and emitting an invented shape in the meantime would
-		// teach a client something it would later have to unlearn.
+	if mode == cli.AppRPC {
+		// Refused rather than approximated. The protocol is decided — required
+		// ids, responses on the same sequence-ordered stream, typed failures —
+		// but none of it is built, and emitting an invented shape in the
+		// meantime would teach a client something it would later have to
+		// unlearn.
 		fmt.Fprintf(streams.Err,
-			"pi: --mode %s is not implemented yet; its native protocol is not decided\n", mode)
+			"pi: --mode rpc is not implemented yet\n")
 		return 2
 	}
 
@@ -151,6 +149,9 @@ func run(argv []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if mode == cli.AppJSON {
+		return cli.RunJSON(ctx, rt, streams, args.Messages)
+	}
 	if mode == cli.AppPrint {
 		return cli.RunPrint(ctx, rt, streams, args.Messages)
 	}

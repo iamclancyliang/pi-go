@@ -9,6 +9,12 @@ file carries what a person upgrading would want to know.
 - A `pi` command: one-shot with `-p`, a session in a terminal, and the mode
   resolved from the terminal itself — a redirected run prints, a terminal
   converses.
+- `--mode json`: the run as a machine-readable stream. One JSON object per
+  line on stdout — a version line first, then every lifecycle event and every
+  piece of the reply as it arrives, all numbered by one sequence so a consumer
+  can interleave them. The answer is inside the stream; nothing else is
+  written there. (`--mode rpc` still refuses: its protocol is decided but not
+  built.)
 - Seven built-in tools, ported against the pinned Pi source: `read`, `ls`,
   `find`, `grep`, `write`, `edit`, `bash`. Searches honour `.gitignore`; edits
   match against the original file and refuse ambiguity; bash output keeps the

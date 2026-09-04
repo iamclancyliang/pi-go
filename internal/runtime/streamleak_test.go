@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
+	"github.com/iamclancyliang/pi-go/internal/events"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
@@ -61,7 +62,7 @@ func TestAbandoningAStreamDoesNotLeak(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		port := &observingPort{
 			inner:     endlessStream{},
-			emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, NewRecorder()),
+			emitter:   newEmitter(func() time.Time { return time.Unix(0, 0) }, []events.Observer{NewRecorder()}, nil),
 			session:   session.New("You are pi-go."),
 			modelName: "fake-1",
 		}

@@ -1,7 +1,7 @@
 # pi-go parity matrix
 
 **Status:** implementation active · this matrix is the parity audit, not a precondition for it
-**Last reconciled against the code:** 2026-09-04 (json/rpc mode and model-listing rows, deviations D-15–D-17); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
+**Last reconciled against the code:** 2026-09-04 (json/rpc mode and model-listing rows, deviations D-15–D-17, `--mode json` shipping); 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
@@ -134,7 +134,7 @@ Pi source: `src/main.ts:118-133`, `src/cli/args.ts`. Class B. Target v1.
 | --- | --- | --- | --- |
 | `coding-agent.mode.interactive` | `internal/cli/run.go` `RunInteractive` | `TestInteractiveAnswersEachLineAndEndsAtEOF` | compatible, less D-7 |
 | `coding-agent.mode.print` | `internal/cli/run.go` `RunPrint` | `TestPrintWritesTheAnswerToStdoutAndNothingElse`, `TestPrintReportsAFailureOnStderrAndInTheExitCode` | compatible |
-| `coding-agent.mode.json` | — | — | **incomplete** (#31) — the mode resolves and refuses rather than emitting an invented shape. The protocol is now decided: ADR-0009 (accepted 2026-09-04) — both streams on one stdout, unmerged, one `seq` counter, a version line first, D-16 registered. What remains is the implementation and its tests; the row moves to `partial` when the stream ships |
+| `coding-agent.mode.json` | `internal/cli/run.go` `RunJSON`, `internal/jsonstream/` | `TestOneCounterSpansBothFamilies` (confirmed to fail with a second counter), `TestTheStreamCarriesTheReplyAndItsLifecycle`, `TestAReplyLineNeverCarriesTheSnapshot`, `TestJSONModeWritesOnlyTheStreamToStdout` | partial — the stream ships per ADR-0009 (D-16): version line, both families, one `seq`. **Not Pi's shape and not its coverage**: 8 of Pi's 24 event capabilities have native equivalents; the missing 15 are the features' own gaps (#28, #32, #36, #39, extensions), enumerated in ADR-0009's table |
 | `coding-agent.mode.rpc` | — | — | **incomplete** (#31) — protocol decided: ADR-0010 (accepted 2026-09-04): required ids (D-17), responses on the same `seq`-ordered stdout, typed failures from the existing taxonomy. 17 of Pi's 32 commands have native equivalents today; every incomplete one is tracked (#28, #30, #32, #36, #39, #40, #41). Implementation not started |
 | mode resolution (§2.1) | `internal/cli/mode.go` | `TestTheTerminalIsHalfTheDecision`, `TestModeTextMeansLetTheEnvironmentDecide` | compatible |
 | CLI flags | `internal/cli/args.go` | `TestTheFlagsThisBuildActsOn`, `TestAPiFlagThisBuildLacksIsSaidAloud` | partial — 13 of 40 acted on; the rest warn rather than being silently ignored |
@@ -228,7 +228,7 @@ ADR-0010.
 | D-11 | `--mode <invalid>` | ignored silently | ignored, with a warning | `--mode interactive` names the one mode the flag rejects and would otherwise look like it worked |
 | D-12 | unimplemented Pi flags and commands | — | warn, naming the reason | a flag a user believes took effect is the failure a parser must not have |
 | D-15 | `/model <name>` | an exact match against the catalogue sets the model; no match opens the selector filtered by the term | an exact name switches whether or not any listing contains it; the listing is discovery, not an allowlist | ADR-0008 — being unable to enumerate is not evidence a name is invalid, and a provider whose listing call fails must not take its working models with it |
-| D-16 | JSON event stream | one stream; content deltas arrive inside `message_update`, whose cumulative snapshot `toJsonEvent` strips on the way out | two families on one stdout — lifecycle and reply lines — correlated by a shared `seq` | ADR-0009 — pi-go never builds the cumulative snapshot, so there is nothing to strip; merging would add the round trip Pi's own source treats as overhead. Takes effect with `--mode json` |
+| D-16 | JSON event stream | one stream; content deltas arrive inside `message_update`, whose cumulative snapshot `toJsonEvent` strips on the way out | two families on one stdout — lifecycle and reply lines — correlated by a shared `seq`; the reply snapshot (`ai.StreamEvent.Partial`, kept for renderers) is likewise not serialised | ADR-0009 as corrected — merging would drown the lifecycle events in deltas (`loop.go:1205`) and buys only a compatibility ADR-0006 rules out. Takes effect with `--mode json` |
 | D-17 | RPC requests | `id` optional; a response without one is attributable only by arrival order | `id` required, echoed on every response | ADR-0010 — correlation by position is a latent bug, not a convenience worth keeping. Takes effect with `--mode rpc` |
 
 

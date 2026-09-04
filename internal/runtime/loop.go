@@ -120,7 +120,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 	return &Agent{
 		cfg:     cfg,
-		emitter: newEmitter(cfg.Now, cfg.Observers...),
+		emitter: newEmitter(cfg.Now, cfg.Observers, cfg.ReplyObservers),
 		caps:    V0Capabilities(),
 		state:   NewStateNamespace(),
 	}, nil
@@ -305,14 +305,13 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		a.cfg.Tools.Declaration)
 
 	observed := &observingPort{
-		inner:          a.cfg.Model,
-		replyObservers: a.cfg.ReplyObservers,
-		emitter:        a.emitter,
-		session:        a.cfg.Session,
-		modelName:      a.cfg.ModelName,
-		batch:          batch,
-		sequentialFor:  a.sequentialFor,
-		summarize:      a.cfg.Summarize,
+		inner:         a.cfg.Model,
+		emitter:       a.emitter,
+		session:       a.cfg.Session,
+		modelName:     a.cfg.ModelName,
+		batch:         batch,
+		sequentialFor: a.sequentialFor,
+		summarize:     a.cfg.Summarize,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -574,15 +573,14 @@ var errToolTerminate = errors.New("runtime: the round asked to stop")
 // observingPort emits model_request / model_response and records the
 // assistant's reply as session truth.
 type observingPort struct {
-	mu             sync.Mutex
-	inner          ai.Port
-	replyObservers []ReplyObserver
-	emitter        *emitter
-	session        *session.Session
-	modelName      string
-	batch          *toolBatch
-	sequentialFor  func(name string) bool
-	summarize      func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
+	mu            sync.Mutex
+	inner         ai.Port
+	emitter       *emitter
+	session       *session.Session
+	modelName     string
+	batch         *toolBatch
+	sequentialFor func(name string) bool
+	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
 
 	// failed is why recovery could not be attempted, when that is a different
 	// failure from the one being recovered from.
@@ -1246,9 +1244,10 @@ func (o *observingPort) publishReply(ctx context.Context, event ai.StreamEvent) 
 	if ctx.Err() != nil && !event.Terminal() {
 		return
 	}
-	for _, observer := range o.replyObservers {
-		observer.Reply(event)
-	}
+	// Delivery and numbering live in the emitter, under the same lock and
+	// counter as the lifecycle events, which is what makes Seq one order
+	// across both families rather than two orders wearing one name.
+	o.emitter.emitReply(event)
 }
 
 // forward hands one event on, and reports whether the reply is still wanted.

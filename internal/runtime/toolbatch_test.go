@@ -30,7 +30,7 @@ func TestBeginDropsACutCallEvenWhenItWinsTheHandoff(t *testing.T) {
 
 	for attempt := 0; attempt < attempts; attempt++ {
 		batch := newToolBatch(
-			newEmitter(nil),
+			newEmitter(nil, nil, nil),
 			session.New("You are pi-go."),
 			func(context.Context, string, string, string) (string, bool) { return "", false },
 			func(string) (tools.ReplayPolicy, string, bool) {

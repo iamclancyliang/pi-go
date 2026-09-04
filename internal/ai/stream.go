@@ -129,6 +129,15 @@ const (
 type StreamEvent struct {
 	Kind StreamEventKind
 
+	// Seq is this event's position in the run's single event order, assigned
+	// by the runtime when the event is delivered to observers — zero at the
+	// port boundary, where no such order exists yet.
+	//
+	// It shares one counter with the lifecycle events (ADR-0009): a consumer
+	// holding both families can interleave them correctly instead of guessing
+	// that a delta belongs to whichever turn happens to be open.
+	Seq int
+
 	// ContentIndex identifies the block this event concerns. Set on the nine
 	// block events; meaningless on start, done and error.
 	//

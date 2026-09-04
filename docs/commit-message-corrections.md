@@ -81,3 +81,21 @@ regression tests for behaviours that had none.
 
 A commit message is read years later by someone with only the diff for context. A word that requires
 knowing what else was happening at the time is a word that will not survive that reading.
+
+## `3eeaf84` and `39bce22` — "a cumulative snapshot pi-go does not otherwise keep"
+
+Both messages (and the ADR they describe, corrected in place on 2026-09-04) claim pi-go never builds
+a cumulative reply snapshot, so refusing Pi's merged `message_update` avoids a build-then-strip round
+trip. `39bce22` repeats it as D-16's rationale: "pi-go never builds the cumulative snapshot, so there
+is nothing to strip."
+
+pi-go builds exactly that snapshot. `ai.StreamEvent.Partial` is a per-event copy of the reply so far,
+on all ten non-terminal events, kept so a renderer never accumulates deltas itself
+(`internal/ai/stream.go`). The wire simply does not serialise it — the same strip Pi's `toJsonEvent`
+performs, at the same kind of boundary.
+
+The decision the commits record is unchanged; the argument was wrong. Not merging stands on the two
+legs that were true throughout: a merged stream drowns lifecycle events in deltas (the reason
+`loop.go:1205` gives for the two-seam architecture), and the merged shape's only value is a
+compatibility ADR-0006 rules out. Found while implementing the stream, before any code was written
+against the false premise.
