@@ -14,15 +14,18 @@ import (
 
 // The OpenRouter port has NOT been verified against the provider.
 //
-// Every other port here was, and that standard is what caught a tool schema
-// never reaching the wire and the real shape of a context-overflow refusal —
-// both cases where the offline tests were passing against assumptions that were
-// wrong. This one has no credential to run against, so its wire semantics are
-// this repository's reading of OpenRouter's documentation and nothing more.
+// The DeepSeek port was, and that standard is what caught a tool schema never
+// reaching the wire and the real shape of a context-overflow refusal — both
+// cases where the offline tests were passing against assumptions that were
+// wrong. (The claim this comment first made, that every other port had been
+// verified, was not true: OpenAI and Qwen had no live test at all until
+// 2026-09-02.) This one has no credential to run against, so its wire semantics
+// are this repository's reading of OpenRouter's documentation and nothing
+// more.
 //
 // The test below is written so that becomes false the moment a key exists.
 // Until then the parity matrix records the port as unverified-against-provider,
-// which is a weaker claim than every other port makes.
+// which is a weaker claim than a verified port makes.
 const openRouterGate = "PI_GO_LIVE_OPENROUTER"
 
 func TestLiveOpenRouterAnswersAndReportsWhatItSpent(t *testing.T) {

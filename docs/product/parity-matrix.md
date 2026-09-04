@@ -1,7 +1,7 @@
 # pi-go parity matrix
 
 **Status:** implementation active · this matrix is the parity audit, not a precondition for it
-**Last reconciled against the code:** 2026-08-29
+**Last reconciled against the code:** 2026-09-02 (provider evidence rows); 2026-08-29 (everything else)
 
 **Approved source baseline:** `earendil-works/pi@086c32e74530564922d011ade23ff582c9d63116` (approved 2026-08-15; re-pin requires explicit review)
 **Product requirement:** complete Pi feature accounting with no silent omissions
@@ -98,8 +98,12 @@ was closed on 2026-08-29 by an authorized probe. Every `incomplete` row below na
 without saying by what.
 
 Evidence is reproducible: each row names a test that fails when the behaviour it
-describes is removed. Every offline test runs under `go test -race ./...`; the
-live rows need `PI_GO_LIVE_DEEPSEEK=1` and a credential, and CI never runs them.
+describes is removed. Every offline test runs under `go test -race ./...`; a
+live row needs that provider's own `PI_GO_LIVE_*` gate and a credential, and CI
+never runs them. Every one of the nine ports now carries such a test —
+`TestEveryProviderPortHasALiveTest` fails if one does not — but **having the
+test is not having the evidence**: which ports have actually reached their
+provider is what the rows below say.
 
 ### Built-in tools — `coding-agent.tool.*`
 
@@ -177,7 +181,8 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 
 | Feature ID | pi-go | Acceptance evidence | Proposed |
 | --- | --- | --- | --- |
-| DeepSeek, OpenAI, Qwen ports | `internal/provider/*` | 115 tests in `internal/provider`; live `TestLiveDeepSeekAnswersAndReportsWhatItSpent` | compatible |
+| DeepSeek port | `internal/provider/deepseek/` | 115 tests in `internal/provider`; live `TestLiveDeepSeekAnswersAndReportsWhatItSpent`, `TestLiveDeepSeekCallsTheReadToolFromItsDeclaredSchema` and the rest of the live suite have run against the provider | compatible |
+| OpenAI and Qwen ports | `internal/provider/{openai,qwen}/` | offline: 115 tests in `internal/provider`, plus `TestQwenToolsReachTheProvider` and the e2e runs through the real agent. Live: `TestLiveOpenAIAnswersAndReportsWhatItSpent`, `TestLiveQwenAnswersAndReportsWhatItSpent` and their tool-schema pair, **written and skipping until a credential exists** | partial — **unverified-against-provider**. These two rows read `compatible` from 2026-08-29 while carrying no live test at all, which was a weaker evidential position than the rows that say plainly they are unverified. The gated tests were added on 2026-09-02 (`TestEveryProviderPortHasALiveTest` now refuses a port without one); the disposition returns to `compatible` when one of them has run |
 | one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test; two vendor SDKs retry by default and are switched off — `internal/provider/claude/retry.go` and Ark's `RetryTimes` — each of which would otherwise make one call three | compatible |
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |

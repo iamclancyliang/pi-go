@@ -100,3 +100,22 @@ be replaced.
 | A refusal reaches the model, not only the session | `TestAQwenPolicyRefusalReachesTheModel` |
 | A tool call announces both halves to a renderer, refused or not | `TestAQwenToolCallAnnouncesBothHalvesToARenderer`, `TestAQwenToolCallIsRefusedByPolicyAndRecordedFirst` |
 | A failure inside a 200 stops the run instead of arriving as an answer | `TestAProviderFailureStopsTheRun` |
+
+## Evidence against the provider
+
+An offline suite runs against a recorded wire, so it proves the port reads what was recorded. Only a
+real call proves the provider sends it — and this repository has twice found the recording wrong:
+a tool argument schema that never reached the wire, and a failure vocabulary taken from a surface
+the port does not reach. Neither offline suite noticed.
+
+| Obligation | Enforced by |
+| --- | --- |
+| Every provider port ships a live test, gated by its own `PI_GO_LIVE_*` variable and skipping until someone consents to spend | `TestEveryProviderPortHasALiveTest` |
+| The live test holds the port to what every other port is held to: an answer, reported usage, and one request per call counted at the transport | `TestLiveDeepSeekAnswersAndReportsWhatItSpent`, `TestLiveOpenAIAnswersAndReportsWhatItSpent`, `TestLiveQwenAnswersAndReportsWhatItSpent`, `TestLiveQianfanAnswersAndReportsWhatItSpent` |
+| A port that can read its provider's bytes reports the model that served the reply, so a substitution is visible | `TestLiveOpenAIAnswersAndReportsWhatItSpent`, `TestLiveQwenAnswersAndReportsWhatItSpent`, `TestLiveQianfanAnswersAndReportsWhatItSpent` |
+| The declared tool schema is exercised against the real provider, which is the check no offline test can make | `TestLiveDeepSeekCallsTheReadToolFromItsDeclaredSchema`, `TestLiveOpenAICallsTheReadToolFromItsDeclaredSchema`, `TestLiveQwenCallsTheReadToolFromItsDeclaredSchema`, `TestLiveQianfanCallsTheReadToolFromItsDeclaredSchema` |
+
+**Having the test is not having the evidence.** A gated test that has never run says only that the
+port is ready to be checked. Which ports have actually reached their provider is recorded in
+`docs/product/parity-matrix.md`, and a port that has not is `unverified-against-provider` there
+however green the offline suite is.
