@@ -124,6 +124,25 @@ func (h *fakeHost) Commands() ([]CommandInfo, []string) {
 	return []CommandInfo{{Name: "help", Summary: "list these commands"}}, []string{"/scoped-models"}
 }
 
+type modelFakeHost struct {
+	*fakeHost
+	models     []ai.ModelRef
+	listErr    error
+	cycle      *ai.ModelCycle
+	listCalls  int
+	cycleCalls int
+}
+
+func (h *modelFakeHost) AvailableModels(context.Context) ([]ai.ModelRef, error) {
+	h.listCalls++
+	return append([]ai.ModelRef(nil), h.models...), h.listErr
+}
+
+func (h *modelFakeHost) CycleModel(context.Context) (*ai.ModelCycle, error) {
+	h.cycleCalls++
+	return h.cycle, h.listErr
+}
+
 func newChannel(t *testing.T) (*Channel, *fakeHost) {
 	t.Helper()
 	host := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "scripted-1", recorded: true}
@@ -153,10 +172,73 @@ func TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers(t *testing.T) {
 	if unknown.OK || unknown.Error.Kind != FailUnknownCommand {
 		t.Fatalf("an invented command was not unknown: %+v", unknown.Error)
 	}
-	unbuilt := dispatch(c, Command{ID: "2", Command: "cycle_model"})
+	unbuilt := dispatch(c, Command{ID: "2", Command: "cycle_thinking_level"})
 	if unbuilt.OK || unbuilt.Error.Kind != FailUnimplemented {
 		t.Fatalf("a real Pi command was not unimplemented: %+v", unbuilt.Error)
 	}
+}
+
+func TestModelInventoryAndCycleResponsesPreserveTheirDistinctShapes(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "ollama", model: "alpha", recorded: true}
+	host := &modelFakeHost{fakeHost: base, models: []ai.ModelRef{{Provider: "ollama", ID: "alpha"}}}
+	c := NewChannel(host)
+	listed := dispatch(c, Command{ID: "1", Command: "get_available_models"})
+	if !listed.OK || string(listed.Data) != `{"models":[{"provider":"ollama","id":"alpha"}]}` {
+		t.Fatalf("model listing response was %+v", listed)
+	}
+	host.cycle = &ai.ModelCycle{Model: ai.ModelRef{Provider: "ollama", ID: "beta"}, IsScoped: true}
+	cycled := dispatch(c, Command{ID: "2", Command: "cycle_model"})
+	if !cycled.OK || !strings.Contains(string(cycled.Data), `"isScoped":true`) || !strings.Contains(string(cycled.Data), `"id":"beta"`) {
+		t.Fatalf("model cycle response was %+v", cycled)
+	}
+	host.cycle = nil
+	none := dispatch(c, Command{ID: "3", Command: "cycle_model"})
+	if !none.OK || string(none.Data) != "null" {
+		t.Fatalf("a cycle with no next model was %q", none.Data)
+	}
+}
+
+func TestModelListingCanSucceedWithNoModels(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "ollama", model: "alpha", recorded: true}
+	host := &modelFakeHost{fakeHost: base, models: []ai.ModelRef{}}
+	got := dispatch(NewChannel(host), Command{ID: "1", Command: "get_available_models"})
+	if !got.OK || string(got.Data) != `{"models":[]}` {
+		t.Fatalf("empty listing was not a successful empty array: %+v", got)
+	}
+}
+
+func TestModelListingFailuresUseDifferentRPCKinds(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "alpha", recorded: true}
+	unsupported := dispatch(NewChannel(base), Command{ID: "1", Command: "get_available_models"})
+	if unsupported.OK || unsupported.Error.Kind != FailUnavailable {
+		t.Fatalf("a host without discovery was not unavailable: %+v", unsupported)
+	}
+
+	provider := &ai.ProviderError{Provider: "ollama", Failure: ai.FailureTransient, Detail: "server unavailable"}
+	host := &modelFakeHost{fakeHost: base, listErr: provider}
+	failed := dispatch(NewChannel(host), Command{ID: "2", Command: "get_available_models"})
+	if failed.OK || failed.Error.Kind != FailProvider || !strings.Contains(failed.Error.Detail, "transient") {
+		t.Fatalf("a discovery failure lost its provider classification: %+v", failed)
+	}
+}
+
+func TestCyclingIsBusyBeforeItAsksForAListing(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "ollama", model: "alpha", recorded: true}
+	host := &modelFakeHost{fakeHost: base, models: []ai.ModelRef{{Provider: "ollama", ID: "alpha"}, {Provider: "ollama", ID: "beta"}}}
+	c := NewChannel(host)
+	if got := dispatch(c, Command{ID: "1", Command: "prompt", Message: "hold"}); !got.OK {
+		t.Fatalf("starting the held prompt failed: %+v", got)
+	}
+	got := dispatch(c, Command{ID: "2", Command: "cycle_model"})
+	if got.OK || got.Error.Kind != FailBusy || host.listCalls != 0 || host.cycleCalls != 0 {
+		t.Fatalf("cycling while busy was not refused before listing: response=%+v list=%d cycle=%d", got, host.listCalls, host.cycleCalls)
+	}
+	got = dispatch(c, Command{ID: "3", Command: "get_available_models"})
+	if got.OK || got.Error.Kind != FailBusy || host.listCalls != 0 {
+		t.Fatalf("listing while busy was not refused before discovery: response=%+v list=%d", got, host.listCalls)
+	}
+	close(host.last.release)
+	c.Settle()
 }
 
 // TestEveryResponseEchoesTheIdItAnswers, because a response attributable only

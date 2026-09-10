@@ -1397,6 +1397,24 @@ LLM response; a port treating it as 0 would show a freshly compacted session as 
 
 - **`get_available_models` → `{ models }`** is `readonly Model<Api>[]`, the model runtime's snapshot
   returned unchanged (`model-runtime.ts:422`, `rpc-mode.ts:486-488`).
+
+pi-go's ADR-0008 wire intentionally carries `ai.ModelRef` identifiers (`provider`, `id`) for this
+response rather than Pi's fully facted `Model<Api>` object. Its facts remain a separately sourced
+catalogue, and a provider that cannot enumerate reports an explicit unsupported result.
+
+The pinned cycle semantics are recorded in `core/agent-session.ts:1605-1680`: a nonempty scoped set
+is intersected with the available snapshot by provider and id; one or fewer candidates returns
+`null`; an absent current model starts at index zero and then advances; and an empty configured
+scope falls back to all available models. The scope is supplied by `cli/args.ts:116-117` and
+resolved by `core/model-resolver.ts:281-360`: exact provider/id and bare-id matches are
+case-insensitive, globs match either canonical provider/id or raw id, duplicates keep their first
+pattern occurrence, and model ids containing colons are matched before any thinking suffix is
+considered. pi-go wires `--models` into the cycle backend without startup discovery and currently
+supports case-insensitive exact references and `*`, `?`, and bracket globs; it leaves fuzzy alias
+selection and per-pattern thinking levels to the later selector/thinking work, a documented
+narrowing of that resolver. Every supplied pattern must match one of those supported forms: an
+unmatched pattern, an invalid glob, or a deferred thinking suffix returns a diagnostic and leaves
+the current model unchanged; it never broadens an explicit scope to the complete listing.
 - **`get_available_thinking_levels` → `{ levels }`** is ⚠ **not the 7-member union**.
   `agent-session.ts:1729` returns the module constant `["off","minimal","low","medium","high"]` — five —
   **only when no model is set**. With a model it returns `getSupportedThinkingLevels(model)`

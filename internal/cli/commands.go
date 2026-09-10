@@ -38,11 +38,12 @@ type Command struct {
 // tells them they mistyped it when they did not — the same failure the flag
 // parser refuses to have.
 var notImplemented = map[string]string{
-	"scoped-models": "there is no model catalogue to scope",
+	"scoped-models": "the full-screen scope selector is not ported",
 }
 
 // commandContext is what a command may act on.
 type commandContext struct {
+	ctx          context.Context
 	session      *session.Session
 	conversation *Conversation
 	out          io.Writer
@@ -75,6 +76,12 @@ type commandContext struct {
 	// modelProvider and modelName report what is answering now.
 	modelProvider func() string
 	modelName     func() string
+
+	// availableModels and cycleModel are shared model-discovery operations. They
+	// are optional so a provider without a listing can still be selected by its
+	// explicitly typed name.
+	availableModels func(context.Context) ([]ai.ModelRef, error)
+	cycleModel      func(context.Context) (*ai.ModelCycle, error)
 
 	// confirm asks the user a yes-or-no question, reading from the same input
 	// the conversation comes from.
@@ -111,6 +118,8 @@ func init() {
 		{Name: "import", Summary: "open a conversation from a file: /import <path>", run: runImport},
 		{Name: "copy", Summary: "copy the last answer to the clipboard", run: runCopy},
 		{Name: "model", Summary: "switch model: /model [provider/]<model>", run: runModel},
+		{Name: "models", Summary: "list models reported by the current provider", run: runModels},
+		{Name: "cycle-model", Summary: "switch to the next reported model", run: runCycleModel},
 		{Name: "compact", Summary: "summarise the older part of this conversation: /compact [focus]", run: runCompact},
 		{Name: "login", Summary: "save a credential for a provider: /login <provider>", run: runLogin},
 		{Name: "logout", Summary: "forget a saved credential: /logout [provider]", run: runLogout},
@@ -494,6 +503,24 @@ func runCopy(c *commandContext, _ string) bool {
 func runModel(c *commandContext, arg string) bool {
 	if arg == "" {
 		fmt.Fprintf(c.out, "  %s/%s\n", c.modelProvider(), c.modelName())
+		if c.availableModels != nil {
+			models, err := c.availableModels(commandContextContext(c))
+			switch {
+			case err == nil:
+				if len(models) == 0 {
+					fmt.Fprintln(c.out, "  no models reported by the provider")
+				} else {
+					fmt.Fprintln(c.out, "  available models")
+					for _, model := range models {
+						fmt.Fprintf(c.out, "    %s/%s\n", model.Provider, model.ID)
+					}
+				}
+			case errors.Is(err, ai.ErrModelListingUnsupported):
+				fmt.Fprintln(c.errOut, "model listing is not supported by this provider")
+			default:
+				fmt.Fprintf(c.errOut, "could not list models: %v\n", err)
+			}
+		}
 		fmt.Fprintln(c.errOut, "usage: /model [provider/]<model>")
 		return false
 	}
@@ -512,6 +539,59 @@ func runModel(c *commandContext, arg string) bool {
 	}
 	fmt.Fprintf(c.out, "model %s/%s · from the next turn\n", c.modelProvider(), c.modelName())
 	return false
+}
+
+func runModels(c *commandContext, _ string) bool {
+	if c.availableModels == nil {
+		fmt.Fprintln(c.errOut, "model listing is not configured for this run")
+		return false
+	}
+	models, err := c.availableModels(commandContextContext(c))
+	if err != nil {
+		if errors.Is(err, ai.ErrModelListingUnsupported) {
+			fmt.Fprintln(c.errOut, "model listing is not supported by this provider")
+		} else {
+			fmt.Fprintf(c.errOut, "could not list models: %v\n", err)
+		}
+		return false
+	}
+	if len(models) == 0 {
+		fmt.Fprintln(c.out, "no models reported by the provider")
+		return false
+	}
+	for _, model := range models {
+		fmt.Fprintf(c.out, "  %s/%s\n", model.Provider, model.ID)
+	}
+	return false
+}
+
+func runCycleModel(c *commandContext, _ string) bool {
+	if c.cycleModel == nil {
+		fmt.Fprintln(c.errOut, "model cycling is not configured for this run")
+		return false
+	}
+	result, err := c.cycleModel(commandContextContext(c))
+	if err != nil {
+		if errors.Is(err, ai.ErrModelListingUnsupported) {
+			fmt.Fprintln(c.errOut, "model listing is not supported by this provider")
+		} else {
+			fmt.Fprintf(c.errOut, "could not cycle model: %v\n", err)
+		}
+		return false
+	}
+	if result == nil {
+		fmt.Fprintln(c.out, "no alternate model is available")
+		return false
+	}
+	fmt.Fprintf(c.out, "model %s/%s · from the next turn\n", result.Model.Provider, result.Model.ID)
+	return false
+}
+
+func commandContextContext(c *commandContext) context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }
 
 // runCompact replaces the older part of the conversation with a summary.

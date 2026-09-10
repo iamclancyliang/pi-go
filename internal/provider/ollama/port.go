@@ -13,7 +13,12 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
@@ -83,7 +88,15 @@ type Config struct {
 }
 
 // Port reaches a local Ollama server.
-type Port = cc.Port
+//
+// The embedded chat-completions port keeps generation on the shared adapter,
+// while these fields retain the local endpoint needed by Ollama's separate
+// model-listing endpoint.
+type Port struct {
+	*cc.Port
+	baseURL   string
+	transport http.RoundTripper
+}
 
 // New builds a Port, refusing a configuration that could not work.
 func New(cfg Config) (*Port, error) {
@@ -91,7 +104,7 @@ func New(cfg Config) (*Port, error) {
 		cfg.BaseURL = DefaultBaseURL
 	}
 	credential, _ := Resolve(context.Background(), nil, "")
-	return cc.New(cc.Config{
+	port, err := cc.New(cc.Config{
 		Provider:        providerName,
 		Model:           cfg.Model,
 		BaseURL:         cfg.BaseURL,
@@ -106,7 +119,70 @@ func New(cfg Config) (*Port, error) {
 		// from the framework's metadata.
 		Wire: false,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &Port{Port: port, baseURL: strings.TrimRight(cfg.BaseURL, "/"), transport: cfg.Transport}, nil
 }
+
+// ListModels asks Ollama for the models currently installed on its server.
+//
+// The endpoint is Ollama's documented GET /api/tags model listing. It returns
+// identifiers only: context limits and reasoning support remain owned by the
+// separately sourced facts catalogue. The request is made only when a caller
+// explicitly asks for discovery.
+func (p *Port) ListModels(ctx context.Context) ([]ai.ModelRef, error) {
+	if p == nil || p.Port == nil {
+		return nil, fmt.Errorf("ollama: model listing has no configured port")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: model listing request: %w", err)
+	}
+	client := &http.Client{
+		Transport: p.transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: model listing request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 64*1024))
+		if readErr != nil {
+			return nil, fmt.Errorf("ollama: model listing returned HTTP %d: %w", response.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("ollama: model listing returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("ollama: model listing response: %w", err)
+	}
+	refs := make([]ai.ModelRef, 0, len(payload.Models))
+	seen := make(map[string]struct{}, len(payload.Models))
+	for _, model := range payload.Models {
+		id := strings.TrimSpace(model.Name)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		refs = append(refs, ai.ModelRef{Provider: providerName, ID: id})
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].ID < refs[j].ID })
+	return refs, nil
+}
+
+var _ ai.ModelLister = (*Port)(nil)
 
 // newModel builds this provider's adapter for one call.
 func newModel(cfg Config) func(context.Context, cc.ModelRequest) (model.ToolCallingChatModel, error) {

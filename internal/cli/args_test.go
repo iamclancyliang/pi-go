@@ -175,3 +175,24 @@ func TestTheSessionFlags(t *testing.T) {
 		t.Fatalf("implemented flags warned: %v", got.Diagnostics)
 	}
 }
+
+func TestModelsFlagKeepsItsPatternsForCycleResolution(t *testing.T) {
+	got := cli.ParseArgs([]string{"--models", "ollama/alpha, *beta ,ollama/qwen2.5:7b"})
+	if got.Failed() {
+		t.Fatalf("--models produced a diagnostic: %v", got.Diagnostics)
+	}
+	want := []string{"ollama/alpha", "*beta", "ollama/qwen2.5:7b"}
+	if strings.Join(got.Models, "|") != strings.Join(want, "|") {
+		t.Fatalf("model scope parsed as %v, want %v", got.Models, want)
+	}
+	if _, ok := got.Unknown["models"]; ok {
+		t.Fatalf("--models was also recorded as unknown: %v", got.Unknown)
+	}
+}
+
+func TestModelsFlagKeepsEmptyEntriesForLaterDiagnostics(t *testing.T) {
+	got := cli.ParseArgs([]string{"--models", "alpha,,beta"})
+	if strings.Join(got.Models, "|") != "alpha||beta" {
+		t.Fatalf("empty model pattern disappeared: %v", got.Models)
+	}
+}

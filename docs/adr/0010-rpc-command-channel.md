@@ -84,8 +84,8 @@ runtime seams), with the parity matrix as the capability authority:
 | `new_session` | `/new` | native-equivalent |
 | `get_state` | model, session id and name, usage — but no steering/follow-up *mode*, no `isCompacting` flag | **partial** — the state object exists only as big as the state does |
 | `set_model` | `/model` | native-equivalent |
-| `cycle_model` | needs scoped models and a listing | **incomplete** (#30, ADR-0008) |
-| `get_available_models` | needs the listing | **incomplete** (#30, ADR-0008) |
+| `cycle_model` | on-demand provider listing, optional ordered scope, and `null` when no next model exists | **partial** — listing/cycling backend is implemented; the persisted scope selector remains #30/#28 |
+| `get_available_models` | on-demand provider listing, with typed unsupported and provider-failure answers | **partial** — implemented for providers that expose `ai.ModelLister`; unsupported providers remain selectable by name, and discovery is busy while a prompt runs so abort remains readable |
 | `set_thinking_level` · `cycle_thinking_level` · `get_available_thinking_levels` | nothing writes a thinking level | **incomplete** (#36) |
 | `set_steering_mode` · `set_follow_up_mode` | steering and follow-up exist as delivery timing; the all / one-at-a-time selection does not | **incomplete** (#40) — mechanism without the mode switch |
 | `compact` | `/compact` | native-equivalent |
@@ -102,17 +102,18 @@ runtime seams), with the parity matrix as the capability authority:
 | `get_messages` | the session snapshot | native-equivalent |
 | `get_commands` | the command table `/help` prints | native-equivalent |
 
-Of the thirty-two: seventeen have native equivalents today, two are partial, one is an already
-registered deviation (D-5), and twelve are incomplete — and every incomplete one was already
-incomplete somewhere else (#28, #30, #32, #36, #39, and the two this table itself surfaced, filed
-as #40 and #41: queue-mode selection and the auto-compaction toggle). The channel adds no new gaps; it inherits the
-ones the features have.
+Of the thirty-two: the channel now has handlers for twenty commands, including the two model
+commands whose provider capability may answer as unsupported; the remaining twelve are still
+typed unimplemented. Model cycling and listing are partial until the scoped selector lands
+(#28/#30), while the other gaps remain elsewhere (#28, #32, #36, #39, and #40/#41: queue-mode
+selection and the auto-compaction toggle). The channel adds no new gaps; it inherits the ones the
+features have.
 
 ## Consequences accepted
 
-**`--mode rpc` becomes implementable at the size pi-go actually is.** Twenty commands answerable —
-seventeen natively, two partially, one in Markdown — and honest responses for the twelve that are
-not: an unimplemented command fails with a typed kind saying so, which is the channel's own
+**`--mode rpc` becomes implementable at the size pi-go actually is.** Twenty commands now have
+handlers, including provider-reported model discovery and cycling, and honest responses for the
+twelve that are not: an unimplemented command fails with a typed kind saying so, which is the channel's own
 vocabulary doing the job `--mode rpc`'s exit-2 refusal does today, one command at a time instead of
 all at once.
 

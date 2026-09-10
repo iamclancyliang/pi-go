@@ -119,10 +119,11 @@ recorded when each is implemented — the same standard ADR-0007 holds a model f
 removes. Three others are named rather than dissolved:
 
 - the selector is a full-screen TUI surface, which is #28;
-- **Pi's selector behaviour was never read.** §27.1 lists `/scoped-models` under "dispatch only —
-  open selector UIs; their behaviour is the selector's, which is TUI and not read". So everything
-  beyond "enable/disable models for Ctrl+P cycling" is `semantics-needed`, including where a scoped
-  set is persisted and whether it is per-session or global;
+- **The selector surface is still unread.** Pi's cycle and scope-resolution rules are now recorded
+  from `agent-session.ts:1605-1680`, `model-resolver.ts:281-360`, and `cli/args.ts:116-117`; the
+  provider listing and cycle backend preserve those rules. The full-screen `/scoped-models` UI,
+  where its set is persisted, and whether that persistence is per-session or global remain
+  `semantics-needed` and are tracked with the selector work;
 - Ctrl+P cycling is an app-level keybinding, which is #28 again and #36.
 
 Implementing a listing therefore gets `/model`'s argument form a way to discover names. It does not
@@ -142,9 +143,9 @@ rejected under "two machines could then disagree about what a model is": there, 
 answer to *what a model is* varied by cache state. Here the identity of a model is untouched — only
 the question of which ones exist right now, whose answer is genuinely time-varying.
 
-**Ordering, filtering and grouping of a listing are pi-go's own.** Pi's selector was not read, so
-there is nothing to be compatible with, and inventing an approximation of an unread UI would be a
-claim this repository cannot support.
+**Ordering, filtering and grouping of a listing are pi-go's own.** The provider returns identifiers;
+pi-go sorts and deduplicates them before rendering text or cycling. Pi's full selector UI remains
+unread and is tracked separately as #28, so this backend does not claim that UI's behaviour.
 
 **pi-go still cannot say how many models it "supports".** Unchanged from ADR-0007. It can say which
 providers it reaches, which models a provider reported when asked, and which models it has recorded
@@ -173,15 +174,25 @@ impossible, and means #30 never closes.
 
 ## What this needs before it is code
 
-Nothing here is implemented. Accepting this ADR authorizes the following, and each item is the
-evidence its own row will name:
+The first implementation slice is now recorded below. Accepting this ADR authorizes the following,
+and each item is the evidence its own row names:
 
 1. **A port method that reports a listing or reports that it cannot**, on the `ai` boundary, exposing
-   no framework type (ADR-0001).
-2. **A test that no listing is reached without a user asking** — the startup path and `go test ./...`
-   both stay offline. This is the one that fails silently if it is not written.
-3. **Per-port implementation with a per-port source**, recorded as ADR-0007 requires. The first
-   should be one that costs nothing to call: Ollama runs on the developer's own machine.
+   no framework type (ADR-0001) — `ai.ModelLister`, with unsupported ports remaining valid.
+2. **A test that no listing is reached without a user asking** — discovery is called only by `/models`,
+   `/model` without an argument, `--models` when `/cycle-model` is used, RPC `get_available_models`,
+   or RPC `cycle_model`; startup and `go test ./...` remain offline.
+3. **Per-port implementation with a per-port source**, recorded as ADR-0007 requires — Ollama's
+   [first-party API documentation](https://docs.ollama.com/api/tags) documents `GET /api/tags` as
+   its installed-model listing; Pi's pinned tests use the same endpoint
+   (`packages/ai/test/context-overflow.test.ts:641`). It is implemented in
+   `internal/provider/ollama/port.go` and returns identifiers only.
 4. ~~The deviation registered~~ — done on acceptance: **D-15** in the parity matrix's register.
-5. ~~The parity matrix updated~~ — done on acceptance: both rows stay `incomplete`, now naming #28
-   and the unread selector semantics rather than the data source.
+5. ~~The parity matrix updated~~ — done on acceptance: the listing-backed model row is `partial`
+   for Ollama, while the scoped selector row remains `incomplete` until its #28 UI and persistence
+   semantics are ported.
+
+The cycle scope is resolved against each fresh listing. An omitted scope cycles the complete
+listing; a nonempty scope is intersected by provider and id. A pattern that matches no model or
+uses a resolver feature still deferred by this port returns a diagnostic and leaves the current
+model unchanged, so a typo cannot select an unrelated model.

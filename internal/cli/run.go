@@ -66,6 +66,10 @@ type Runtime struct {
 	// switched to mid-session goes through the same one this run was given.
 	Transport http.RoundTripper
 
+	// OpenModel replaces provider construction for an embedding or test that
+	// supplies its own model factory. Nil uses the normal provider registry.
+	OpenModel func(Args, http.RoundTripper) (ai.Port, string, string, error)
+
 	// Config is what this run resolved: effective settings, and how the
 	// project's trust question was answered. /settings and /trust read it.
 	Config Config
@@ -73,11 +77,27 @@ type Runtime struct {
 	// Thinking is how much reasoning to ask for on every turn.
 	Thinking ai.ThinkingLevel
 
+	// ScopedModels limits model cycling when a caller has selected an explicit
+	// ordered set. An empty set means cycle through the provider's reported
+	// listing. The full-screen scope editor is a separate interface feature.
+	ScopedModels []ai.ModelRef
+
+	// ModelPatterns carries the raw --models patterns. They are matched against
+	// the provider's on-demand listing when cycling, so startup stays offline.
+	ModelPatterns []string
+
 	// ReadLine, when set, replaces the plain line scanner with an editing
 	// prompt — the terminal path. Nil reads lines from Streams.In, which is
 	// what tests and redirected input use. A seam rather than a TTY check
 	// here, so the decision lives where the terminal is actually known.
 	ReadLine func(prompt string) (string, bool, error)
+}
+
+func (rt Runtime) openModel(args Args) (ai.Port, string, string, error) {
+	if rt.OpenModel != nil {
+		return rt.OpenModel(args, rt.Transport)
+	}
+	return Open(args, rt.Transport)
 }
 
 // RunPrint sends each prompt in turn and writes the final answer.
@@ -202,19 +222,23 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 // built with, and a swapped model reopens the port before anything is pointed
 // at it.
 type rpcHost struct {
-	mu      sync.Mutex
-	rt      Runtime
-	writer  *jsonstream.Writer
-	current *Conversation
-	agent   *runtime.Agent
-	port    ai.Port
-	prov    string
-	model   string
+	mu       sync.Mutex
+	rt       Runtime
+	writer   *jsonstream.Writer
+	current  *Conversation
+	agent    *runtime.Agent
+	port     ai.Port
+	prov     string
+	model    string
+	scoped   []ai.ModelRef
+	patterns []string
 }
 
 func newRPCHost(rt Runtime, writer *jsonstream.Writer) (*rpcHost, error) {
 	h := &rpcHost{rt: rt, writer: writer, current: rt.Conversation,
-		port: rt.Model, prov: rt.Provider, model: rt.ModelName}
+		port: rt.Model, prov: rt.Provider, model: rt.ModelName,
+		scoped:   append([]ai.ModelRef(nil), rt.ScopedModels...),
+		patterns: append([]string(nil), rt.ModelPatterns...)}
 	if err := h.build(); err != nil {
 		return nil, err
 	}
@@ -365,12 +389,42 @@ func (h *rpcHost) SetModel(toProvider, toModel string) error {
 		// credential happens to be found first.
 		next.Provider = h.prov
 	}
-	opened, openedProvider, openedModel, err := Open(next, h.rt.Transport)
+	opened, openedProvider, openedModel, err := h.rt.openModel(next)
 	if err != nil {
 		return err
 	}
+	oldPort, oldProvider, oldModel := h.port, h.prov, h.model
 	h.port, h.prov, h.model = opened, openedProvider, openedModel
-	return h.build()
+	if err := h.build(); err != nil {
+		h.port, h.prov, h.model = oldPort, oldProvider, oldModel
+		return err
+	}
+	// Keep later model changes and newly reopened conversations aligned with
+	// the model that actually became active. The args are only in-memory run
+	// state; Open still resolves credentials through its ordinary path.
+	h.rt.Args.Provider = openedProvider
+	h.rt.Args.Model = openedModel
+	return nil
+}
+
+// AvailableModels asks the currently selected provider for its identifiers.
+// No listing request occurs while the host is constructed or a prompt runs;
+// the RPC command invokes this method explicitly.
+func (h *rpcHost) AvailableModels(ctx context.Context) ([]ai.ModelRef, error) {
+	h.mu.Lock()
+	port, provider := h.port, h.prov
+	h.mu.Unlock()
+	return listAvailableModels(ctx, port, provider)
+}
+
+// CycleModel lists the current provider on demand, then applies the shared
+// cycle semantics and changes the model used from the next turn onward.
+func (h *rpcHost) CycleModel(ctx context.Context) (*ai.ModelCycle, error) {
+	h.mu.Lock()
+	port, provider, current, thinking := h.port, h.prov, h.model, h.rt.Thinking
+	scoped, patterns := append([]ai.ModelRef(nil), h.scoped...), append([]string(nil), h.patterns...)
+	h.mu.Unlock()
+	return cycleModelsWithPatterns(ctx, port, provider, current, scoped, patterns, thinking, h.SetModel)
 }
 
 func (h *rpcHost) Compact(instructions string) error {
@@ -511,6 +565,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	}
 
 	ctxt := &commandContext{
+		ctx:          ctx,
 		session:      current.Session,
 		conversation: current,
 		out:          streams.Out,
@@ -576,12 +631,26 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			// credential happens to be found first.
 			next.Provider = provider
 		}
-		opened, openedProvider, openedModel, err := Open(next, rt.Transport)
+		opened, openedProvider, openedModel, err := rt.openModel(next)
 		if err != nil {
 			return err
 		}
+		oldPort, oldProvider, oldModel := port, provider, modelName
 		port, provider, modelName = opened, openedProvider, openedModel
-		return build()
+		if err := build(); err != nil {
+			port, provider, modelName = oldPort, oldProvider, oldModel
+			return err
+		}
+		rt.Args = next
+		ctxt.args = next
+		return nil
+	}
+	ctxt.availableModels = func(listCtx context.Context) ([]ai.ModelRef, error) {
+		return listAvailableModels(listCtx, port, provider)
+	}
+	ctxt.cycleModel = func(cycleCtx context.Context) (*ai.ModelCycle, error) {
+		return cycleModelsWithPatterns(cycleCtx, port, provider, modelName, rt.ScopedModels, rt.ModelPatterns,
+			rt.Thinking, ctxt.switchModel)
 	}
 	ctxt.reload = func() error {
 		// Rebuilt from the store the conversation already has, rather than

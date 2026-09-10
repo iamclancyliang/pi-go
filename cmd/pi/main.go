@@ -110,17 +110,18 @@ func run(argv []string) int {
 	defer conversation.Close()
 
 	rt := cli.Runtime{
-		Model:        port,
-		ModelName:    model,
-		Tools:        registry,
-		System:       system,
-		Provider:     providerName,
-		Conversation: conversation,
-		Thinking:     thinking,
-		Args:         args,
-		WorkingDir:   root,
-		Transport:    http.DefaultTransport,
-		Config:       cfg,
+		Model:         port,
+		ModelName:     model,
+		Tools:         registry,
+		System:        system,
+		Provider:      providerName,
+		Conversation:  conversation,
+		Thinking:      thinking,
+		ModelPatterns: args.Models,
+		Args:          args,
+		WorkingDir:    root,
+		Transport:     http.DefaultTransport,
+		Config:        cfg,
 	}
 
 	if mode == cli.AppInteractive {
@@ -177,6 +178,7 @@ Flags:
       --mode text|json|rpc how to run; text lets the terminal decide
       --provider NAME      deepseek, openai or qwen
       --model NAME         the model to ask for
+      --models PATTERNS    comma-separated model patterns for cycling
       --api-key KEY        the credential, instead of the environment
       --system-prompt TEXT replace the assembled prompt
       --append-system-prompt TEXT   add to it; repeatable

@@ -53,6 +53,14 @@ type Host interface {
 	Commands() (have []CommandInfo, absent []string)
 }
 
+// ModelHost is the optional model discovery capability of a Host. It remains
+// separate from Host so callers whose providers cannot list models continue to
+// implement the core command channel without a fabricated catalogue.
+type ModelHost interface {
+	AvailableModels(context.Context) ([]ai.ModelRef, error)
+	CycleModel(context.Context) (*ai.ModelCycle, error)
+}
+
 // Run is a prompt in flight: the two ways to add to it, and the way to wait for
 // it to settle. Steer and Follow are the runtime's own contract — steer
 // interrupts the work at its next safe point, follow-up waits for it — and the
@@ -245,6 +253,45 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 			return failFromRun(resp, err)
 		}
 		return okData(resp, map[string]any{"provider": c.host.Provider(), "model": c.host.ModelName()})
+
+	case "get_available_models":
+		if c.running() != nil {
+			// Discovery is a synchronous provider call. Refusing it while a
+			// prompt runs keeps the reader available for abort and steering.
+			return fail(resp, FailBusy, "a prompt is running; list models between turns")
+		}
+		models, ok := c.host.(ModelHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this provider does not support model listing")
+		}
+		available, err := models.AvailableModels(ctx)
+		if err != nil {
+			return modelFailure(resp, err)
+		}
+		if available == nil {
+			// A successful listing with no entries is an empty array on the
+			// wire. `null` would incorrectly mean the provider did not answer
+			// the discovery request.
+			available = []ai.ModelRef{}
+		}
+		return okData(resp, map[string]any{"models": available})
+
+	case "cycle_model":
+		if c.running() != nil {
+			// Model selection changes what the NEXT turn uses. Asking the
+			// provider for a listing while a turn is live would do work for a
+			// change that cannot safely be applied yet.
+			return fail(resp, FailBusy, "a prompt is running; cycle the model between turns")
+		}
+		models, ok := c.host.(ModelHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this provider does not support model listing")
+		}
+		cycled, err := models.CycleModel(ctx)
+		if err != nil {
+			return modelFailure(resp, err)
+		}
+		return okData(resp, cycled)
 
 	case "compact":
 		if c.running() != nil {
@@ -459,6 +506,13 @@ func failFromRun(resp Response, err error) Response {
 	return fail(resp, FailInternal, err.Error())
 }
 
+func modelFailure(resp Response, err error) Response {
+	if errors.Is(err, ai.ErrModelListingUnsupported) {
+		return fail(resp, FailUnavailable, err.Error())
+	}
+	return failFromRun(resp, err)
+}
+
 func ok(resp Response, data json.RawMessage) Response {
 	resp.OK = true
 	resp.Data = data
@@ -484,7 +538,6 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // here fails as unimplemented; one not here fails as unknown. The list is the
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
-	"cycle_model": true, "get_available_models": true,
 	"set_thinking_level": true, "cycle_thinking_level": true, "get_available_thinking_levels": true,
 	"set_steering_mode": true, "set_follow_up_mode": true,
 	"set_auto_compaction": true,

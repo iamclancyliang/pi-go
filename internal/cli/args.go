@@ -63,6 +63,11 @@ type Args struct {
 	// SessionDir overrides where sessions are kept.
 	SessionDir string
 
+	// Models are the comma-separated patterns that limit model cycling. They
+	// are resolved against the provider listing when a cycle is requested, so
+	// parsing a command line never reaches the network.
+	Models []string
+
 	// Thinking is how much reasoning to ask for.
 	Thinking ai.ThinkingLevel
 
@@ -96,8 +101,7 @@ type Args struct {
 // effect — the failure mode a parser must never have.
 var notPorted = map[string]bool{
 	"name": true, "session": true, "session-id": true, "fork": true,
-	"models": true,
-	"tools":  true, "exclude-tools": true, "no-builtin-tools": true,
+	"tools": true, "exclude-tools": true, "no-builtin-tools": true,
 	"extensions": true, "no-extensions": true, "export": true,
 	"no-skills": true, "skills": true, "prompt-templates": true,
 	"no-prompt-templates": true, "themes": true, "use-theme": true,
@@ -144,6 +148,19 @@ func ParseArgs(argv []string) Args {
 			continue
 		case "--no-context-files":
 			parsed.NoContextFiles = true
+			continue
+		case "--models":
+			if i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "-") {
+				for _, pattern := range strings.Split(argv[i+1], ",") {
+					// Keep empty entries so a malformed list is diagnosed when
+					// cycling instead of silently broadening to every model.
+					parsed.Models = append(parsed.Models, strings.TrimSpace(pattern))
+				}
+				i++
+			} else {
+				parsed.Diagnostics = append(parsed.Diagnostics,
+					Diagnostic{Message: "--models requires a comma-separated pattern list"})
+			}
 			continue
 		case "--thinking":
 			if i+1 < len(argv) {

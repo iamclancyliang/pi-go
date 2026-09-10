@@ -15,14 +15,24 @@ import (
 type recordedTransport struct {
 	requests  int
 	responses []*http.Response
+	paths     []string
 }
 
-func (r *recordedTransport) RoundTrip(*http.Request) (*http.Response, error) {
+func (r *recordedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.requests++
+	r.paths = append(r.paths, req.URL.Path)
 	if r.requests > len(r.responses) {
 		return nil, io.ErrUnexpectedEOF
 	}
 	return r.responses[r.requests-1], nil
+}
+
+func listed(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
 }
 
 func refused(status int, body string) *http.Response {
@@ -148,6 +158,39 @@ func TestAConfigurationThatCouldNotWorkIsRefusedAtConstruction(t *testing.T) {
 		if _, err := ollama.New(cfg); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+// TestListingReturnsOnlyTheModelsOllamaReports. The provider's tags endpoint
+// is the source of identifiers; duplicate and blank records are not useful to
+// a selector, and the stable order makes cycling deterministic between calls.
+func TestListingReturnsOnlyTheModelsOllamaReports(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{
+		listed(`{"models":[{"name":"zeta:latest"},{"name":""},{"name":"alpha"},{"name":"alpha"}]}`),
+	}}
+	models, err := newPort(t, tr).ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 || models[0].Provider != "ollama" || models[0].ID != "alpha" || models[1].ID != "zeta:latest" {
+		t.Fatalf("unexpected model listing: %+v", models)
+	}
+	if tr.requests != 1 || len(tr.paths) != 1 || tr.paths[0] != "/api/tags" {
+		t.Fatalf("listing sent %d requests to %v; want one GET /api/tags", tr.requests, tr.paths)
+	}
+}
+
+// TestAnEmptyListingIsDifferentFromAnUnsupportedProvider. A running Ollama
+// server with no pulled models answered the listing successfully; callers must
+// preserve that empty result instead of converting it into a provider error.
+func TestAnEmptyListingIsDifferentFromAnUnsupportedProvider(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{listed(`{"models":[]}`)}}
+	models, err := newPort(t, tr).ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("an empty listing failed: %v", err)
+	}
+	if models == nil || len(models) != 0 {
+		t.Fatalf("empty Ollama listing became %#v", models)
 	}
 }
 
