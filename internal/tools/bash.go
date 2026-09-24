@@ -1,16 +1,20 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
+
+	"github.com/iamclancyliang/pi-go/internal/ai"
 )
 
 // MaxBashTimeout is the largest timeout that may be asked for.
@@ -41,6 +45,11 @@ type Bash struct {
 	// Limits bound one call's output. The zero value uses the defaults.
 	Limits Limits
 }
+
+// BashResult is the complete outcome of one command. ExitCode is absent when
+// the command was cancelled; otherwise it is the process's code, including
+// zero for a successful command.
+type BashResult = ai.BashResult
 
 func (b *Bash) Name() string { return "bash" }
 
@@ -103,17 +112,45 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("bash: command is required")
 	}
 
-	timeout, err := bashTimeout(in.Timeout)
+	result, err := b.Execute(ctx, in.Command, in.Timeout, nil)
 	if err != nil {
 		return Result{}, err
 	}
+	if result.Cancelled {
+		return Result{}, fmt.Errorf("bash: %s", appendStatus(result.Output, "Command aborted"))
+	}
+	if result.ExitCode != nil && *result.ExitCode != 0 {
+		return Result{}, fmt.Errorf("bash: %s", appendStatus(result.Output,
+			fmt.Sprintf("Command exited with code %d", *result.ExitCode)))
+	}
+	if result.Output == "" {
+		return Result{Content: "(no output)"}, nil
+	}
+	return Result{Content: result.Output}, nil
+}
+
+// Execute runs a command and optionally reports sanitized output chunks while
+// the process is alive. It returns nonzero exit codes as data because RPC
+// clients need the complete BashResult; Call formats those codes as tool
+// failures for model tool-use.
+func (b *Bash) Execute(ctx context.Context, command string, timeoutSeconds *float64, onChunk func(string)) (BashResult, error) {
+	if strings.TrimSpace(command) == "" {
+		return BashResult{}, fmt.Errorf("%w: command is required", ai.ErrBashArgument)
+	}
+	timeout, err := bashTimeout(timeoutSeconds)
+	if err != nil {
+		return BashResult{}, err
+	}
 	if _, err := os.Stat(b.Dir); err != nil {
-		return Result{}, fmt.Errorf("bash: working directory does not exist: %s", b.Dir)
+		return BashResult{}, fmt.Errorf("bash: working directory does not exist: %s", b.Dir)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	// The timeout is the caller's context narrowed, so a cancelled call and an
-	// expired timer stop the command by the same path — one place that kills,
-	// rather than two that can disagree about whether it died.
+	// The timeout narrows the caller's context, so cancellation and timeout
+	// reach one process-killing path rather than two that can disagree about
+	// whether the command stopped.
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if timeout > 0 {
@@ -125,24 +162,13 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 	if shell == "" {
 		shell = "bash"
 	}
-	command := in.Command
 	if b.CommandPrefix != "" {
-		// Its own line, as Pi runs it: joined onto the command's line it would
-		// change the command's first word instead of preceding it.
 		command = b.CommandPrefix + "\n" + command
 	}
 	cmd := exec.CommandContext(runCtx, shell, "-c", command)
 	cmd.Dir = b.Dir
-
-	// Its own process group, so stopping the command stops what it started. A
-	// kill aimed only at the shell leaves its children running, holding the
-	// pipe open and the call waiting on output from a process nobody is
-	// tracking — a test with a background sleep hangs for the full wait rather
-	// than ending at the timeout.
-	//
-	// Unix only, which is what this repository builds and tests on. A Windows
-	// port needs a job object here; it will not compile until someone writes
-	// one, which is the right way for that to surface.
+	// Its own process group means abort stops children too. Otherwise a
+	// background child can keep the output pipe open after the shell dies.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -151,42 +177,279 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 
-	// One buffer for both streams, interleaved as the command wrote them: a
-	// diagnostic printed to stderr between two lines of stdout belongs where it
-	// was printed, and separating them loses that ordering.
-	var captured bytes.Buffer
-	cmd.Stdout = &captured
-	cmd.Stderr = &captured
-
+	captured := newBashCapture(onChunk, b.Limits)
+	cmd.Stdout, cmd.Stderr = captured, captured
 	runErr := cmd.Run()
-	shown := b.render(captured.String())
+	raw, fullOutputPath, captureErr := captured.Finish()
+	if captureErr != nil {
+		return BashResult{Output: raw}, captureErr
+	}
+	cut := TruncateTail(raw, b.Limits)
+	result := BashResult{Output: b.render(raw), Truncated: cut.Truncated}
+	if fullOutputPath != "" {
+		result.FullOutputPath = fullOutputPath
+	} else if cut.Truncated {
+		path, spillErr := spillBashOutput(raw)
+		if spillErr != nil {
+			return result, spillErr
+		}
+		result.FullOutputPath = path
+	}
 
 	switch {
 	case errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
-		// What it had produced travels with the failure: a command killed after
-		// printing where it got to is far more useful than the fact it was
-		// killed.
-		return Result{}, fmt.Errorf("bash: %s", appendStatus(shown,
+		return result, fmt.Errorf("bash: %s", appendStatus(result.Output,
 			fmt.Sprintf("Command timed out after %s seconds", formatSeconds(timeout))))
 	case ctx.Err() != nil:
-		return Result{}, fmt.Errorf("bash: %s", appendStatus(shown, "Command aborted"))
+		result.Cancelled = true
+		return result, nil
 	}
-
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		// A non-zero exit is a failure the model must see as one, and the
-		// output is the reason. Returning it as success with the code buried in
-		// the text lets a model read a failed build as a finished one.
-		return Result{}, fmt.Errorf("bash: %s", appendStatus(shown,
-			fmt.Sprintf("Command exited with code %d", exitErr.ExitCode())))
+		code := exitErr.ExitCode()
+		result.ExitCode = &code
+		return result, nil
 	}
 	if runErr != nil {
-		return Result{}, fmt.Errorf("bash: %w", runErr)
+		return result, fmt.Errorf("bash: %w", runErr)
 	}
-	if shown == "" {
-		return Result{Content: "(no output)"}, nil
+	code := 0
+	result.ExitCode = &code
+	return result, nil
+}
+
+type bashCapture struct {
+	mu             sync.Mutex
+	rolling        []byte
+	pending        []byte
+	inOSC          bool
+	totalBytes     int
+	spillThreshold int
+	maxRolling     int
+	spill          *os.File
+	spillPath      string
+	spillErr       error
+	onChunk        func(string)
+}
+
+func newBashCapture(onChunk func(string), limits Limits) *bashCapture {
+	_, maxBytes := limits.resolve()
+	return &bashCapture{
+		spillThreshold: maxBytes,
+		maxRolling:     maxBytes * 2,
+		onChunk:        onChunk,
 	}
-	return Result{Content: shown}, nil
+}
+
+func (c *bashCapture) Write(data []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.spillErr != nil {
+		return 0, c.spillErr
+	}
+	c.totalBytes += len(data)
+	text := c.decodeLocked(data)
+	if err := c.appendLocked(text); err != nil {
+		return 0, err
+	}
+	if c.onChunk != nil && text != "" {
+		c.onChunk(text)
+	}
+	return len(data), nil
+}
+
+func (c *bashCapture) Finish() (string, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.pending) > 0 {
+		text, _, _ := sanitizeBashOutputChunkState(c.pending, c.inOSC)
+		c.pending = nil
+		c.inOSC = false
+		if err := c.appendLocked(text); err != nil {
+			return string(c.rolling), c.spillPath, err
+		}
+		if c.onChunk != nil && text != "" {
+			c.onChunk(text)
+		}
+	}
+	c.inOSC = false
+	if c.spill != nil {
+		if err := c.spill.Close(); err != nil && c.spillErr == nil {
+			c.spillErr = fmt.Errorf("bash: closing full output file: %w", err)
+		}
+		c.spill = nil
+	}
+	return string(c.rolling), c.spillPath, c.spillErr
+}
+
+func (c *bashCapture) decodeLocked(data []byte) string {
+	combined := make([]byte, 0, len(c.pending)+len(data))
+	combined = append(combined, c.pending...)
+	combined = append(combined, data...)
+	c.pending = nil
+	complete := len(combined)
+	for i := 0; i < len(combined); {
+		if !utf8.FullRune(combined[i:]) {
+			complete = i
+			c.pending = append(c.pending, combined[i:]...)
+			break
+		}
+		_, size := utf8.DecodeRune(combined[i:])
+		i += size
+	}
+	text, pending, inOSC := sanitizeBashOutputChunkState(combined[:complete], c.inOSC)
+	c.pending = append(c.pending, pending...)
+	c.inOSC = inOSC
+	return text
+}
+
+func (c *bashCapture) appendLocked(text string) error {
+	if c.totalBytes > c.spillThreshold && c.spill == nil {
+		f, err := os.CreateTemp("", "pi-bash-*.log")
+		if err != nil {
+			c.spillErr = fmt.Errorf("bash: creating full output file: %w", err)
+			return c.spillErr
+		}
+		if _, err := f.Write(c.rolling); err != nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			c.spillErr = fmt.Errorf("bash: writing full output file: %w", err)
+			return c.spillErr
+		}
+		c.spill, c.spillPath = f, f.Name()
+	}
+	if c.spill != nil && text != "" {
+		if _, err := c.spill.WriteString(text); err != nil {
+			c.spillErr = fmt.Errorf("bash: writing full output file: %w", err)
+			return c.spillErr
+		}
+	}
+	c.rolling = append(c.rolling, text...)
+	if len(c.rolling) > c.maxRolling {
+		c.rolling = []byte(tailBytes(string(c.rolling), c.maxRolling))
+	}
+	return nil
+}
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func sanitizeBashOutput(data []byte) string {
+	text, _, _ := sanitizeBashOutputChunkState(data, false)
+	return text
+}
+
+// sanitizeBashOutputChunk removes terminal title and hyperlink payloads before
+// the remaining control-byte and CSI sanitization. OSC payloads can contain
+// arbitrary URLs, so leaving an unterminated sequence in a streamed chunk
+// would leak terminal control data into the model-visible output.
+func sanitizeBashOutputChunkState(data []byte, inOSC bool) (string, []byte, bool) {
+	clean := make([]byte, 0, len(data))
+	for i := 0; i < len(data); {
+		if inOSC {
+			var pending []byte
+			i, pending, inOSC = consumeOSC(data, i)
+			if inOSC {
+				return sanitizeBashControls(clean), pending, true
+			}
+			continue
+		}
+
+		if data[i] == 0x1b && i+1 == len(data) {
+			return sanitizeBashControls(clean), data[i:], false
+		}
+		prefixSize, ok := oscPrefixSize(data, i)
+		if ok {
+			i += prefixSize
+			inOSC = true
+			continue
+		}
+		r, size := decodeBashRune(data, i)
+		if size == 0 {
+			size = 1
+		}
+		if r == '\u009c' {
+			i += size
+			continue
+		}
+		clean = append(clean, data[i:i+size]...)
+		i += size
+	}
+	return sanitizeBashControls(clean), nil, inOSC
+}
+
+func decodeBashRune(data []byte, offset int) (rune, int) {
+	r, size := utf8.DecodeRune(data[offset:])
+	if size == 1 && (data[offset] == 0x9c || data[offset] == 0x9d) {
+		return rune(data[offset]), 1
+	}
+	return r, size
+}
+
+func oscPrefixSize(data []byte, offset int) (int, bool) {
+	if data[offset] == 0x1b && offset+1 < len(data) && data[offset+1] == ']' {
+		return 2, true
+	}
+	r, size := decodeBashRune(data, offset)
+	if r == '\u009d' {
+		return size, true
+	}
+	return 0, false
+}
+
+// consumeOSC skips an OSC payload without retaining it. Only a trailing ESC
+// needs to be carried across writes to decide whether the next byte is ST;
+// this keeps an unterminated payload's memory bounded while it is streamed.
+func consumeOSC(data []byte, offset int) (int, []byte, bool) {
+	for offset < len(data) {
+		r, size := decodeBashRune(data, offset)
+		if r == '\a' || r == '\u009c' {
+			return offset + size, nil, false
+		}
+		if data[offset] == 0x1b {
+			if offset+1 == len(data) {
+				return len(data), data[offset:], true
+			}
+			if data[offset+1] == '\\' {
+				return offset + 2, nil, false
+			}
+			offset++
+			continue
+		}
+		if size == 0 {
+			size = 1
+		}
+		offset += size
+	}
+	return len(data), nil, true
+}
+
+func sanitizeBashControls(data []byte) string {
+	text := ansiEscape.ReplaceAllString(strings.ToValidUTF8(string(data), "�"), "")
+	text = strings.ReplaceAll(text, "\r", "")
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || (r >= 0x20 && !(r >= 0x80 && r <= 0x9f)) {
+			return r
+		}
+		return -1
+	}, text)
+}
+
+func spillBashOutput(content string) (string, error) {
+	f, err := os.CreateTemp("", "pi-bash-*.log")
+	if err != nil {
+		return "", fmt.Errorf("bash: creating full output file: %w", err)
+	}
+	name := f.Name()
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		_ = os.Remove(name)
+		return "", fmt.Errorf("bash: writing full output file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("bash: closing full output file: %w", err)
+	}
+	return name, nil
 }
 
 // render bounds what the command said, keeping the end.
@@ -218,11 +481,11 @@ func bashTimeout(seconds *float64) (time.Duration, error) {
 	// Refused rather than ignored. A model that asked for a bound and silently
 	// got none would wait on a command it believed could not outlast it.
 	if v <= 0 || v != v {
-		return 0, fmt.Errorf("bash: invalid timeout: must be a positive number of seconds")
+		return 0, fmt.Errorf("%w: timeout must be a positive number of seconds", ai.ErrBashArgument)
 	}
 	d := time.Duration(v * float64(time.Second))
 	if d > MaxBashTimeout {
-		return 0, fmt.Errorf("bash: invalid timeout: maximum is %s seconds",
+		return 0, fmt.Errorf("%w: timeout maximum is %s seconds", ai.ErrBashArgument,
 			formatSeconds(MaxBashTimeout))
 	}
 	return d, nil

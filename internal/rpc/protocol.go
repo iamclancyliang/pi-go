@@ -55,6 +55,13 @@ type Command struct {
 
 	// Instructions is what to focus a summary on, on `compact`.
 	Instructions string `json:"instructions,omitempty"`
+
+	// BashCommand is the shell text for `bash`; it is separate from Command,
+	// which names the RPC verb. Message is accepted as a compatibility alias
+	// by the dispatcher for callers that use prompt-shaped arguments.
+	BashCommand        string   `json:"bash_command,omitempty"`
+	ExcludeFromContext bool     `json:"excludeFromContext,omitempty"`
+	Timeout            *float64 `json:"timeout,omitempty"`
 }
 
 // FailureKind is why a command did not succeed. Closed and stable: a client
@@ -105,13 +112,14 @@ const (
 // It carries the family and sequence the wire needs, the id and command echoed
 // back, whether it succeeded, and exactly one of Data or Error.
 type Response struct {
-	Family  string          `json:"family"`
-	Seq     int             `json:"seq"`
-	ID      string          `json:"id,omitempty"`
-	Command string          `json:"command,omitempty"`
-	OK      bool            `json:"ok"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   *Failure        `json:"error,omitempty"`
+	Family   string          `json:"family"`
+	Seq      int             `json:"seq"`
+	ID       string          `json:"id,omitempty"`
+	Command  string          `json:"command,omitempty"`
+	OK       bool            `json:"ok"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Error    *Failure        `json:"error,omitempty"`
+	deferred bool
 }
 
 // Failure is a typed error with human detail.

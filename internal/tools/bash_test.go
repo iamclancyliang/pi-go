@@ -2,10 +2,14 @@ package tools_test
 
 import (
 	"context"
+	"errors"
+	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
@@ -196,5 +200,84 @@ func TestTheCommandPrefixRunsBeforeEveryCommand(t *testing.T) {
 	got := call(t, tool, `{"command":"echo $GREETING"}`)
 	if got != "prefixed\n" {
 		t.Fatalf("the prefix did not reach the command: %q", got)
+	}
+}
+
+func TestExecuteStreamsStructuredResultAndSanitizesOutput(t *testing.T) {
+	var chunks []string
+	result, err := (&tools.Bash{Dir: t.TempDir()}).Execute(context.Background(),
+		`printf '\033[31mfirst\033[0m\n'; printf '\001second\n'`, nil, func(chunk string) {
+			chunks = append(chunks, chunk)
+		})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Output != "first\nsecond\n" || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("structured result was %+v", result)
+	}
+	if strings.Join(chunks, "") != result.Output {
+		t.Fatalf("streamed chunks %q do not reconstruct output %q", chunks, result.Output)
+	}
+}
+
+func TestExecuteReturnsNonzeroExitAsData(t *testing.T) {
+	result, err := (&tools.Bash{Dir: t.TempDir()}).Execute(context.Background(),
+		`printf 'failed\n'; exit 7`, nil, nil)
+	if err != nil || result.ExitCode == nil || *result.ExitCode != 7 || result.Output != "failed\n" {
+		t.Fatalf("nonzero result=%+v err=%v", result, err)
+	}
+}
+
+func TestExecuteSpillsFullOutputWhenTruncated(t *testing.T) {
+	result, err := (&tools.Bash{Dir: t.TempDir(), Limits: tools.Limits{MaxLines: 3}}).Execute(
+		context.Background(), "seq 1 10", nil, nil)
+	if err != nil || !result.Truncated || result.FullOutputPath == "" {
+		t.Fatalf("truncated result=%+v err=%v", result, err)
+	}
+	defer os.Remove(result.FullOutputPath)
+	full, err := os.ReadFile(result.FullOutputPath)
+	if err != nil || string(full) != "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n" {
+		t.Fatalf("spill=%q err=%v", full, err)
+	}
+	if !strings.Contains(result.Output, "10") || strings.Contains(result.Output, "\n1\n") {
+		t.Fatalf("tail truncation lost the command's end: %q", result.Output)
+	}
+}
+
+func TestExecuteCancellationReturnsQuicklyAndMarksResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	result, err := (&tools.Bash{Dir: t.TempDir()}).Execute(ctx, "echo before; sleep 30", nil, nil)
+	if err != nil || !result.Cancelled || result.ExitCode != nil {
+		t.Fatalf("cancelled result=%+v err=%v", result, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("cancellation took %v", elapsed)
+	}
+}
+
+func TestExecuteTimeoutReturnsAnErrorAndStopsTheProcess(t *testing.T) {
+	timeout := 0.05
+	started := time.Now()
+	result, err := (&tools.Bash{Dir: t.TempDir()}).Execute(
+		context.Background(), "sleep 30", &timeout, nil)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("timeout was not reported: result=%+v err=%v", result, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("timeout took %v", elapsed)
+	}
+}
+
+func TestExecuteRejectsNaNTimeoutAsAnArgumentError(t *testing.T) {
+	timeout := math.NaN()
+	_, err := (&tools.Bash{Dir: t.TempDir()}).Execute(
+		context.Background(), "true", &timeout, nil)
+	if !errors.Is(err, ai.ErrBashArgument) {
+		t.Fatalf("NaN timeout error=%v, want argument classification", err)
 	}
 }

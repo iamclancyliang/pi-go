@@ -427,6 +427,31 @@ func (h *rpcHost) CycleModel(ctx context.Context) (*ai.ModelCycle, error) {
 	return cycleModelsWithPatterns(ctx, port, provider, current, scoped, patterns, thinking, h.SetModel)
 }
 
+// ExecuteBash runs a direct shell command independently of the model loop.
+// Session queues its completed message when a prompt is still active so the
+// command cannot split an assistant tool call from its result.
+func (h *rpcHost) ExecuteBash(ctx context.Context, command string, timeout *float64,
+	excludeFromContext bool, _ string, onChunk func(string),
+) (ai.BashResult, error) {
+	h.mu.Lock()
+	tool, ok := h.rt.Tools.Lookup("bash")
+	sess := h.current.Session
+	h.mu.Unlock()
+	if !ok {
+		return ai.BashResult{}, fmt.Errorf("shell execution is not configured")
+	}
+	runner, ok := tool.(bashExecutor)
+	if !ok {
+		return ai.BashResult{}, fmt.Errorf("the configured bash tool cannot run direct commands")
+	}
+	return executeBashWithTimeout(ctx, sess, runner, command, timeout, excludeFromContext, onChunk)
+}
+
+// AbortBash is a host capability marker. The channel owns the cancellation
+// contexts for each command, so aborting there is what makes this operation
+// safe when several commands are active at once.
+func (h *rpcHost) AbortBash() {}
+
 func (h *rpcHost) Compact(instructions string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -504,7 +529,7 @@ func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 	}
 	defer func() { _ = host.current.Close() }()
 
-	if err := rpc.Loop(ctx, streams.In, writer, rpc.NewChannel(host)); err != nil {
+	if err := rpc.Loop(ctx, streams.In, writer, rpc.NewChannelWithWriter(host, writer)); err != nil {
 		if err == context.Canceled {
 			return 0
 		}
@@ -576,6 +601,13 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 
 		modelProvider: func() string { return provider },
 		modelName:     func() string { return modelName },
+	}
+	if registered, ok := rt.Tools.Lookup("bash"); ok {
+		if runner, ok := registered.(bashExecutor); ok {
+			ctxt.bash = func(bashCtx context.Context, command string, exclude bool, onChunk func(string)) (tools.BashResult, error) {
+				return executeBash(bashCtx, current.Session, runner, command, exclude, onChunk)
+			}
+		}
 	}
 	// The scanner is shared with the prompt loop, so a confirmation reads the
 	// next line the user types rather than opening a second reader that would

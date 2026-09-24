@@ -91,7 +91,7 @@ runtime seams), with the parity matrix as the capability authority:
 | `compact` | `/compact` | native-equivalent |
 | `set_auto_compaction` | overflow recovery is always on and has no toggle | **incomplete** (#41) — a toggle is a decision about recovery, not a flag to add casually |
 | `set_auto_retry` · `abort_retry` | no session-level retry | **incomplete** (#39) |
-| `bash` · `abort_bash` | the bash *tool* exists; running a command outside the turn with `excludeFromContext` does not | **incomplete** — closest to #28's `!` surface |
+| `bash` · `abort_bash` | direct local shell execution, streamed output, all-active cancellation, durable records and `excludeFromContext` | **partial** — the RPC commands run outside the turn and preserve ordering, but the wire uses pi-go's `bash` family and the extension hook/full-screen picker remain #28 work |
 | `get_session_stats` | counts and token ledger; **no currency** — pi-go computes no cost (§7.2) | **partial** |
 | `export_html` | `/export`, Markdown | deviation D-5 (#27) |
 | `switch_session` | `/resume` | native-equivalent |
@@ -102,18 +102,18 @@ runtime seams), with the parity matrix as the capability authority:
 | `get_messages` | the session snapshot | native-equivalent |
 | `get_commands` | the command table `/help` prints | native-equivalent |
 
-Of the thirty-two: the channel now has handlers for twenty commands, including the two model
-commands whose provider capability may answer as unsupported; the remaining twelve are still
+Of the thirty-two: the channel now has handlers for twenty-two commands, including the two model
+commands whose provider capability may answer as unsupported; the remaining ten are still
 typed unimplemented. Model cycling and listing are partial until the scoped selector lands
-(#28/#30), while the other gaps remain elsewhere (#28, #32, #36, #39, and #40/#41: queue-mode
+(#30), while the other gaps remain elsewhere (#27, #28, #32, #36, #39, and #40/#41: queue-mode
 selection and the auto-compaction toggle). The channel adds no new gaps; it inherits the ones the
 features have.
 
 ## Consequences accepted
 
-**`--mode rpc` becomes implementable at the size pi-go actually is.** Twenty commands now have
-handlers, including provider-reported model discovery and cycling, and honest responses for the
-twelve that are not: an unimplemented command fails with a typed kind saying so, which is the channel's own
+**`--mode rpc` becomes implementable at the size pi-go actually is.** Twenty-two commands now have
+handlers, including provider-reported model discovery and cycling plus direct shell execution, and
+honest responses for the ten that are not: an unimplemented command fails with a typed kind saying so, which is the channel's own
 vocabulary doing the job `--mode rpc`'s exit-2 refusal does today, one command at a time instead of
 all at once.
 

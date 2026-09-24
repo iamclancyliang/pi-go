@@ -54,6 +54,11 @@ type Message struct {
 	// require the reasoning of earlier turns to be sent back with the next
 	// request, and a history that dropped it cannot continue that conversation.
 	Reasoning string
+
+	// BashExecution is set for a direct shell command recorded outside an agent
+	// turn. It remains in truth even when ExcludeFromContext keeps it out of the
+	// projection sent to the next model call.
+	BashExecution *BashExecution `json:"bash_execution,omitempty"`
 }
 
 // ToolSpec describes a tool to the model. It is deliberately a copy of the

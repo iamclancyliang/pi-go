@@ -41,6 +41,11 @@ type Session struct {
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
+	// agentRuns protects tool-use ordering when a direct shell command finishes
+	// while a model round is still writing its assistant and tool messages.
+	agentRuns   int
+	pendingBash []ai.Message
+
 	// intents are tool calls that were about to run, by reserved result id.
 	intents map[string]ToolIntent
 
@@ -112,7 +117,10 @@ func (s *Session) Append(m ai.Message) error {
 func (s *Session) AppendAll(msgs ...ai.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.appendAllLocked(msgs...)
+}
 
+func (s *Session) appendAllLocked(msgs ...ai.Message) error {
 	if s.store != nil && len(msgs) > 0 {
 		entries := make([]Entry, 0, len(msgs))
 		for i := range msgs {
@@ -127,6 +135,52 @@ func (s *Session) AppendAll(msgs ...ai.Message) error {
 	return nil
 }
 
+// BeginAgentRun marks the interval in which direct bash results are held aside.
+func (s *Session) BeginAgentRun() {
+	s.mu.Lock()
+	s.agentRuns++
+	s.mu.Unlock()
+}
+
+// EndAgentRun flushes bash results that completed during the model run. They
+// are appended after all assistant and tool messages from that run, preserving
+// the order a resumed conversation presents to the model.
+func (s *Session) EndAgentRun() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.agentRuns > 0 {
+		s.agentRuns--
+	}
+	if s.agentRuns > 0 || len(s.pendingBash) == 0 {
+		return nil
+	}
+	if err := s.appendAllLocked(s.pendingBash...); err != nil {
+		return err
+	}
+	s.pendingBash = nil
+	return nil
+}
+
+// AppendBashExecution records a shell result as a conversation message. While
+// an agent run is active it is queued until the run settles, so a direct
+// command cannot land between an assistant tool call and its result.
+func (s *Session) AppendBashExecution(execution ai.BashExecution) error {
+	message := ai.Message{
+		Role:          ai.RoleUser,
+		Content:       ai.BashExecutionToText(execution),
+		BashExecution: &execution,
+	}
+	s.mu.Lock()
+	if s.agentRuns > 0 {
+		s.pendingBash = append(s.pendingBash, message)
+		s.mu.Unlock()
+		return nil
+	}
+	err := s.appendAllLocked(message)
+	s.mu.Unlock()
+	return err
+}
+
 // rememberLocked makes messages visible in memory. The caller holds the lock and
 // has already recorded them.
 func (s *Session) rememberLocked(msgs ...ai.Message) {
@@ -139,7 +193,7 @@ func (s *Session) rememberLocked(msgs ...ai.Message) {
 		// attempts were spent trying to answer a different question, and
 		// charging them against this one would leave a conversation unable to
 		// recover from its first overflow.
-		if m.Role == ai.RoleUser {
+		if m.Role == ai.RoleUser && m.BashExecution == nil {
 			s.overflowAttempts = 0
 			s.failure = nil
 			s.operations++
@@ -202,8 +256,8 @@ func (s *Session) Project() Projection {
 			Role:    ai.RoleSystem,
 			Content: s.checkpoint.Summary,
 		})
-		out = append(out, cloneMessages(s.checkpoint.RetainedTail)...)
-		out = append(out, cloneMessages(s.sinceCheckpoint)...)
+		out = append(out, projectMessages(s.checkpoint.RetainedTail)...)
+		out = append(out, projectMessages(s.sinceCheckpoint)...)
 
 		// NOT complete: a summary stands in for messages this projection does not
 		// carry. Reporting completeness here would make a compacted context
@@ -211,8 +265,27 @@ func (s *Session) Project() Projection {
 		return Projection{Messages: out, Complete: false}
 	}
 
-	out = append(out, cloneMessages(s.messages)...)
+	out = append(out, projectMessages(s.messages)...)
 	return Projection{Messages: out, Complete: true}
+}
+
+func projectMessages(in []ai.Message) []ai.Message {
+	cloned := cloneMessages(in)
+	out := make([]ai.Message, 0, len(cloned))
+	for _, original := range cloned {
+		if original.BashExecution != nil {
+			if original.BashExecution.ExcludeFromContext {
+				continue
+			}
+			out = append(out, ai.Message{
+				Role:    ai.RoleUser,
+				Content: ai.BashExecutionToText(*original.BashExecution),
+			})
+			continue
+		}
+		out = append(out, cloneMessages([]ai.Message{original})[0])
+	}
+	return out
 }
 
 // Fail durably records that the operation ended and cannot be retried as it
@@ -527,6 +600,14 @@ func cloneMessages(in []ai.Message) []ai.Message {
 		cm := m
 		if len(m.ToolCalls) > 0 {
 			cm.ToolCalls = append([]ai.ToolCall(nil), m.ToolCalls...)
+		}
+		if m.BashExecution != nil {
+			bash := *m.BashExecution
+			if m.BashExecution.ExitCode != nil {
+				code := *m.BashExecution.ExitCode
+				bash.ExitCode = &code
+			}
+			cm.BashExecution = &bash
 		}
 		out[i] = cm
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/session"
+	"github.com/iamclancyliang/pi-go/internal/tools"
 	"github.com/iamclancyliang/pi-go/internal/tui"
 )
 
@@ -83,6 +84,11 @@ type commandContext struct {
 	availableModels func(context.Context) ([]ai.ModelRef, error)
 	cycleModel      func(context.Context) (*ai.ModelCycle, error)
 
+	// bash runs a direct shell command outside the model turn. Its output
+	// callback is called as chunks arrive, while the completed result is added
+	// to session truth for the next prompt.
+	bash func(context.Context, string, bool, func(string)) (tools.BashResult, error)
+
 	// confirm asks the user a yes-or-no question, reading from the same input
 	// the conversation comes from.
 	confirm func() bool
@@ -136,6 +142,37 @@ func init() {
 
 // dispatch runs a slash command. It reports whether the line was one.
 func dispatch(c *commandContext, line string) (handled, stop bool) {
+	if strings.HasPrefix(line, "!") {
+		exclude := strings.HasPrefix(line, "!!")
+		command := strings.TrimSpace(line[1:])
+		if exclude {
+			command = strings.TrimSpace(line[2:])
+		}
+		if command == "" {
+			fmt.Fprintln(c.errOut, "! needs a shell command")
+			return true, false
+		}
+		if c.bash == nil {
+			fmt.Fprintln(c.errOut, "shell execution is not configured for this run")
+			return true, false
+		}
+		streamed := false
+		result, err := c.bash(commandContextContext(c), command, exclude, func(delta string) {
+			streamed = true
+			_, _ = io.WriteString(c.out, delta)
+		})
+		if err != nil {
+			fmt.Fprintf(c.errOut, "could not run shell command: %v\n", err)
+			return true, false
+		}
+		if !streamed {
+			fmt.Fprintln(c.out, bashResultText(result))
+		}
+		if result.ExitCode != nil && *result.ExitCode != 0 {
+			fmt.Fprintf(c.errOut, "command exited with code %d\n", *result.ExitCode)
+		}
+		return true, false
+	}
 	if !strings.HasPrefix(line, "/") {
 		return false, false
 	}

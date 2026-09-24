@@ -124,7 +124,7 @@ ADR-0006 requires each remote capability to end as `native-equivalent`, `accepte
 | `thinking_level_changed` | — | **incomplete** (#36) — nothing writes a thinking level at all |
 | `auto_retry_start` · `auto_retry_end` | — | **incomplete** (#39) — no auto-retry |
 | `summarization_retry_scheduled` · `_attempt_start` · `_finished` | — | **incomplete** — needs retry (#39) and branch summarization (#32) |
-| `bash_execution_update` | — | **incomplete** (#28) — Pi's `!` execution is a full-screen-mode surface |
+| `bash_execution_update` | RPC-only `family:"bash"` lines with `id`, `delta` and the shared `seq` | **partial** (#28) — direct RPC shell output streams with the event name; `--mode json` and the full-screen `!` surface do not publish it yet |
 | `extension_error` | — | **incomplete** — no extension host; the parity matrix records that surface as architecture-risk |
 
 Eight of Pi's capabilities have native equivalents today and fifteen do not. **That is a reason to

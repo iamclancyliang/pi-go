@@ -151,9 +151,11 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 // express "while a tool round is active", so it cannot test the contract
 // either.
 type Run struct {
-	agent *Agent
-	loop  *adk.TurnLoop[*schema.Message, *schema.Message]
-	ctx   context.Context
+	agent   *Agent
+	loop    *adk.TurnLoop[*schema.Message, *schema.Message]
+	ctx     context.Context
+	endOnce sync.Once
+	endErr  error
 }
 
 // Start submits a prompt and returns while the run is still in flight.
@@ -169,16 +171,19 @@ func (a *Agent) Start(ctx context.Context, prompt string) (*Run, error) {
 		return nil, err
 	}
 
+	a.cfg.Session.BeginAgentRun()
 	a.emitter.emit(events.KindAgentStart, nil)
 
 	loop, err := a.buildLoop(ctx)
 	if err != nil {
+		_ = a.cfg.Session.EndAgentRun()
 		a.failStart(err)
 		return nil, err
 	}
 
 	if ok, _ := loop.Push(schema.UserMessage(prompt)); !ok {
 		err := errors.New("runtime: loop rejected the prompt")
+		_ = a.cfg.Session.EndAgentRun()
 		a.failStart(err)
 		return nil, err
 	}
@@ -281,6 +286,11 @@ func (r *Run) Wait() error {
 	if err := r.ctx.Err(); err != nil {
 		reason = "aborted"
 		exitErr = err
+	}
+	r.endOnce.Do(func() { r.endErr = r.agent.cfg.Session.EndAgentRun() })
+	if exitErr == nil && r.endErr != nil {
+		reason = "error"
+		exitErr = r.endErr
 	}
 
 	r.agent.emitter.emit(events.KindAgentEnd, func(e *events.Event) {

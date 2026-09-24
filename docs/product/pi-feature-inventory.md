@@ -2677,7 +2677,9 @@ example is SSH, i.e. running the user's shell commands **on another machine**), 
 backend, or return a result directly without executing anything.
 
 This is a larger capability than the name suggests: it means the shell backend is a **seam**, not a
-built-in. pi-go currently has no equivalent — its bash tool would be a fixed local implementation.
+built-in. pi-go now keeps its local runner behind the CLI/RPC adapter seam, so direct commands can
+share the same execution, cancellation and result recording path. The extension host and its
+`user_bash` replacement hook are still absent.
 
 ### 24.3 Project trust is a first-decision-wins protocol
 

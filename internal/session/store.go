@@ -203,8 +203,12 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 	for _, e := range recorded {
 		switch {
 		case e.Message != nil:
-			s.messages = append(s.messages, *e.Message)
-			if e.Message.Role == ai.RoleUser {
+			message := *e.Message
+			if message.BashExecution != nil && message.Content == "" {
+				message.Content = ai.BashExecutionToText(*message.BashExecution)
+			}
+			s.messages = append(s.messages, message)
+			if message.Role == ai.RoleUser && message.BashExecution == nil {
 				// A new question starts a new budget, and clears a terminal
 				// state that belonged to the previous one. The spent cost is
 				// NOT reset: it was really paid, and the ledger is cumulative.
@@ -247,7 +251,11 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			continue
 		}
 		if s.checkpoint != nil && e.Message != nil {
-			s.sinceCheckpoint = append(s.sinceCheckpoint, *e.Message)
+			message := *e.Message
+			if message.BashExecution != nil && message.Content == "" {
+				message.Content = ai.BashExecutionToText(*message.BashExecution)
+			}
+			s.sinceCheckpoint = append(s.sinceCheckpoint, message)
 		}
 	}
 	return s, nil

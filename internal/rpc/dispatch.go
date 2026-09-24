@@ -61,6 +61,13 @@ type ModelHost interface {
 	CycleModel(context.Context) (*ai.ModelCycle, error)
 }
 
+// BashHost is the optional direct shell capability. The command runs outside
+// the agent turn, so the channel can keep reading abort_bash while it waits.
+type BashHost interface {
+	ExecuteBash(context.Context, string, *float64, bool, string, func(string)) (ai.BashResult, error)
+	AbortBash()
+}
+
 // Run is a prompt in flight: the two ways to add to it, and the way to wait for
 // it to settle. Steer and Follow are the runtime's own contract — steer
 // interrupts the work at its next safe point, follow-up waits for it — and the
@@ -97,8 +104,12 @@ var ErrNotRecorded = errors.New("this conversation is not recorded")
 type Channel struct {
 	host Host
 
-	mu     sync.Mutex
-	active *activeRun
+	mu         sync.Mutex
+	active     *activeRun
+	writer     Writer
+	bashEvents BashEventWriter
+	bashRuns   map[int]*activeBash
+	nextBash   int
 }
 
 // activeRun is a prompt in flight and the means to end it.
@@ -111,7 +122,20 @@ type activeRun struct {
 
 // NewChannel builds a channel over a host.
 func NewChannel(host Host) *Channel {
-	return &Channel{host: host}
+	return &Channel{host: host, bashRuns: make(map[int]*activeBash)}
+}
+
+// NewChannelWithWriter enables asynchronous bash responses and output events.
+// Ordinary Dispatch callers remain synchronous; the RPC loop uses this form
+// because a final bash response must arrive after the command completes while
+// abort_bash remains readable.
+func NewChannelWithWriter(host Host, writer Writer) *Channel {
+	c := NewChannel(host)
+	c.writer = writer
+	if events, ok := writer.(BashEventWriter); ok {
+		c.bashEvents = events
+	}
+	return c
 }
 
 // stateData is the get_state payload.
@@ -159,9 +183,9 @@ type entryData struct {
 // is wrong here for the same reason it is wrong in Pi.
 //
 // Anything that swaps the conversation or the model — fork, clone, switch,
-// new, set_model, compact — is refused as busy while a prompt runs. The agent
-// holds the session and port it was built with, and swapping either under a
-// live run would write its next turn into a conversation the client just left.
+// new, set_model, compact — is refused as busy while a prompt or shell command
+// runs. The agent and shell hold the session they were built with, and swapping
+// it underneath either would append a result to a conversation the client left.
 func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 	resp := Response{Family: "response", ID: cmd.ID, Command: cmd.Command}
 	sess := c.host.Session()
@@ -246,8 +270,8 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		if strings.TrimSpace(cmd.Model) == "" {
 			return fail(resp, FailBadArgument, "set_model needs a model")
 		}
-		if c.running() != nil {
-			return fail(resp, FailBusy, "a prompt is running; the model changes between turns, not during one")
+		if c.running() != nil || c.bashRunning() {
+			return fail(resp, FailBusy, "a prompt or shell command is running; the model changes between turns")
 		}
 		if err := c.host.SetModel(cmd.Provider, cmd.Model); err != nil {
 			return failFromRun(resp, err)
@@ -293,9 +317,16 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		}
 		return okData(resp, cycled)
 
+	case "bash":
+		return c.bash(ctx, cmd, resp)
+
+	case "abort_bash":
+		c.abortBash()
+		return ok(resp, nil)
+
 	case "compact":
-		if c.running() != nil {
-			return fail(resp, FailBusy, "a prompt is running; compact between turns")
+		if c.running() != nil || c.bashRunning() {
+			return fail(resp, FailBusy, "a prompt or shell command is running; compact between turns")
 		}
 		before := len(sess.Snapshot().Messages)
 		if err := c.host.Compact(cmd.Instructions); err != nil {
@@ -370,10 +401,10 @@ func (c *Channel) entries(cmd Command, resp Response) Response {
 }
 
 // reopen runs one of the conversation-swapping operations, refusing it while a
-// prompt runs.
+// prompt or shell command runs.
 func (c *Channel) reopen(resp Response, open func() (Opened, error)) Response {
-	if c.running() != nil {
-		return fail(resp, FailBusy, "a prompt is running; abort it or wait for it before changing conversation")
+	if c.running() != nil || c.bashRunning() {
+		return fail(resp, FailBusy, "a prompt or shell command is running; wait for it before changing conversation")
 	}
 	opened, err := open()
 	if errors.Is(err, ErrNotRecorded) {
@@ -383,6 +414,12 @@ func (c *Channel) reopen(resp Response, open func() (Opened, error)) Response {
 		return fail(resp, FailInternal, err.Error())
 	}
 	return okData(resp, opened)
+}
+
+func (c *Channel) bashRunning() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.bashRuns) > 0
 }
 
 // prompt starts a run and acknowledges it.
@@ -446,9 +483,16 @@ func (c *Channel) running() Run {
 func (c *Channel) Settle() {
 	c.mu.Lock()
 	active := c.active
+	bash := make([]*activeBash, 0, len(c.bashRuns))
+	for _, run := range c.bashRuns {
+		bash = append(bash, run)
+	}
 	c.mu.Unlock()
 	if active != nil {
 		<-active.done
+	}
+	for _, run := range bash {
+		<-run.done
 	}
 }
 
@@ -459,6 +503,78 @@ func (a *activeRun) finished() bool {
 	default:
 		return false
 	}
+}
+
+type activeBash struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (c *Channel) bash(ctx context.Context, cmd Command, resp Response) Response {
+	if strings.TrimSpace(cmd.BashCommand) == "" && strings.TrimSpace(cmd.Message) == "" {
+		return fail(resp, FailBadArgument, "bash needs a command")
+	}
+	host, ok := c.host.(BashHost)
+	if !ok {
+		return fail(resp, FailUnavailable, "shell execution is not configured")
+	}
+	command := cmd.BashCommand
+	if strings.TrimSpace(command) == "" {
+		command = cmd.Message
+	}
+	if c.writer == nil {
+		result, err := host.ExecuteBash(ctx, command, cmd.Timeout, cmd.ExcludeFromContext, cmd.ID, nil)
+		if err != nil {
+			return bashFailure(resp, err)
+		}
+		return okData(resp, result)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	run := &activeBash{cancel: cancel, done: make(chan struct{})}
+	c.mu.Lock()
+	c.nextBash++
+	index := c.nextBash
+	c.bashRuns[index] = run
+	c.mu.Unlock()
+	response := resp
+	resp.deferred = true
+	go func(response Response) {
+		defer close(run.done)
+		defer cancel()
+		result, err := host.ExecuteBash(runCtx, command, cmd.Timeout, cmd.ExcludeFromContext, cmd.ID, func(delta string) {
+			if c.bashEvents != nil {
+				if writeErr := c.bashEvents.WriteBashExecutionUpdate(cmd.ID, delta); writeErr != nil {
+					cancel()
+				}
+			}
+		})
+		if err != nil {
+			response = bashFailure(response, err)
+		} else {
+			response = okData(response, result)
+		}
+		_ = c.writer.WriteResponse(response)
+		c.mu.Lock()
+		delete(c.bashRuns, index)
+		c.mu.Unlock()
+	}(response)
+	return resp
+}
+
+func (c *Channel) abortBash() bool {
+	c.mu.Lock()
+	runs := make([]*activeBash, 0, len(c.bashRuns))
+	for _, run := range c.bashRuns {
+		runs = append(runs, run)
+	}
+	c.mu.Unlock()
+	for _, run := range runs {
+		run.cancel()
+	}
+	if host, ok := c.host.(BashHost); ok {
+		host.AbortBash()
+	}
+	return len(runs) > 0
 }
 
 func statsFrom(host Host, sess *session.Session) statsData {
@@ -506,6 +622,13 @@ func failFromRun(resp Response, err error) Response {
 	return fail(resp, FailInternal, err.Error())
 }
 
+func bashFailure(resp Response, err error) Response {
+	if errors.Is(err, ai.ErrBashArgument) {
+		return fail(resp, FailBadArgument, err.Error())
+	}
+	return failFromRun(resp, err)
+}
+
 func modelFailure(resp Response, err error) Response {
 	if errors.Is(err, ai.ErrModelListingUnsupported) {
 		return fail(resp, FailUnavailable, err.Error())
@@ -542,6 +665,5 @@ var pi = map[string]bool{
 	"set_steering_mode": true, "set_follow_up_mode": true,
 	"set_auto_compaction": true,
 	"set_auto_retry":      true, "abort_retry": true,
-	"bash": true, "abort_bash": true,
 	"export_html": true, "get_fork_messages": true,
 }

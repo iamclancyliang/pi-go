@@ -27,7 +27,15 @@ const DefaultKeepRecentTokens = 20000
 // knows how it tokenises, and the decision this feeds is "roughly how much of
 // the end to keep", which does not need to be exact.
 func EstimateTokens(m ai.Message) int {
-	chars := len(m.Content) + len(m.Reasoning)
+	if m.BashExecution != nil && m.BashExecution.ExcludeFromContext {
+		return 0
+	}
+	chars := len(m.Reasoning)
+	if m.BashExecution != nil {
+		chars += len(ai.BashExecutionToText(*m.BashExecution))
+	} else {
+		chars += len(m.Content)
+	}
 	for _, call := range m.ToolCalls {
 		chars += len(call.Name) + len(call.Args)
 	}
@@ -97,7 +105,7 @@ func CutPoint(messages []ai.Message, keepRecentTokens int) int {
 func turnStarts(messages []ai.Message) []int {
 	var out []int
 	for i, m := range messages {
-		if m.Role == ai.RoleUser {
+		if m.Role == ai.RoleUser && (m.BashExecution == nil || !m.BashExecution.ExcludeFromContext) {
 			out = append(out, i)
 		}
 	}
@@ -225,6 +233,13 @@ func (c *Compactor) summarise(ctx context.Context, messages []ai.Message, previo
 func serialize(messages []ai.Message) string {
 	var b strings.Builder
 	for _, m := range messages {
+		if m.BashExecution != nil {
+			if m.BashExecution.ExcludeFromContext {
+				continue
+			}
+			fmt.Fprintf(&b, "%s: %s\n", m.Role, ai.BashExecutionToText(*m.BashExecution))
+			continue
+		}
 		role := string(m.Role)
 		if strings.TrimSpace(m.Content) != "" {
 			fmt.Fprintf(&b, "%s: %s\n", role, m.Content)

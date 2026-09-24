@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -133,6 +134,55 @@ type modelFakeHost struct {
 	cycleCalls int
 }
 
+type bashFakeHost struct {
+	*fakeHost
+	mu       sync.Mutex
+	commands []string
+	wait     bool
+	err      error
+}
+
+func (h *bashFakeHost) ExecuteBash(ctx context.Context, command string, _ *float64, _ bool, _ string, onChunk func(string)) (ai.BashResult, error) {
+	h.mu.Lock()
+	h.commands = append(h.commands, command)
+	wait := h.wait
+	err := h.err
+	h.mu.Unlock()
+	if err != nil {
+		return ai.BashResult{}, err
+	}
+	if onChunk != nil {
+		onChunk("chunk\n")
+	}
+	if wait {
+		<-ctx.Done()
+	}
+	code := 0
+	return ai.BashResult{Output: "chunk\n", ExitCode: &code, Cancelled: wait}, nil
+}
+
+func (h *bashFakeHost) AbortBash() {}
+
+type bashTestWriter struct {
+	mu        sync.Mutex
+	responses []Response
+	updates   []string
+}
+
+func (w *bashTestWriter) WriteResponse(resp Response) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.responses = append(w.responses, resp)
+	return nil
+}
+
+func (w *bashTestWriter) WriteBashExecutionUpdate(id, delta string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.updates = append(w.updates, id+":"+delta)
+	return nil
+}
+
 func (h *modelFakeHost) AvailableModels(context.Context) ([]ai.ModelRef, error) {
 	h.listCalls++
 	return append([]ai.ModelRef(nil), h.models...), h.listErr
@@ -238,6 +288,89 @@ func TestCyclingIsBusyBeforeItAsksForAListing(t *testing.T) {
 		t.Fatalf("listing while busy was not refused before discovery: response=%+v list=%d", got, host.listCalls)
 	}
 	close(host.last.release)
+	c.Settle()
+}
+
+func TestBashDispatchReturnsStructuredResultAndRejectsMissingCommand(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "alpha", recorded: true}
+	host := &bashFakeHost{fakeHost: base}
+	c := NewChannel(host)
+	var data ai.BashResult
+	decode(t, dispatch(c, Command{ID: "1", Command: "bash", BashCommand: "echo hello"}), &data)
+	if data.Output != "chunk\n" || data.ExitCode == nil || *data.ExitCode != 0 {
+		t.Fatalf("structured bash response was %+v", data)
+	}
+	bad := dispatch(c, Command{ID: "2", Command: "bash"})
+	if bad.OK || bad.Error.Kind != FailBadArgument {
+		t.Fatalf("missing bash command was not rejected: %+v", bad)
+	}
+}
+
+func TestBashArgumentFailuresUseBadArgumentKind(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "alpha", recorded: true}
+	host := &bashFakeHost{fakeHost: base, err: fmt.Errorf("%w: timeout must be positive", ai.ErrBashArgument)}
+	got := dispatch(NewChannel(host), Command{ID: "bad", Command: "bash", BashCommand: "true"})
+	if got.OK || got.Error.Kind != FailBadArgument {
+		t.Fatalf("synchronous bash argument failure was misclassified: %+v", got)
+	}
+
+	writer := &bashTestWriter{}
+	channel := NewChannelWithWriter(host, writer)
+	if response := channel.Dispatch(context.Background(), Command{ID: "bad-async", Command: "bash", BashCommand: "true"}); !response.deferred {
+		t.Fatalf("asynchronous bash did not defer: %+v", response)
+	}
+	channel.Settle()
+	writer.mu.Lock()
+	deferred := append([]Response(nil), writer.responses...)
+	writer.mu.Unlock()
+	if len(deferred) != 1 || deferred[0].OK || deferred[0].Error.Kind != FailBadArgument {
+		t.Fatalf("asynchronous bash argument failure was misclassified: %+v", deferred)
+	}
+}
+
+func TestBashRunsAsynchronouslyStreamsAndAbortCancelsAll(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "alpha", recorded: true}
+	host := &bashFakeHost{fakeHost: base, wait: true}
+	writer := &bashTestWriter{}
+	c := NewChannelWithWriter(host, writer)
+	if got := c.Dispatch(context.Background(), Command{ID: "one", Command: "bash", BashCommand: "sleep 10"}); !got.deferred {
+		t.Fatalf("bash did not defer its final response: %+v", got)
+	}
+	if got := c.Dispatch(context.Background(), Command{ID: "two", Command: "bash", BashCommand: "sleep 10"}); !got.deferred {
+		t.Fatalf("second bash did not defer its final response: %+v", got)
+	}
+	abort := dispatch(c, Command{ID: "abort", Command: "abort_bash"})
+	if !abort.OK {
+		t.Fatalf("abort_bash failed: %+v", abort)
+	}
+	c.Settle()
+	writer.mu.Lock()
+	responses, updates := append([]Response(nil), writer.responses...), append([]string(nil), writer.updates...)
+	writer.mu.Unlock()
+	if len(responses) != 2 || len(updates) != 2 || len(host.commands) != 2 {
+		t.Fatalf("async bash responses=%+v updates=%v commands=%v", responses, updates, host.commands)
+	}
+	for _, response := range responses {
+		if !response.OK || response.Command != "bash" {
+			t.Fatalf("bash completion response was %+v", response)
+		}
+	}
+}
+
+func TestConversationSwapsAreBusyWhileBashRuns(t *testing.T) {
+	base := &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "alpha", recorded: true}
+	host := &bashFakeHost{fakeHost: base, wait: true}
+	c := NewChannelWithWriter(host, &bashTestWriter{})
+	if got := c.Dispatch(context.Background(), Command{ID: "bash", Command: "bash", BashCommand: "sleep 10"}); !got.deferred {
+		t.Fatalf("bash did not start asynchronously: %+v", got)
+	}
+	for _, command := range []string{"new_session", "clone", "switch_session"} {
+		got := dispatch(c, Command{ID: command, Command: command, Session: "other"})
+		if got.OK || got.Error.Kind != FailBusy {
+			t.Fatalf("%s while bash ran was not busy: %+v", command, got)
+		}
+	}
+	dispatch(c, Command{ID: "abort", Command: "abort_bash"})
 	c.Settle()
 }
 

@@ -15,6 +15,13 @@ type Writer interface {
 	WriteResponse(resp Response) error
 }
 
+// BashEventWriter receives output while a direct shell command is running.
+// It is optional so command-channel users that only need synchronous dispatch
+// do not have to implement an event stream.
+type BashEventWriter interface {
+	WriteBashExecutionUpdate(id, delta string) error
+}
+
 // Loop reads commands from a reader and answers each on the writer.
 //
 // Commands are read and answered in order, but a prompt does not hold the loop:
@@ -66,8 +73,11 @@ func Loop(ctx context.Context, r io.Reader, w Writer, channel *Channel) error {
 			continue
 		}
 
-		if err := w.WriteResponse(channel.Dispatch(ctx, cmd)); err != nil {
-			return err
+		response := channel.Dispatch(ctx, cmd)
+		if !response.deferred {
+			if err := w.WriteResponse(response); err != nil {
+				return err
+			}
 		}
 	}
 	channel.Settle()

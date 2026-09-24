@@ -68,6 +68,14 @@ type replyLine struct {
 	Final *finalLine `json:"final,omitempty"`
 }
 
+type bashUpdateLine struct {
+	Family string `json:"family"`
+	Seq    int    `json:"seq"`
+	Type   string `json:"type"`
+	ID     string `json:"id,omitempty"`
+	Delta  string `json:"delta"`
+}
+
 type toolCallLine struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -173,6 +181,15 @@ func (w *Writer) Reply(e ai.StreamEvent) {
 // reply families, numbered by the same counter under the same lock.
 func (w *Writer) WriteResponse(resp rpc.Response) error {
 	w.write(&resp, func(n int) { resp.Seq = n })
+	return w.Err()
+}
+
+// WriteBashExecutionUpdate writes one sanitized chunk from a direct shell
+// command. It uses the same sequence as responses and model events so a client
+// can reconstruct the order in which output and acknowledgements were written.
+func (w *Writer) WriteBashExecutionUpdate(id, delta string) error {
+	line := bashUpdateLine{Family: "bash", Type: "bash_execution_update", ID: id, Delta: delta}
+	w.write(&line, func(n int) { line.Seq = n })
 	return w.Err()
 }
 

@@ -1,7 +1,12 @@
 package session
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
@@ -124,6 +129,71 @@ func TestProjectionCarriesSystemAndCompleteness(t *testing.T) {
 	// The system instruction is not conversational history.
 	if got := s.Len(); got != 1 {
 		t.Errorf("Len() = %d, want 1 — the system message must not count as history", got)
+	}
+}
+
+func TestBashExecutionIsDurableAndExcludedOnlyFromProjection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName("bash", time.Unix(0, 0)))
+	store, err := OpenFileStore(path, dir, "bash")
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer store.Close()
+	s := WithStore("You are pi-go.", store)
+	code := 3
+	if err := s.AppendBashExecution(ai.BashExecution{
+		Command: "printf secret", Output: "secret\n", ExitCode: &code,
+	}); err != nil {
+		t.Fatalf("recording bash execution: %v", err)
+	}
+	if err := s.AppendBashExecution(ai.BashExecution{
+		Command: "printf hidden", Output: "hidden\n", ExcludeFromContext: true,
+	}); err != nil {
+		t.Fatalf("recording excluded bash execution: %v", err)
+	}
+	truth := s.Truth()
+	if len(truth) != 2 || truth[0].BashExecution == nil || truth[1].BashExecution == nil {
+		t.Fatalf("bash records missing from truth: %+v", truth)
+	}
+	if !strings.Contains(truth[0].Content, "secret") || truth[1].Content == "" {
+		t.Fatalf("bash records did not carry serializable content: %+v", truth)
+	}
+	projection := s.Project().Messages
+	if len(projection) != 2 || !strings.Contains(projection[1].Content, "secret") || strings.Contains(projection[1].Content, "hidden") {
+		t.Fatalf("projection did not preserve/exclude bash records: %+v", projection)
+	}
+	restored, err := Restore(context.Background(), "You are pi-go.", store)
+	if err != nil {
+		t.Fatalf("restoring bash records: %v", err)
+	}
+	if len(restored.Truth()) != 2 || restored.Truth()[0].BashExecution == nil || !restored.Truth()[1].BashExecution.ExcludeFromContext {
+		t.Fatalf("restored bash records were %+v", restored.Truth())
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil || !strings.Contains(string(raw), "bash_execution") {
+		t.Fatalf("durable store does not contain bash records: %v\n%s", err, raw)
+	}
+}
+
+func TestBashExecutionWaitsUntilAgentRunEndsToPreserveToolOrdering(t *testing.T) {
+	s := New("You are pi-go.")
+	s.BeginAgentRun()
+	if err := s.AppendBashExecution(ai.BashExecution{Command: "echo shell", Output: "shell\n"}); err != nil {
+		t.Fatalf("queueing bash execution: %v", err)
+	}
+	if err := s.Append(ai.Message{Role: ai.RoleAssistant, Content: "model"}); err != nil {
+		t.Fatalf("appending model message: %v", err)
+	}
+	if got := len(s.Truth()); got != 1 {
+		t.Fatalf("queued bash became visible during run: %d messages", got)
+	}
+	if err := s.EndAgentRun(); err != nil {
+		t.Fatalf("flushing bash execution: %v", err)
+	}
+	truth := s.Truth()
+	if len(truth) != 2 || truth[0].Content != "model" || truth[1].BashExecution == nil {
+		t.Fatalf("bash execution was not appended after model messages: %+v", truth)
 	}
 }
 
