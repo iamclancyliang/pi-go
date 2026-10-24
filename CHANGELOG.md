@@ -30,6 +30,10 @@ file carries what a person upgrading would want to know.
   `find`, `grep`, `write`, `edit`, `bash`. Searches honour `.gitignore`; edits
   match against the original file and refuse ambiguity; bash output keeps the
   end, not the beginning.
+- `edit` lands when the model's text differs from the file only by trailing
+  whitespace, smart quotes, Unicode dashes, special spaces or compatibility
+  forms such as fullwidth punctuation. Exact text is still preferred, and
+  every line the edit did not touch keeps its original bytes.
 - Three providers: DeepSeek, OpenAI and Qwen. A provider is chosen by
   credential when `--provider` is absent, and one call sends one billed
   request.

@@ -172,14 +172,20 @@ func (e *Edit) Call(ctx context.Context, args string) (Result, error) {
 
 // applyEdits locates every replacement in the original content, refuses the
 // combinations that cannot mean one thing, and applies what is left.
+//
+// Every edit is matched exactly when it can be. Only when some edit cannot be
+// found that way does the whole call move into the normalised view of the
+// file (see normalizeForFuzzyMatch), so all its edits are still located in one
+// coherent text; the result is then mapped back so that lines no edit touched
+// keep their original bytes.
 func applyEdits(content string, edits []replacement, path string) (string, error) {
 	total := len(edits)
-	located := make([]matched, 0, total)
-
+	olds := make([]string, total)
+	news := make([]string, total)
 	for i, r := range edits {
-		oldText := normalizeToLF(*r.OldText)
-		newText := normalizeToLF(*r.NewText)
-		if oldText == "" {
+		olds[i] = normalizeToLF(*r.OldText)
+		news[i] = normalizeToLF(*r.NewText)
+		if olds[i] == "" {
 			// An empty match is at every position at once, so "replace it" has
 			// no single meaning. Refused rather than resolved by a convention
 			// nobody would predict.
@@ -188,8 +194,33 @@ func applyEdits(content string, edits []replacement, path string) (string, error
 			}
 			return "", fmt.Errorf("edits[%d].oldText must not be empty in %s", i, path)
 		}
+	}
 
-		at := strings.Index(content, oldText)
+	normalized := normalizeForFuzzyMatch(content)
+	fuzzy := false
+	for _, old := range olds {
+		if !strings.Contains(content, old) && strings.Contains(normalized, normalizeForFuzzyMatch(old)) {
+			fuzzy = true
+			break
+		}
+	}
+	base := content
+	if fuzzy {
+		base = normalized
+	}
+
+	located := make([]matched, 0, total)
+	for i, old := range olds {
+		at, length := strings.Index(base, old), len(old)
+		if at < 0 {
+			fuzzyOld := normalizeForFuzzyMatch(old)
+			at, length = strings.Index(normalized, fuzzyOld), len(fuzzyOld)
+			if !fuzzy {
+				// Outside normalised space a fuzzy position indexes a text
+				// this call is not editing.
+				at = -1
+			}
+		}
 		if at < 0 {
 			if total == 1 {
 				return "", fmt.Errorf("could not find the exact text in %s; the old text must "+
@@ -198,10 +229,11 @@ func applyEdits(content string, edits []replacement, path string) (string, error
 			return "", fmt.Errorf("could not find edits[%d] in %s; the oldText must match exactly "+
 				"including all whitespace and newlines", i, path)
 		}
-		// Counted on the ORIGINAL content, like the match itself: a text that
-		// appears twice identifies no single region, and picking the first
-		// would edit somewhere the model did not look at.
-		if n := strings.Count(content, oldText); n > 1 {
+		// Counted in the normalised view even when the match itself was exact:
+		// text that differs from another region only by trailing whitespace or
+		// quote style identifies no single place either, and picking the exact
+		// one would edit somewhere the model may not have meant.
+		if n := strings.Count(normalized, normalizeForFuzzyMatch(old)); n > 1 {
 			if total == 1 {
 				return "", fmt.Errorf("found %d occurrences of the text in %s; the text must be "+
 					"unique, so provide more context to make it unique", n, path)
@@ -209,7 +241,7 @@ func applyEdits(content string, edits []replacement, path string) (string, error
 			return "", fmt.Errorf("found %d occurrences of edits[%d] in %s; each oldText must be "+
 				"unique, so provide more context to make it unique", n, i, path)
 		}
-		located = append(located, matched{index: i, at: at, length: len(oldText), with: newText})
+		located = append(located, matched{index: i, at: at, length: length, with: news[i]})
 	}
 
 	// Sorted by position so an overlap is a comparison with the neighbour
@@ -224,13 +256,16 @@ func applyEdits(content string, edits []replacement, path string) (string, error
 		}
 	}
 
-	// Applied from the end, so each splice leaves the offsets of the ones
-	// before it untouched. Going forwards would need every later position
-	// adjusted by the length change of every earlier edit.
+	// Positions are in base, so in fuzzy mode they index the normalised text
+	// and must never be spliced into the original directly.
 	edited := content
-	for i := len(located) - 1; i >= 0; i-- {
-		m := located[i]
-		edited = edited[:m.at] + m.with + edited[m.at+m.length:]
+	if fuzzy {
+		var err error
+		if edited, err = applyPreservingUnchangedLines(content, base, located); err != nil {
+			return "", err
+		}
+	} else {
+		edited = splice(content, located, 0)
 	}
 
 	if edited == content {

@@ -92,7 +92,7 @@ claimed at merge time drifts the first time something is changed afterwards.
 
 **These rows are still not a parity claim.** What each says is that the surface
 exists and its evidence runs. Reaching `compatible` needs the incomplete
-deviations closed (#25, #26, #27, #28). The provider rows' open question, #29,
+deviations closed (#26, #27, #28). The provider rows' open question, #29,
 was closed on 2026-08-29 by an authorized probe. Every `incomplete` row below names the issue that tracks it —
 `docs/product/feature-inventory-schema.md` §C7 refuses a row that is blocked
 without saying by what.
@@ -116,7 +116,7 @@ Pi source: `packages/coding-agent/src/core/tools/`. Class B. Target v1.
 | `coding-agent.tool.find` | `internal/tools/find.go` | `TestIgnoredFilesStayOut`, `TestAPatternWithoutASlashMatchesAtAnyDepth` | compatible-via-adapter |
 | `coding-agent.tool.grep` | `internal/tools/grep.go` | `TestTheSeparatorSaysWhichLineMatched`, `TestSearchingIgnoresWhatGitIgnores` | compatible-via-adapter |
 | `coding-agent.tool.write` | `internal/tools/write.go` | `TestWritingReplacesTheWholeFile`, `TestOneFileIsMutatedByOneCallAtATime` | compatible |
-| `coding-agent.tool.edit` | `internal/tools/edit.go` | `TestEveryEditIsMatchedAgainstTheOriginalFile`, `TestOverlappingEditsAreRefused` | compatible, less D-2 |
+| `coding-agent.tool.edit` | `internal/tools/edit.go`, `internal/tools/edit_fuzzy.go` | `TestEveryEditIsMatchedAgainstTheOriginalFile`, `TestOverlappingEditsAreRefused`; fuzzy fallback: `TestFuzzyMatching` (Pi's cases), `TestUniquenessIsJudgedAfterNormalising`, `TestAFuzzyEditLeavesEveryUnchangedLineByteIdentical` (confirmed to fail when the normalised file is written back) | compatible |
 | `coding-agent.tool.bash` | `internal/tools/bash.go` | `TestOutputIsTruncatedFromTheEnd`, `TestKillingACommandKillsWhatItStarted` | compatible |
 | tool argument schemas (§15) | `internal/tools/schema.go` | `TestAToolsArgumentSchemaReachesTheWire` asserts the bytes sent; `TestLiveDeepSeekCallsTheReadToolFromItsDeclaredSchema` asserts a real model uses them | compatible |
 
@@ -240,11 +240,14 @@ statement that Pi's behaviour is wrong.
 
 | # | Issue | Where | Pi | pi-go | What closing it needs |
 | --- | --- | --- | --- | --- | --- |
-| D-2 | #25 | `edit` | falls back to fuzzy matching (trailing whitespace, smart quotes) and overlays the change to keep unchanged bytes | exact matching only; a miss is reported | a partly correct overlay silently rewrites regions nobody touched, which for an editing tool is worse than not matching |
 | D-3 | #26 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
 | D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
 | D-14 | #37 | context-overflow detection | one shared matcher over six recorded wordings, applied to every provider | per-port detection: two-number comparison (deepseek), error code (qwen, openai), pi's phrase (ollama), up-front counts where a window is recorded | a provider whose wording nobody recorded reports an overflow as an ordinary refusal, losing the one failure this repository can recover from. Pi's six positives and four negatives are recorded in its own tests and can be adopted on that basis |
+
+`D-2` (#25, `edit` without fuzzy matching) **was closed on 2026-10-24**: the fallback and
+the line-preserving overlay are ported, and the overlay's property — every line no edit touches
+keeps its bytes — has its own test.
 
 `D-13` was reserved for an up-front context-overflow rejection pi-go could not
 recognise. **It is no longer needed** (#29 closed 2026-08-29): an
