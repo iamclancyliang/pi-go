@@ -1,31 +1,49 @@
 package tui
 
 import (
+	"context"
 	"maps"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf16"
 )
 
 // EditorHost is what the editor needs from the interface around it: a frame
 // when its look changes outside a keystroke, and the terminal's height, which
 // bounds how many lines it shows.
+//
+// A host that also has Do(func()) — the interface's UI does — runs
+// completion off its loop: suggestions are computed on another goroutine and
+// handed back through Do, so a slow directory walk never stalls typing.
+// Without it, completion runs inline.
 type EditorHost interface {
 	RequestRender()
 	Rows() int
+}
+
+// loopHost is a host that can run work on its loop.
+type loopHost interface {
+	Do(func())
 }
 
 // EditorTheme styles the editor.
 type EditorTheme struct {
 	// BorderColor styles the rules above and below the text.
 	BorderColor Style
+	// SelectList styles the completion list.
+	SelectList SelectListTheme
 }
 
 // EditorOptions configure an editor.
 type EditorOptions struct {
 	// PaddingX is the blank columns either side of the text.
 	PaddingX int
+	// AutocompleteMaxVisible is how many completions show at once, from 3
+	// to 20; zero means 5.
+	AutocompleteMaxVisible int
 }
 
 // Editor is the prompt editor of the interface — Pi's Editor component: a
@@ -82,7 +100,41 @@ type Editor struct {
 	hasSnappedFrom bool
 
 	undoStack []editorSnapshot
+
+	ac autocompleteState
 }
+
+// autocompleteState is the editor's completion: the provider, the list on
+// show, and the request in flight.
+type autocompleteState struct {
+	provider        AutocompleteProvider
+	triggers        []string
+	triggerPattern  *regexp.Regexp
+	debouncePattern *regexp.Regexp
+	maxVisible      int
+	theme           SelectListTheme
+
+	mode   int // acNone, acRegular, or acForce
+	list   *SelectList
+	prefix string
+
+	// startToken invalidates a request not yet started (still debouncing);
+	// requestID one in flight; cancel stops it.
+	startToken int
+	requestID  int
+	cancel     context.CancelFunc
+	debounce   *time.Timer
+}
+
+const (
+	acNone = iota
+	acRegular
+	acForce
+)
+
+// attachmentDebounce is how long typing after @ or another trigger pauses
+// before completion runs, so a path search is not started per keystroke.
+const attachmentDebounce = 20 * time.Millisecond
 
 type editorState struct {
 	lines      []string
@@ -112,7 +164,7 @@ const (
 // NewEditor is an empty editor. host may be nil, for an editor drawn outside
 // an interface; it is then taken to be on a 24-row terminal.
 func NewEditor(host EditorHost, theme EditorTheme, options EditorOptions) *Editor {
-	return &Editor{
+	e := &Editor{
 		host:         host,
 		paddingX:     max(0, options.PaddingX),
 		BorderColor:  theme.BorderColor,
@@ -121,6 +173,17 @@ func NewEditor(host EditorHost, theme EditorTheme, options EditorOptions) *Edito
 		historyIndex: -1,
 		pastes:       newPasteRegistry(),
 	}
+	e.ac.theme = theme.SelectList
+	e.ac.maxVisible = clampMaxVisible(options.AutocompleteMaxVisible)
+	e.setTriggerCharacters(nil)
+	return e
+}
+
+func clampMaxVisible(n int) int {
+	if n == 0 {
+		return 5
+	}
+	return max(3, min(20, n))
 }
 
 func (e *Editor) keys() *Keybindings {
@@ -178,6 +241,7 @@ func (e *Editor) Cursor() (line, col int) { return e.state.cursorLine, e.state.c
 // SetText replaces the text, leaving the cursor at its end. The replacement
 // can be undone.
 func (e *Editor) SetText(text string) {
+	e.cancelAutocomplete()
 	e.lastAction = actionNone
 	e.exitHistoryBrowsing()
 	normalized := normalizeText(text)
@@ -193,6 +257,7 @@ func (e *Editor) InsertTextAtCursor(text string) {
 	if text == "" {
 		return
 	}
+	e.cancelAutocomplete()
 	e.pushUndoSnapshot()
 	e.lastAction = actionNone
 	e.exitHistoryBrowsing()
@@ -266,14 +331,23 @@ func (e *Editor) HandleKey(k Key) {
 		return
 	}
 
-	switch {
-	case kb.Matches(k, "tui.input.copy"):
+	if kb.Matches(k, "tui.input.copy") {
 		// Left to the interactive mode, which clears or exits.
-	case kb.Matches(k, "tui.editor.undo"):
+		return
+	}
+	if kb.Matches(k, "tui.editor.undo") {
 		e.undo()
+		return
+	}
+	if e.ac.mode != acNone && e.ac.list != nil && e.handleAutocompleteKey(k) {
+		return
+	}
+
+	switch {
 	case kb.Matches(k, "tui.input.tab"):
-		// Tab completes, and with no completion source there is nothing to
-		// complete.
+		if e.ac.mode == acNone {
+			e.handleTabCompletion()
+		}
 	case kb.Matches(k, "tui.editor.deleteToLineEnd"):
 		e.deleteToEndOfLine()
 	case kb.Matches(k, "tui.editor.deleteToLineStart"):
@@ -291,8 +365,10 @@ func (e *Editor) HandleKey(k Key) {
 	case kb.Matches(k, "tui.editor.yankPop"):
 		e.yankPop()
 	case kb.Matches(k, "tui.editor.historyPrevious"):
+		e.cancelAutocomplete()
 		e.navigateHistory(-1)
 	case kb.Matches(k, "tui.editor.historyNext"):
+		e.cancelAutocomplete()
 		e.navigateHistory(1)
 	case kb.Matches(k, "tui.editor.cursorLineStart"):
 		e.lastAction = actionNone
@@ -540,6 +616,12 @@ func (e *Editor) Render(width int) []string {
 	} else {
 		out = append(out, e.BorderColor.apply(strings.Repeat("─", width)))
 	}
+
+	if e.ac.mode != acNone && e.ac.list != nil {
+		for _, l := range e.ac.list.Render(contentWidth) {
+			out = append(out, padding+l+strings.Repeat(" ", max(0, contentWidth-VisibleWidth(l)))+padding)
+		}
+	}
 	return out
 }
 
@@ -783,6 +865,12 @@ func (e *Editor) moveCursor(deltaLine, deltaCol int) {
 			e.setCursorCol(len(e.currentLine()))
 		}
 	}
+
+	// The text before the cursor changed, so an open list is stale: ask
+	// again, which refreshes it or closes it.
+	if e.ac.mode != acNone {
+		e.updateAutocomplete()
+	}
 }
 
 // pageScroll moves the cursor a page — the editor's visible height — up or
@@ -919,6 +1007,32 @@ func (e *Editor) insertCharacter(char string, skipUndoCoalescing bool) {
 	e.setLine(line[:e.state.cursorCol] + char + line[e.state.cursorCol:])
 	e.setCursorCol(e.state.cursorCol + len(char))
 	e.changed()
+
+	if e.ac.mode != acNone {
+		e.updateAutocomplete()
+		return
+	}
+	before := e.currentLine()[:e.state.cursorCol]
+	switch {
+	case char == "/" && e.isAtStartOfMessage():
+		// A slash command at the start of the message.
+		e.requestAutocomplete(false, false)
+	case slices.Contains(e.ac.triggers, char):
+		// A trigger character opens completion at the start of a word.
+		if len(before) == len(char) || before[len(before)-len(char)-1] == ' ' || before[len(before)-len(char)-1] == '\t' {
+			e.requestAutocomplete(false, false)
+		}
+	case len(char) == 1 && isCompletionChar(char[0]):
+		if e.isInSlashCommandContext(before) || e.ac.triggerPattern.MatchString(before) {
+			e.requestAutocomplete(false, false)
+		}
+	}
+}
+
+// isCompletionChar is a character that continues a command name, path or
+// mention being completed.
+func isCompletionChar(b byte) bool {
+	return b == '.' || b == '-' || b == '_' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 var csiUCtrlLetter = regexp.MustCompile(`\x1b\[(\d+);5u`)
@@ -928,6 +1042,7 @@ var csiUCtrlLetter = regexp.MustCompile(`\x1b\[(\d+);5u`)
 // a thousand characters is held aside behind a marker, expanded again on
 // submit.
 func (e *Editor) handlePaste(pasted string) {
+	e.cancelAutocomplete()
 	e.exitHistoryBrowsing()
 	e.lastAction = actionNone
 	e.pushUndoSnapshot()
@@ -981,6 +1096,7 @@ func isASCIIWordByte(b byte) bool {
 }
 
 func (e *Editor) addNewLine() {
+	e.cancelAutocomplete()
 	e.exitHistoryBrowsing()
 	e.lastAction = actionNone
 	e.pushUndoSnapshot()
@@ -993,6 +1109,7 @@ func (e *Editor) addNewLine() {
 }
 
 func (e *Editor) submitValue() {
+	e.cancelAutocomplete()
 	result := strings.TrimFunc(e.expandPasteMarkers(e.Text()), jsSpace)
 	e.state = editorState{lines: []string{""}}
 	e.pastes = newPasteRegistry()
@@ -1043,6 +1160,20 @@ func (e *Editor) handleBackspace() {
 		e.mergeWithPrevious()
 	}
 	e.changed()
+	e.refreshAutocompleteAfterDelete()
+}
+
+// refreshAutocompleteAfterDelete updates an open list, or opens one again
+// when deleting has brought the cursor back into something completable.
+func (e *Editor) refreshAutocompleteAfterDelete() {
+	if e.ac.mode != acNone {
+		e.updateAutocomplete()
+		return
+	}
+	before := e.currentLine()[:e.state.cursorCol]
+	if e.isInSlashCommandContext(before) || e.ac.triggerPattern.MatchString(before) {
+		e.requestAutocomplete(false, false)
+	}
 }
 
 // removePaste forgets a deleted marker's paste and renumbers the pastes
@@ -1088,6 +1219,7 @@ func (e *Editor) handleForwardDelete() {
 		e.mergeWithNext()
 	}
 	e.changed()
+	e.refreshAutocompleteAfterDelete()
 }
 
 // kill records deleted text in the kill ring. Kills in a row accumulate into
@@ -1324,4 +1456,287 @@ func (k *killRing) rotate() {
 		last := k.ring[len(k.ring)-1]
 		k.ring = append([]string{last}, k.ring[:len(k.ring)-1]...)
 	}
+}
+
+// --- autocomplete ---
+
+// SetAutocompleteProvider sets where completions come from, closing any list
+// on show.
+func (e *Editor) SetAutocompleteProvider(provider AutocompleteProvider) {
+	e.cancelAutocomplete()
+	e.ac.provider = provider
+	var triggers []string
+	if t, ok := provider.(TriggerCharacterProvider); ok {
+		triggers = t.TriggerCharacters()
+	}
+	e.setTriggerCharacters(triggers)
+}
+
+// IsShowingAutocomplete reports whether the completion list is open.
+func (e *Editor) IsShowingAutocomplete() bool { return e.ac.mode != acNone }
+
+// AutocompleteMaxVisible is how many completions show at once.
+func (e *Editor) AutocompleteMaxVisible() int { return e.ac.maxVisible }
+
+// SetAutocompleteMaxVisible changes how many completions show at once,
+// clamped to 3..20.
+func (e *Editor) SetAutocompleteMaxVisible(n int) {
+	if n = max(3, min(20, n)); n != e.ac.maxVisible {
+		e.ac.maxVisible = n
+		e.requestRender()
+	}
+}
+
+func (e *Editor) requestRender() {
+	if e.host != nil {
+		e.host.RequestRender()
+	}
+}
+
+// setTriggerCharacters is @ and # plus the provider's own: single characters
+// other than the slash and whitespace.
+func (e *Editor) setTriggerCharacters(extra []string) {
+	triggers := []string{"@", "#"}
+	for _, c := range extra {
+		if len(utf16.Encode([]rune(c))) != 1 || c == "/" || isWhitespace(c) || slices.Contains(triggers, c) {
+			continue
+		}
+		triggers = append(triggers, c)
+	}
+	e.ac.triggers = triggers
+
+	var class, others strings.Builder
+	for _, t := range triggers {
+		class.WriteString(regexp.QuoteMeta(t))
+		if t != "@" {
+			others.WriteString(regexp.QuoteMeta(t))
+		}
+	}
+	// A trigger at the start of a word, followed by the word so far.
+	e.ac.triggerPattern = regexp.MustCompile(`(?:^|\s)[` + class.String() + `][^\s]*$`)
+	// What is worth pausing on before searching: an @-mention, quoted or
+	// not, or a word after another trigger.
+	e.ac.debouncePattern = regexp.MustCompile(`(?:^|[ \t])(?:@(?:"[^"]*|[^\s]*)|[` + others.String() + `][^\s]*)$`)
+}
+
+// isAtStartOfMessage: a slash command can begin only on the first line,
+// with nothing but whitespace before it.
+func (e *Editor) isAtStartOfMessage() bool {
+	if e.state.cursorLine != 0 {
+		return false
+	}
+	before := strings.TrimFunc(e.currentLine()[:e.state.cursorCol], jsSpace)
+	return before == "" || before == "/"
+}
+
+func (e *Editor) isInSlashCommandContext(before string) bool {
+	return e.state.cursorLine == 0 && strings.HasPrefix(strings.TrimLeftFunc(before, jsSpace), "/")
+}
+
+// handleAutocompleteKey handles a key while the list is open, reporting
+// whether it was taken. Enter on a slash command applies it and goes on to
+// submit.
+func (e *Editor) handleAutocompleteKey(k Key) bool {
+	kb := e.keys()
+	switch {
+	case kb.Matches(k, "tui.select.cancel"):
+		e.cancelAutocomplete()
+		return true
+	case kb.Matches(k, "tui.select.up"), kb.Matches(k, "tui.select.down"):
+		e.ac.list.HandleKey(k)
+		return true
+	case kb.Matches(k, "tui.input.tab"):
+		if e.applySelectedCompletion() {
+			e.cancelAutocomplete()
+			e.changed()
+		}
+		return true
+	case kb.Matches(k, "tui.select.confirm"):
+		if !e.applySelectedCompletion() {
+			return false
+		}
+		slash := strings.HasPrefix(e.ac.prefix, "/")
+		e.cancelAutocomplete()
+		if slash {
+			return false
+		}
+		e.changed()
+		return true
+	}
+	return false
+}
+
+// applySelectedCompletion puts the selected completion into the text as one
+// undoable step.
+func (e *Editor) applySelectedCompletion() bool {
+	selected, ok := e.ac.list.SelectedItem()
+	if !ok || e.ac.provider == nil {
+		return false
+	}
+	e.applyCompletion(AutocompleteItem(selected), e.ac.prefix)
+	return true
+}
+
+func (e *Editor) applyCompletion(item AutocompleteItem, prefix string) {
+	e.pushUndoSnapshot()
+	e.lastAction = actionNone
+	lines, line, col := e.ac.provider.ApplyCompletion(slices.Clone(e.state.lines), e.state.cursorLine, e.state.cursorCol, item, prefix)
+	e.state.lines = lines
+	e.state.cursorLine = line
+	e.setCursorCol(col)
+}
+
+// handleTabCompletion: tab in a slash command's name completes the command;
+// anywhere else it completes a path.
+func (e *Editor) handleTabCompletion() {
+	if e.ac.provider == nil {
+		return
+	}
+	before := e.currentLine()[:e.state.cursorCol]
+	if e.isInSlashCommandContext(before) && !strings.Contains(strings.TrimLeftFunc(before, jsSpace), " ") {
+		e.requestAutocomplete(false, true)
+	} else {
+		e.requestAutocomplete(true, true)
+	}
+}
+
+func (e *Editor) updateAutocomplete() {
+	if e.ac.mode == acNone || e.ac.provider == nil {
+		return
+	}
+	e.requestAutocomplete(e.ac.mode == acForce, false)
+}
+
+// requestAutocomplete asks the provider for completions where the cursor
+// is, replacing any request still pending. force is a tab's request for
+// paths; explicitTab marks a request the user made rather than typing.
+func (e *Editor) requestAutocomplete(force, explicitTab bool) {
+	if e.ac.provider == nil {
+		return
+	}
+	if force {
+		if gate, ok := e.ac.provider.(FileCompletionGate); ok &&
+			!gate.ShouldTriggerFileCompletion(e.state.lines, e.state.cursorLine, e.state.cursorCol) {
+			return
+		}
+	}
+	e.cancelAutocompleteRequest()
+	token := e.ac.startToken
+
+	host, async := e.host.(loopHost)
+	if !async {
+		e.startAutocompleteRequest(force, explicitTab)
+		return
+	}
+	if !explicitTab && !force && e.ac.debouncePattern.MatchString(e.currentLine()[:e.state.cursorCol]) {
+		e.ac.debounce = time.AfterFunc(attachmentDebounce, func() {
+			host.Do(func() {
+				if token == e.ac.startToken {
+					e.ac.debounce = nil
+					e.startAutocompleteRequest(force, explicitTab)
+				}
+			})
+		})
+		return
+	}
+	e.startAutocompleteRequest(force, explicitTab)
+}
+
+func (e *Editor) startAutocompleteRequest(force, explicitTab bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	e.ac.cancel = cancel
+	e.ac.requestID++
+	id := e.ac.requestID
+	text, line, col := e.Text(), e.state.cursorLine, e.state.cursorCol
+	lines := slices.Clone(e.state.lines)
+	provider := e.ac.provider
+
+	finish := func(s *AutocompleteSuggestions) {
+		// Typing, moving or another request since makes the answer stale.
+		if ctx.Err() != nil || id != e.ac.requestID || e.Text() != text ||
+			e.state.cursorLine != line || e.state.cursorCol != col {
+			return
+		}
+		e.ac.cancel = nil
+		cancel()
+		e.finishAutocomplete(s, force, explicitTab)
+	}
+	if host, ok := e.host.(loopHost); ok {
+		go func() {
+			s := provider.Suggestions(ctx, lines, line, col, force)
+			host.Do(func() { finish(s) })
+		}()
+		return
+	}
+	finish(provider.Suggestions(ctx, lines, line, col, force))
+}
+
+func (e *Editor) finishAutocomplete(s *AutocompleteSuggestions, force, explicitTab bool) {
+	defer e.requestRender()
+	if s == nil || len(s.Items) == 0 {
+		e.cancelAutocomplete()
+		return
+	}
+	if force && explicitTab && len(s.Items) == 1 {
+		// A tab with one answer takes it without showing a list.
+		e.applyCompletion(s.Items[0], s.Prefix)
+		e.changed()
+		return
+	}
+	e.ac.prefix = s.Prefix
+	items := make([]SelectItem, len(s.Items))
+	for i, item := range s.Items {
+		items[i] = SelectItem(item)
+	}
+	var layout SelectListLayout
+	if strings.HasPrefix(s.Prefix, "/") {
+		layout = SelectListLayout{MinPrimaryColumnWidth: 12, MaxPrimaryColumnWidth: 32}
+	}
+	e.ac.list = NewSelectList(items, e.ac.maxVisible, e.ac.theme, layout)
+	e.ac.list.Keybindings = e.Keybindings
+	if best := bestMatchIndex(s.Items, s.Prefix); best >= 0 {
+		e.ac.list.SetSelectedIndex(best)
+	}
+	if force {
+		e.ac.mode = acForce
+	} else {
+		e.ac.mode = acRegular
+	}
+}
+
+// bestMatchIndex is the item to select first: one whose value is exactly
+// the prefix, else the first that starts with it, else none.
+func bestMatchIndex(items []AutocompleteItem, prefix string) int {
+	if prefix == "" {
+		return -1
+	}
+	first := -1
+	for i, item := range items {
+		if item.Value == prefix {
+			return i
+		}
+		if first < 0 && strings.HasPrefix(item.Value, prefix) {
+			first = i
+		}
+	}
+	return first
+}
+
+func (e *Editor) cancelAutocompleteRequest() {
+	e.ac.startToken++
+	if e.ac.debounce != nil {
+		e.ac.debounce.Stop()
+		e.ac.debounce = nil
+	}
+	if e.ac.cancel != nil {
+		e.ac.cancel()
+		e.ac.cancel = nil
+	}
+}
+
+func (e *Editor) cancelAutocomplete() {
+	e.cancelAutocompleteRequest()
+	e.ac.mode = acNone
+	e.ac.list = nil
+	e.ac.prefix = ""
 }

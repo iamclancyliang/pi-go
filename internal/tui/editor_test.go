@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"context"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // These follow Pi's editor tests (packages/tui/test/editor.test.ts at the
@@ -1467,4 +1471,408 @@ func TestEditorPageScroll(t *testing.T) {
 	wantCursor(t, e, 0, 5)
 	in(e, "\x1b[6~")
 	wantCursor(t, e, 7, 5)
+}
+
+// --- autocomplete ---
+
+// funcProvider is a provider made of functions, as Pi's tests write them.
+type funcProvider struct {
+	suggest  func(ctx context.Context, lines []string, line, col int, force bool) *AutocompleteSuggestions
+	triggers []string
+}
+
+func (p funcProvider) Suggestions(ctx context.Context, lines []string, line, col int, force bool) *AutocompleteSuggestions {
+	return p.suggest(ctx, lines, line, col, force)
+}
+
+// ApplyCompletion replaces the prefix with the value, as Pi's tests do.
+func (funcProvider) ApplyCompletion(lines []string, line, col int, item AutocompleteItem, prefix string) ([]string, int, int) {
+	out := slices.Clone(lines)
+	out[line] = lines[line][:col-len(prefix)] + item.Value + lines[line][col:]
+	return out, line, col - len(prefix) + len(item.Value)
+}
+
+func (p funcProvider) TriggerCharacters() []string { return p.triggers }
+
+func items(vs ...string) []AutocompleteItem {
+	var out []AutocompleteItem
+	for _, v := range vs {
+		out = append(out, AutocompleteItem{Value: v, Label: v})
+	}
+	return out
+}
+
+func before(lines []string, line, col int) string { return lines[line][:col] }
+
+func TestEditorAutocompleteTab(t *testing.T) {
+	t.Run("a single path is applied at once, and undoes", func(t *testing.T) {
+		e := newTestEditor()
+		e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, force bool) *AutocompleteSuggestions {
+			if force && before(l, line, col) == "Work" {
+				return &AutocompleteSuggestions{Items: items("Workspace/"), Prefix: "Work"}
+			}
+			return nil
+		}})
+		typeInto(e, "Work")
+		in(e, "\t")
+		wantText(t, e, "Workspace/")
+		if e.IsShowingAutocomplete() {
+			t.Fatal("a list was shown for one answer")
+		}
+		in(e, undoKey)
+		wantText(t, e, "Work")
+	})
+	t.Run("several paths show a list, and tab takes the first", func(t *testing.T) {
+		e := newTestEditor()
+		e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, force bool) *AutocompleteSuggestions {
+			if force && before(l, line, col) == "src" {
+				return &AutocompleteSuggestions{Items: items("src/", "src.txt"), Prefix: "src"}
+			}
+			return nil
+		}})
+		typeInto(e, "src")
+		in(e, "\t")
+		wantText(t, e, "src")
+		if !e.IsShowingAutocomplete() {
+			t.Fatal("no list")
+		}
+		in(e, "\t")
+		wantText(t, e, "src/")
+		if e.IsShowingAutocomplete() {
+			t.Fatal("the list stayed open")
+		}
+	})
+	t.Run("a tab-opened list follows typing", func(t *testing.T) {
+		all := items("readme.md", "package.json", "src/", "dist/")
+		e := newTestEditor()
+		e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, force bool) *AutocompleteSuggestions {
+			prefix := before(l, line, col)
+			if !force && !strings.Contains(prefix, "/") && !strings.HasPrefix(prefix, ".") {
+				return nil
+			}
+			var matched []AutocompleteItem
+			for _, f := range all {
+				if strings.HasPrefix(strings.ToLower(f.Value), strings.ToLower(prefix)) {
+					matched = append(matched, f)
+				}
+			}
+			if len(matched) == 0 {
+				return nil
+			}
+			return &AutocompleteSuggestions{Items: matched, Prefix: prefix}
+		}})
+		in(e, "\t")
+		if !e.IsShowingAutocomplete() {
+			t.Fatal("no list on an empty prompt")
+		}
+		for _, ch := range []string{"r", "e"} {
+			in(e, ch)
+			if !e.IsShowingAutocomplete() {
+				t.Fatalf("the list closed after %q", e.Text())
+			}
+		}
+		in(e, "\t")
+		wantText(t, e, "readme.md")
+	})
+	t.Run("escape closes the list", func(t *testing.T) {
+		e := newTestEditor()
+		e.SetAutocompleteProvider(funcProvider{suggest: func(context.Context, []string, int, int, bool) *AutocompleteSuggestions {
+			return &AutocompleteSuggestions{Items: items("a", "b"), Prefix: ""}
+		}})
+		in(e, "\t")
+		if !e.IsShowingAutocomplete() {
+			t.Fatal("no list")
+		}
+		in(e, "\x1b")
+		if e.IsShowingAutocomplete() {
+			t.Fatal("escape left the list open")
+		}
+	})
+}
+
+func TestEditorAutocompleteSlashCommands(t *testing.T) {
+	commands := []AutocompleteItem{{Value: "/model", Label: "model"}, {Value: "/help", Label: "help"}}
+	e := newTestEditor()
+	e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, _ bool) *AutocompleteSuggestions {
+		prefix := before(l, line, col)
+		if !strings.HasPrefix(prefix, "/") {
+			return nil
+		}
+		var matched []AutocompleteItem
+		for _, c := range commands {
+			if strings.HasPrefix(c.Value, prefix[1:]) {
+				matched = append(matched, c)
+			}
+		}
+		if len(matched) == 0 {
+			return nil
+		}
+		return &AutocompleteSuggestions{Items: matched, Prefix: prefix}
+	}})
+	in(e, "/")
+	if !e.IsShowingAutocomplete() {
+		t.Fatal("no list after /")
+	}
+	in(e, backspace)
+	wantText(t, e, "")
+	if e.IsShowingAutocomplete() {
+		t.Fatal("the list survived deleting the slash")
+	}
+}
+
+// argProvider completes /argtest's argument from a fixed list, filtered by
+// prefix or not.
+func argProvider(command string, filter bool, args ...string) funcProvider {
+	return funcProvider{suggest: func(_ context.Context, l []string, line, col int, _ bool) *AutocompleteSuggestions {
+		b := before(l, line, col)
+		rest, ok := strings.CutPrefix(b, "/"+command+" ")
+		if !ok || rest == "" || strings.Contains(rest, " ") {
+			return nil
+		}
+		var out []AutocompleteItem
+		for _, a := range args {
+			if !filter || strings.HasPrefix(a, rest) {
+				out = append(out, AutocompleteItem{Value: a, Label: a})
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return &AutocompleteSuggestions{Items: out, Prefix: rest}
+	}}
+}
+
+func TestEditorAutocompleteEnterOnArguments(t *testing.T) {
+	cases := []struct {
+		name, typed, want string
+		provider          funcProvider
+	}{
+		{"an exact value is kept", "/argtest two", "/argtest two", argProvider("argtest", true, "one", "two", "three")},
+		{"the first prefix match is taken", "/argtest t", "/argtest two", argProvider("argtest", true, "two", "three", "twelve")},
+		{"a unique prefix is highlighted", "/argtest tw", "/argtest two", argProvider("argtest", false, "one", "two", "three")},
+		{"the first of several matches", "/argtest t", "/argtest two", argProvider("argtest", false, "one", "two", "three")},
+		{"a model-like exact value", "/model gpt-4o-mini", "/model gpt-4o-mini", argProvider("model", true, "gpt-4o", "gpt-4o-mini", "claude-sonnet")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newTestEditor()
+			e.SetAutocompleteProvider(c.provider)
+			submitted := false
+			e.OnSubmit = func(string) { submitted = true }
+			typeInto(e, c.typed)
+			if !e.IsShowingAutocomplete() {
+				t.Fatal("no list")
+			}
+			in(e, enter)
+			wantText(t, e, c.want)
+			if submitted {
+				t.Fatal("enter on an argument submitted")
+			}
+		})
+	}
+}
+
+func TestEditorAutocompleteEnterOnACommandSubmits(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(NewCombinedAutocompleteProvider([]SlashCommand{{Name: "help"}, {Name: "hotkeys"}}, t.TempDir(), nil))
+	var submitted string
+	e.OnSubmit = func(s string) { submitted = s }
+	typeInto(e, "/he")
+	in(e, enter)
+	if submitted != "/help" {
+		t.Fatalf("submitted %q", submitted)
+	}
+}
+
+func TestEditorAutocompleteMovesRequery(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, _ bool) *AutocompleteSuggestions {
+		b := before(l, line, col)
+		if !strings.HasPrefix(b, "/") {
+			return nil
+		}
+		if i := strings.IndexByte(b, ' '); i >= 0 {
+			return &AutocompleteSuggestions{Items: items("repo", "message", "help"), Prefix: b[i+1:]}
+		}
+		return &AutocompleteSuggestions{Items: items("cmd"), Prefix: b}
+	}})
+	typeInto(e, "/cmd ")
+	if !strings.Contains(StripSequences(strings.Join(e.Render(80), "\n")), "repo") {
+		t.Fatal("no argument list at '/cmd '")
+	}
+	in(e, left)
+	if got := StripSequences(strings.Join(e.Render(80), "\n")); strings.Contains(got, "repo") || strings.Contains(got, "message") {
+		t.Fatalf("the argument list survived moving back into the command:\n%s", got)
+	}
+}
+
+func TestEditorAutocompleteWithTheCombinedProvider(t *testing.T) {
+	cmds := []SlashCommand{
+		{Name: "help", Description: "Show help"},
+		{Name: "model", Description: "Switch model", ArgumentCompletions: func(context.Context, string) []AutocompleteItem {
+			return items("claude-opus")
+		}},
+		{Name: "load-skills", Description: "Load skills", ArgumentCompletions: func(_ context.Context, prefix string) []AutocompleteItem {
+			if strings.HasPrefix(prefix, "s") {
+				return items("skill-a")
+			}
+			return nil
+		}},
+	}
+	e := newTestEditor()
+	e.SetAutocompleteProvider(NewCombinedAutocompleteProvider(cmds, t.TempDir(), nil))
+	e.SetText("/load-skills ")
+	in(e, "s")
+	if !e.IsShowingAutocomplete() {
+		t.Fatal("no argument list")
+	}
+	in(e, "\t")
+	wantText(t, e, "/load-skills skill-a")
+
+	e = newTestEditor()
+	e.SetAutocompleteProvider(NewCombinedAutocompleteProvider(cmds, t.TempDir(), nil))
+	typeInto(e, "/he")
+	if !e.IsShowingAutocomplete() {
+		t.Fatal("no command list")
+	}
+	in(e, "\t")
+	wantText(t, e, "/help ")
+	if e.IsShowingAutocomplete() {
+		t.Fatal("arguments were offered for a command without any")
+	}
+}
+
+func TestEditorAutocompleteListRendersBelow(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(NewCombinedAutocompleteProvider([]SlashCommand{{Name: "help", Description: "Show help"}, {Name: "hotkeys", Description: "Keys"}}, t.TempDir(), nil))
+	typeInto(e, "/h")
+	out := e.Render(60)
+	if len(out) != 5 || !strings.HasPrefix(out[3], "→ help") || !strings.Contains(out[3], "Show help") {
+		t.Fatalf("render:\n%s", strings.Join(out, "\n"))
+	}
+	for _, l := range out {
+		if VisibleWidth(l) != 60 {
+			t.Fatalf("line %q is %d wide", l, VisibleWidth(l))
+		}
+	}
+	in(e, down)
+	if out := e.Render(60); !strings.HasPrefix(out[4], "→ hotkeys") {
+		t.Fatalf("down did not move the selection:\n%s", strings.Join(out, "\n"))
+	}
+}
+
+func TestEditorPasteDoesNotOpenCompletion(t *testing.T) {
+	calls := 0
+	e := newTestEditor()
+	e.SetAutocompleteProvider(funcProvider{suggest: func(context.Context, []string, int, int, bool) *AutocompleteSuggestions {
+		calls++
+		return nil
+	}})
+	in(e, paste("look at @node_modules/react/index.js please"))
+	wantText(t, e, "look at @node_modules/react/index.js please")
+	if calls != 0 || e.IsShowingAutocomplete() {
+		t.Fatalf("a paste asked for completions %d times", calls)
+	}
+}
+
+// loopTestHost runs completion as the interface does: posted work is queued
+// and run on the test's goroutine by settle.
+type loopTestHost struct {
+	rowsHost
+	work chan func()
+}
+
+func newLoopHost() *loopTestHost { return &loopTestHost{rowsHost{24}, make(chan func(), 64)} }
+
+func (h *loopTestHost) Do(fn func()) { h.work <- fn }
+
+// settle runs posted work until none arrives for a while.
+func (h *loopTestHost) settle(wait time.Duration) {
+	for {
+		select {
+		case fn := <-h.work:
+			fn()
+		case <-time.After(wait):
+			return
+		}
+	}
+}
+
+func TestEditorAutocompleteDebouncesTriggers(t *testing.T) {
+	for _, c := range []struct {
+		typed    string
+		triggers []string
+	}{{"@mai", nil}, {"#298", nil}, {"$sk", []string{"$"}}} {
+		host := newLoopHost()
+		e := NewEditor(host, EditorTheme{}, EditorOptions{})
+		var calls atomic.Int32
+		e.SetAutocompleteProvider(funcProvider{triggers: c.triggers, suggest: func(_ context.Context, l []string, line, col int, _ bool) *AutocompleteSuggestions {
+			calls.Add(1)
+			return &AutocompleteSuggestions{Items: items("x"), Prefix: before(l, line, col)}
+		}})
+		typeInto(e, c.typed)
+		if calls.Load() != 0 || e.IsShowingAutocomplete() {
+			t.Fatalf("%q: asked before the pause", c.typed)
+		}
+		host.settle(60 * time.Millisecond)
+		if calls.Load() != 1 || !e.IsShowingAutocomplete() {
+			t.Fatalf("%q: %d requests after the pause, showing %v", c.typed, calls.Load(), e.IsShowingAutocomplete())
+		}
+	}
+}
+
+func TestEditorAutocompleteTriggersFollowTheProvider(t *testing.T) {
+	host := newLoopHost()
+	e := NewEditor(host, EditorTheme{}, EditorOptions{})
+	e.SetAutocompleteProvider(funcProvider{triggers: []string{"$"}, suggest: func(context.Context, []string, int, int, bool) *AutocompleteSuggestions {
+		return &AutocompleteSuggestions{Items: items("$skill-name"), Prefix: "$"}
+	}})
+	calls := 0
+	e.SetAutocompleteProvider(funcProvider{suggest: func(context.Context, []string, int, int, bool) *AutocompleteSuggestions {
+		calls++
+		return &AutocompleteSuggestions{Items: items("$skill-name"), Prefix: "$"}
+	}})
+	typeInto(e, "$s")
+	host.settle(60 * time.Millisecond)
+	if calls != 0 || e.IsShowingAutocomplete() {
+		t.Fatalf("an old provider's trigger still opened completion (%d calls)", calls)
+	}
+}
+
+func TestEditorAutocompleteCancelsAStaleRequest(t *testing.T) {
+	host := newLoopHost()
+	e := NewEditor(host, EditorTheme{}, EditorOptions{})
+	var aborts atomic.Int32
+	e.SetAutocompleteProvider(funcProvider{suggest: func(ctx context.Context, _ []string, _, _ int, _ bool) *AutocompleteSuggestions {
+		select {
+		case <-ctx.Done():
+			aborts.Add(1)
+			return nil
+		case <-time.After(500 * time.Millisecond):
+			return &AutocompleteSuggestions{Items: items("@main.ts"), Prefix: "@main"}
+		}
+	}})
+	typeInto(e, "@mai")
+	host.settle(250 * time.Millisecond)
+	in(e, "n")
+	time.Sleep(50 * time.Millisecond)
+	if aborts.Load() != 1 {
+		t.Fatalf("%d requests stopped, want 1", aborts.Load())
+	}
+	e.cancelAutocomplete()
+}
+
+func TestEditorAutocompleteUndo(t *testing.T) {
+	e := newTestEditor()
+	e.SetAutocompleteProvider(funcProvider{suggest: func(_ context.Context, l []string, line, col int, _ bool) *AutocompleteSuggestions {
+		if before(l, line, col) == "di" {
+			return &AutocompleteSuggestions{Items: items("dist/"), Prefix: "di"}
+		}
+		return nil
+	}})
+	typeInto(e, "di")
+	in(e, "\t")
+	wantText(t, e, "dist/")
+	in(e, undoKey)
+	wantText(t, e, "di")
 }
