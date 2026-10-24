@@ -15,6 +15,7 @@ require (
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/openai/openai-go/v3 v3.35.0
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/term v0.33.0
 	golang.org/x/text v0.27.0
 	google.golang.org/genai v1.36.0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,12 @@ type ThinkingHost interface {
 	ThinkingLevel() ai.ThinkingLevel
 	AvailableThinkingLevels() []ai.ThinkingLevel
 	SetThinkingLevel(ai.ThinkingLevel) (ai.ThinkingLevel, error)
+}
+
+// ExportHost is the optional capability to write the conversation as a page.
+// It answers with the path written.
+type ExportHost interface {
+	ExportHTML(path string) (string, error)
 }
 
 // QueueHost is the optional control over how many queued steering and
@@ -375,6 +382,20 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels":
 		return c.thinking(cmd, resp)
+
+	case "export_html":
+		exporter, ok := c.host.(ExportHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this session cannot be exported")
+		}
+		if ext := strings.ToLower(filepath.Ext(cmd.OutputPath)); ext == ".jsonl" || ext == ".md" {
+			return fail(resp, FailBadArgument, "export_html writes HTML; "+cmd.OutputPath+" names another format")
+		}
+		written, err := exporter.ExportHTML(cmd.OutputPath)
+		if err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"path": written})
 
 	case "set_steering_mode", "set_follow_up_mode":
 		queue, ok := c.host.(QueueHost)
@@ -805,5 +826,5 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // here fails as unimplemented; one not here fails as unknown. The list is the
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
-	"export_html": true, "get_fork_messages": true,
+	"get_fork_messages": true,
 }

@@ -59,6 +59,10 @@ type Command struct {
 	// Level is a thinking level, on `set_thinking_level`.
 	Level string `json:"level,omitempty"`
 
+	// OutputPath is where `export_html` writes; empty is a page named for the
+	// session in the working directory.
+	OutputPath string `json:"output_path,omitempty"`
+
 	// Mode is a queue mode, on `set_steering_mode` and `set_follow_up_mode`.
 	Mode string `json:"mode,omitempty"`
 

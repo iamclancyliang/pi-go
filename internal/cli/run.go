@@ -580,6 +580,19 @@ func (h *rpcHost) SetAutoCompaction(enabled bool) error {
 	return nil
 }
 
+// ExportHTML writes the conversation as a page, at path or under the
+// session's own name in the working directory.
+func (h *rpcHost) ExportHTML(path string) (string, error) {
+	h.mu.Lock()
+	source := exportSource{
+		conversation: h.current, session: h.current.Session,
+		provider: h.prov, model: h.model, thinking: h.rt.Thinking,
+		tools: h.rt.Tools, workingDir: h.rt.WorkingDir,
+	}
+	h.mu.Unlock()
+	return exportTo(source, path)
+}
+
 // QueueModes reports how many queued messages each drain point takes.
 func (h *rpcHost) QueueModes() (steering, followUp string) {
 	h.mu.Lock()
@@ -842,6 +855,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		workingDir:   rt.WorkingDir,
 		config:       &config,
 
+		tools:         rt.Tools,
 		modelProvider: func() string { return provider },
 		modelName:     func() string { return modelName },
 	}

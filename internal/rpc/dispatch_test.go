@@ -222,7 +222,7 @@ func TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers(t *testing.T) {
 	if unknown.OK || unknown.Error.Kind != FailUnknownCommand {
 		t.Fatalf("an invented command was not unknown: %+v", unknown.Error)
 	}
-	unbuilt := dispatch(c, Command{ID: "2", Command: "export_html"})
+	unbuilt := dispatch(c, Command{ID: "2", Command: "get_fork_messages"})
 	if unbuilt.OK || unbuilt.Error.Kind != FailUnimplemented {
 		t.Fatalf("a real Pi command was not unimplemented: %+v", unbuilt.Error)
 	}
@@ -886,5 +886,44 @@ func TestQueueModesCanBeSetAndAreInTheState(t *testing.T) {
 	}
 	if host.steering != "all" {
 		t.Fatalf("a refused mode still changed it to %q", host.steering)
+	}
+}
+
+type exportFakeHost struct {
+	*fakeHost
+	asked string
+}
+
+func (h *exportFakeHost) ExportHTML(path string) (string, error) {
+	h.asked = path
+	if path == "" {
+		path = "/work/pi-go-session-x.html"
+	}
+	return path, nil
+}
+
+// TestExportHTMLAnswersWithWhereItWrote, with or without a path given.
+func TestExportHTMLAnswersWithWhereItWrote(t *testing.T) {
+	host := &exportFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go.")}}
+	c := NewChannel(host)
+	var data struct {
+		Path string `json:"path"`
+	}
+	decode(t, dispatch(c, Command{ID: "1", Command: "export_html"}), &data)
+	if data.Path != "/work/pi-go-session-x.html" || host.asked != "" {
+		t.Fatalf("export_html with no path answered %q (asked %q)", data.Path, host.asked)
+	}
+	decode(t, dispatch(c, Command{ID: "2", Command: "export_html", OutputPath: "/tmp/a.html"}), &data)
+	if data.Path != "/tmp/a.html" || host.asked != "/tmp/a.html" {
+		t.Fatalf("export_html with a path answered %q (asked %q)", data.Path, host.asked)
+	}
+}
+
+// TestExportHTMLRefusesAPathForAnotherFormat as a bad argument.
+func TestExportHTMLRefusesAPathForAnotherFormat(t *testing.T) {
+	host := &exportFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go.")}}
+	resp := dispatch(NewChannel(host), Command{ID: "1", Command: "export_html", OutputPath: "x.jsonl"})
+	if resp.OK || resp.Error.Kind != FailBadArgument || host.asked != "" {
+		t.Fatalf("a .jsonl path answered %+v", resp)
 	}
 }

@@ -31,7 +31,8 @@ file carries what a person upgrading would want to know.
   and a wait cut short with `abort_retry`, and compacting before an overflow
   is switched with `set_auto_compaction`. `set_steering_mode` and
   `set_follow_up_mode` choose how many queued messages are taken at a time.
-  Thirty of Pi's commands answer; the rest fail with a typed reason that says whether they are
+  `export_html` writes the conversation as a page. Thirty-one of Pi's
+  commands answer; the rest fail with a typed reason that says whether they are
   unknown or not yet built.
 - A model call that fails for a reason another attempt might survive — a
   throttle, a server fault — is retried, as Pi retries it: three times, two
@@ -80,6 +81,12 @@ file carries what a person upgrading would want to know.
   `compaction.enabled` switches that off, and leaves overflow recovery on.
 
 ### The session
+- `/export` writes an HTML page by default — the conversation with its
+  Markdown rendered, tool calls beside their results, reasoning and long
+  output folded away — named for the session in the working directory, or at
+  the path given. A `.jsonl` path gets the current branch as a session file,
+  `.md` the Markdown. `/share` puts the page and the Markdown in one secret
+  gist.
 - Slash commands: `/help`, `/session`, `/name`, `/export`, `/import`, `/copy`,
   `/share` (a secret gist, after asking), `/model` to switch mid-session,
   `/login` and `/logout` for stored credentials, `/settings`, `/trust`,

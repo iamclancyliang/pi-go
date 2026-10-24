@@ -12,6 +12,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/auth"
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/session"
 	"github.com/iamclancyliang/pi-go/internal/settings"
 )
 
@@ -167,12 +168,52 @@ func TestExportWritesSomethingAPersonReads(t *testing.T) {
 	}
 }
 
-// TestExportWithNoPathSaysSo rather than writing somewhere the user did not
-// choose.
-func TestExportWithNoPathSaysSo(t *testing.T) {
-	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/export")
-	if !strings.Contains(errOut, "needs a path") {
-		t.Fatalf("/export with no path said %q", errOut)
+// TestExportWithNoPathWritesAPageNamedForTheSession, in the working
+// directory, as Pi's /export does.
+func TestExportWithNoPathWritesAPageNamedForTheSession(t *testing.T) {
+	work := t.TempDir()
+	out, errOut := interactive(t, cli.Args{SessionDir: t.TempDir()}, work, "a question worth keeping", "/export")
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("export failed: %q", errOut)
+	}
+	pages, _ := filepath.Glob(filepath.Join(work, "pi-go-session-*.html"))
+	if len(pages) != 1 || !strings.Contains(out, pages[0]) {
+		t.Fatalf("no page named for the session in the working directory: %v\n%s", pages, out)
+	}
+	raw, _ := os.ReadFile(pages[0])
+	if !strings.Contains(string(raw), "<!doctype html>") || !strings.Contains(string(raw), "a question worth keeping") {
+		t.Fatal("the page does not carry the conversation")
+	}
+}
+
+// TestAQuotedExportPathMayHoldSpaces, as Pi's path argument may.
+func TestAQuotedExportPathMayHoldSpaces(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "my notes", "chat.html")
+	_, errOut := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "hello", `/export "`+target+`"`)
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("export failed: %q", errOut)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("the quoted path was not written: %v", err)
+	}
+}
+
+// TestExportingToJsonlCopiesTheBranchAsASessionFile, which pi-go can reopen,
+// and refuses for a conversation that was never recorded.
+func TestExportingToJsonlCopiesTheBranchAsASessionFile(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "branch.jsonl")
+	_, errOut := interactive(t, cli.Args{SessionDir: t.TempDir()}, t.TempDir(), "a question worth keeping", "/export "+target)
+	if strings.Contains(errOut, "could not") {
+		t.Fatalf("export failed: %q", errOut)
+	}
+	info, err := session.Describe(target)
+	if err != nil || info.Entries == 0 || info.Opening != "a question worth keeping" {
+		t.Fatalf("the export is not a session holding the branch: %+v (%v)", info, err)
+	}
+
+	_, errOut = interactive(t, cli.Args{NoSession: true}, t.TempDir(), "hello", "/export "+filepath.Join(t.TempDir(), "x.jsonl"))
+	if !strings.Contains(errOut, "not recorded") {
+		t.Fatalf("an unrecorded conversation exported as .jsonl said %q", errOut)
 	}
 }
 

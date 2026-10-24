@@ -163,7 +163,7 @@ func TestAbortEndsARunningPromptAndTheStreamSaysAborted(t *testing.T) {
 // commands ADR-0010 records as incomplete: one at a time, named, rather than
 // the mode refusing wholesale.
 func TestAnUnbuiltCommandFailsWithATypedKind(t *testing.T) {
-	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"export_html"}`)
+	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"get_fork_messages"}`)
 	got := responses(lines)
 	errObj := got[0]["error"].(map[string]any)
 	if got[0]["ok"] != false || errObj["kind"] != "unimplemented" {

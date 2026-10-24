@@ -74,6 +74,9 @@ type commandContext struct {
 	// is worse than one that refused to switch.
 	switchModel func(provider, model string) error
 
+	// tools is what the conversation offers the model, which an export lists.
+	tools *tools.Registry
+
 	// modelProvider and modelName report what is answering now.
 	modelProvider func() string
 	modelName     func() string
@@ -266,30 +269,31 @@ func runResume(c *commandContext, arg string) bool {
 	return false
 }
 
-// runExport writes the conversation somewhere the user chose.
-//
-// Text, not the session file: an export is for reading, and copying the record
-// would hand someone a format built for this program to reopen. Pi's default is
-// HTML, which needs a renderer this build does not have — named as the
-// difference rather than passed off as the same thing.
+// runExport writes the conversation somewhere the user chose: an HTML page by
+// default, as Pi's is, or the current branch as a session file for a .jsonl
+// path. See exportTo.
 func runExport(c *commandContext, arg string) bool {
-	if arg == "" {
-		fmt.Fprintln(c.errOut, "/export needs a path")
+	path, ok := pathArgument(arg)
+	if !ok {
+		fmt.Fprintln(c.errOut, "could not export: the path's quote is never closed")
 		return false
 	}
-	path, err := filepath.Abs(arg)
+	written, err := exportTo(c.exportSource(), path)
 	if err != nil {
 		fmt.Fprintf(c.errOut, "could not export: %v\n", err)
 		return false
 	}
-
-	body := renderConversation(c.conversation.ID, c.session.Snapshot().Messages)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		fmt.Fprintf(c.errOut, "could not export: %v\n", err)
-		return false
-	}
-	fmt.Fprintf(c.out, "exported to %s\n", path)
+	fmt.Fprintf(c.out, "exported to %s\n", written)
 	return false
+}
+
+// exportSource is what this session's exports describe.
+func (c *commandContext) exportSource() exportSource {
+	return exportSource{
+		conversation: c.conversation, session: c.session,
+		provider: c.modelProvider(), model: c.modelName(), thinking: c.args.Thinking,
+		tools: c.tools, workingDir: c.workingDir,
+	}
 }
 
 // runTree shows the shape of the conversation, or moves within it.
@@ -785,10 +789,11 @@ func runShare(c *commandContext, _ string) bool {
 		return false
 	}
 
-	// Markdown rather than Pi's HTML: there is no renderer here, and sharing
-	// something this build cannot produce would be worse than sharing the
-	// content in a form GitHub already displays.
-	file, err := os.CreateTemp("", "pi-go-session-*.md")
+	// Two files in one gist. Pi uploads its HTML page and links its own
+	// viewer site, since GitHub shows an HTML file as source; pi-go has no
+	// viewer, so the page goes up for download beside the same conversation
+	// as Markdown, which GitHub renders where the link lands.
+	dir, err := os.MkdirTemp("", "pi-go-share-*")
 	if err != nil {
 		fmt.Fprintf(c.errOut, "could not prepare the upload: %v\n", err)
 		return false
@@ -796,15 +801,20 @@ func runShare(c *commandContext, _ string) bool {
 	// Removed whatever happens: it holds the whole conversation, and leaving it
 	// in a shared temporary directory is the disclosure this command asked
 	// about.
-	defer os.Remove(file.Name())
-	if _, err := file.WriteString(renderConversation(c.conversation.ID, messages)); err != nil {
-		file.Close()
-		fmt.Fprintf(c.errOut, "could not prepare the upload: %v\n", err)
-		return false
+	defer os.RemoveAll(dir)
+	source := c.exportSource()
+	source.workingDir = dir
+	var files []string
+	for _, name := range []string{"session.md", "session.html"} {
+		written, err := exportTo(source, name)
+		if err != nil {
+			fmt.Fprintf(c.errOut, "could not prepare the upload: %v\n", err)
+			return false
+		}
+		files = append(files, written)
 	}
-	file.Close()
 
-	out, err := exec.Command("gh", "gist", "create", "--public=false", file.Name()).Output()
+	out, err := exec.Command("gh", append([]string{"gist", "create", "--public=false"}, files...)...).Output()
 	if err != nil {
 		fmt.Fprintf(c.errOut, "could not create the gist: %v\n", err)
 		return false
