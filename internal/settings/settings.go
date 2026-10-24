@@ -117,6 +117,11 @@ type Settings struct {
 	Compaction Compaction `json:"compaction,omitempty"`
 
 	Retry Retry `json:"retry,omitzero"`
+
+	// SteeringMode and FollowUpMode are how many queued messages each drain
+	// point takes: "one-at-a-time" (Pi's default) or "all".
+	SteeringMode string `json:"steeringMode,omitempty"`
+	FollowUpMode string `json:"followUpMode,omitempty"`
 }
 
 // GlobalPath is where the global scope lives.
@@ -163,6 +168,11 @@ func (s Settings) validate(path string) error {
 	}
 	if s.Compaction.ReserveTokens < 0 {
 		return fmt.Errorf("settings: %s: compaction.reserveTokens is negative", path)
+	}
+	for key, mode := range map[string]string{"steeringMode": s.SteeringMode, "followUpMode": s.FollowUpMode} {
+		if mode != "" && mode != "all" && mode != "one-at-a-time" {
+			return fmt.Errorf("settings: %s: %s is %q; it takes all or one-at-a-time", path, key, mode)
+		}
 	}
 	if s.Retry.MaxRetries != nil && *s.Retry.MaxRetries < 0 {
 		return fmt.Errorf("settings: %s: retry.maxRetries is negative", path)
@@ -219,6 +229,12 @@ func Merge(global, project Settings) Settings {
 	}
 	if project.Compaction.ReserveTokens != 0 {
 		merged.Compaction.ReserveTokens = project.Compaction.ReserveTokens
+	}
+	if project.SteeringMode != "" {
+		merged.SteeringMode = project.SteeringMode
+	}
+	if project.FollowUpMode != "" {
+		merged.FollowUpMode = project.FollowUpMode
 	}
 	if project.Retry.Enabled != nil {
 		merged.Retry.Enabled = project.Retry.Enabled

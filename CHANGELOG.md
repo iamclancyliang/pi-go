@@ -29,8 +29,9 @@ file carries what a person upgrading would want to know.
   with `set_thinking_level`, `cycle_thinking_level` and
   `get_available_thinking_levels`; retrying is switched with `set_auto_retry`
   and a wait cut short with `abort_retry`, and compacting before an overflow
-  is switched with `set_auto_compaction`. Twenty-eight of Pi's commands
-  answer; the rest fail with a typed reason that says whether they are
+  is switched with `set_auto_compaction`. `set_steering_mode` and
+  `set_follow_up_mode` choose how many queued messages are taken at a time.
+  Thirty of Pi's commands answer; the rest fail with a typed reason that says whether they are
   unknown or not yet built.
 - A model call that fails for a reason another attempt might survive — a
   throttle, a server fault — is retried, as Pi retries it: three times, two
@@ -38,6 +39,11 @@ file carries what a person upgrading would want to know.
   Every attempt is billed and in the ledger. An exhausted balance and an
   overflow are never retried. `retry.enabled`, `retry.maxRetries` and
   `retry.baseDelayMs` change it.
+- Messages queued during a run are taken one at a time, as in Pi: a steering
+  message at the end of each turn, a follow-up each time the run would
+  otherwise stop. `steeringMode` and `followUpMode` set either to `all`. A
+  follow-up queued before a steer now waits for the run to stop rather than
+  arriving with the steer.
 - Thinking levels reach OpenAI and OpenRouter as well as DeepSeek. A level the
   model does not offer becomes the nearest one it does, and the run says so;
   without a recorded per-model mapping, `xhigh` and `max` land on `high`.

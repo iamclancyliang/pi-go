@@ -83,6 +83,11 @@ type Runtime struct {
 	// the composition root fills it from settings with RetryPolicy.
 	Retry runtime.RetryPolicy
 
+	// SteeringMode and FollowUpMode are how many queued messages each drain
+	// point takes; empty is Pi's default, one at a time.
+	SteeringMode runtime.QueueMode
+	FollowUpMode runtime.QueueMode
+
 	// AutoCompaction is whether and with how much reserve to compact before
 	// the context overflows. Its window is filled per model as each agent is
 	// built, from what is recorded about that model; zero values compact
@@ -143,6 +148,8 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		Thinking:       rt.Thinking,
 		Retry:          rt.Retry,
 		AutoCompaction: autoCompactionFor(rt.AutoCompaction, rt.Provider, rt.ModelName),
+		SteeringMode:   rt.SteeringMode,
+		FollowUpMode:   rt.FollowUpMode,
 		// A one-shot can overflow too, and a refusal with no recovery is a
 		// failed run where a shortened context would have answered.
 		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
@@ -210,6 +217,8 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 		Thinking:       rt.Thinking,
 		Retry:          rt.Retry,
 		AutoCompaction: autoCompactionFor(rt.AutoCompaction, rt.Provider, rt.ModelName),
+		SteeringMode:   rt.SteeringMode,
+		FollowUpMode:   rt.FollowUpMode,
 		Summarize:      (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
 		// The writer is both observers, which is the wiring the shared
 		// counter exists for: one consumer, two families, one order.
@@ -283,6 +292,8 @@ func (h *rpcHost) build() error {
 		Thinking:       requestThinking(h.prov, h.model, h.rt.Thinking),
 		Retry:          h.rt.Retry,
 		AutoCompaction: autoCompactionFor(h.rt.AutoCompaction, h.prov, h.model),
+		SteeringMode:   h.rt.SteeringMode,
+		FollowUpMode:   h.rt.FollowUpMode,
 		Summarize:      (&compaction.Compactor{Model: h.port, ModelName: h.model}).Summarize,
 		Observers:      []events.Observer{h.writer},
 		ReplyObservers: []runtime.ReplyObserver{h.writer},
@@ -569,6 +580,41 @@ func (h *rpcHost) SetAutoCompaction(enabled bool) error {
 	return nil
 }
 
+// QueueModes reports how many queued messages each drain point takes.
+func (h *rpcHost) QueueModes() (steering, followUp string) {
+	h.mu.Lock()
+	agent := h.agent
+	h.mu.Unlock()
+	return string(agent.SteeringMode()), string(agent.FollowUpMode())
+}
+
+// SetQueueMode changes one queue's mode from the next drain point, and
+// remembers it for later runs as Pi does.
+func (h *rpcHost) SetQueueMode(which, raw string) error {
+	mode, err := runtime.ParseQueueMode(raw)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if which == "steering" {
+		h.rt.SteeringMode = mode
+		h.agent.SetSteeringMode(mode)
+		h.rt.Config.Global.SteeringMode = raw
+	} else {
+		h.rt.FollowUpMode = mode
+		h.agent.SetFollowUpMode(mode)
+		h.rt.Config.Global.FollowUpMode = raw
+	}
+	if h.rt.Config.AgentDir == "" {
+		return nil
+	}
+	if err := settings.Save(settings.GlobalPath(h.rt.Config.AgentDir), h.rt.Config.Global); err != nil {
+		return fmt.Errorf("the change is in effect, but saving it failed: %w", err)
+	}
+	return nil
+}
+
 // AutoCompactionEnabled reports whether compacting before an overflow is on.
 func (h *rpcHost) AutoCompactionEnabled() bool {
 	h.mu.Lock()
@@ -768,6 +814,8 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			Thinking:       rt.Thinking,
 			Retry:          rt.Retry,
 			AutoCompaction: autoCompactionFor(rt.AutoCompaction, provider, modelName),
+			SteeringMode:   rt.SteeringMode,
+			FollowUpMode:   rt.FollowUpMode,
 			// The same summariser /compact uses. Without it an overflow is
 			// terminal: the request is refused, and a conversation long enough
 			// to overflow once will do it again on every turn after.

@@ -73,6 +73,14 @@ type ThinkingHost interface {
 	SetThinkingLevel(ai.ThinkingLevel) (ai.ThinkingLevel, error)
 }
 
+// QueueHost is the optional control over how many queued steering and
+// follow-up messages each drain point takes. The modes are strings here so
+// the channel does not reach into the runtime's types; the host validates.
+type QueueHost interface {
+	QueueModes() (steering, followUp string)
+	SetQueueMode(which, mode string) error
+}
+
 // CompactionHost is the optional switch for compacting before an overflow.
 // Recovering from an overflow is not governed by it.
 type CompactionHost interface {
@@ -180,6 +188,10 @@ type stateData struct {
 	// AutoCompaction says whether the conversation is compacted before it
 	// overflows; absent when the host has no such switch.
 	AutoCompaction *bool `json:"auto_compaction,omitempty"`
+	// SteeringMode and FollowUpMode are how many queued messages each drain
+	// point takes; absent when the host has no queue control.
+	SteeringMode string `json:"steering_mode,omitempty"`
+	FollowUpMode string `json:"follow_up_mode,omitempty"`
 }
 
 // statsData is the get_session_stats payload. Token counts keep the ledger's
@@ -259,6 +271,9 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		}
 		if thinking, ok := c.host.(ThinkingHost); ok {
 			state.ThinkingLevel = thinking.ThinkingLevel()
+		}
+		if queue, ok := c.host.(QueueHost); ok {
+			state.SteeringMode, state.FollowUpMode = queue.QueueModes()
 		}
 		if compacting, ok := c.host.(CompactionHost); ok {
 			enabled := compacting.AutoCompactionEnabled()
@@ -360,6 +375,25 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels":
 		return c.thinking(cmd, resp)
+
+	case "set_steering_mode", "set_follow_up_mode":
+		queue, ok := c.host.(QueueHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this session has no message queues to configure")
+		}
+		if cmd.Mode != "all" && cmd.Mode != "one-at-a-time" {
+			return fail(resp, FailBadArgument, cmd.Command+" takes mode: all or one-at-a-time")
+		}
+		which := "steering"
+		if cmd.Command == "set_follow_up_mode" {
+			which = "follow_up"
+		}
+		// Not refused while a prompt runs: what is queued stays queued, and
+		// only how much of it the next drain point takes changes.
+		if err := queue.SetQueueMode(which, cmd.Mode); err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"mode": cmd.Mode})
 
 	case "set_auto_compaction":
 		compacting, ok := c.host.(CompactionHost)
@@ -771,6 +805,5 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // here fails as unimplemented; one not here fails as unknown. The list is the
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
-	"set_steering_mode": true, "set_follow_up_mode": true,
 	"export_html": true, "get_fork_messages": true,
 }

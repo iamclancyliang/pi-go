@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 	"github.com/iamclancyliang/pi-go/internal/tui"
 )
@@ -143,6 +144,8 @@ func run(argv []string) int {
 		Thinking:       thinking,
 		Retry:          cli.RetryPolicy(cfg.Effective),
 		AutoCompaction: cli.AutoCompactionPolicy(cfg.Effective),
+		SteeringMode:   runtime.QueueMode(cfg.Effective.SteeringMode),
+		FollowUpMode:   runtime.QueueMode(cfg.Effective.FollowUpMode),
 		ModelPatterns:  args.Models,
 		Args:           args,
 		WorkingDir:     root,

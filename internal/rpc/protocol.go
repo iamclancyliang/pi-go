@@ -59,6 +59,9 @@ type Command struct {
 	// Level is a thinking level, on `set_thinking_level`.
 	Level string `json:"level,omitempty"`
 
+	// Mode is a queue mode, on `set_steering_mode` and `set_follow_up_mode`.
+	Mode string `json:"mode,omitempty"`
+
 	// Enabled switches a behaviour, on `set_auto_retry`. A pointer so a
 	// command that left it out is refused rather than read as false.
 	Enabled *bool `json:"enabled,omitempty"`

@@ -222,7 +222,7 @@ func TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers(t *testing.T) {
 	if unknown.OK || unknown.Error.Kind != FailUnknownCommand {
 		t.Fatalf("an invented command was not unknown: %+v", unknown.Error)
 	}
-	unbuilt := dispatch(c, Command{ID: "2", Command: "set_steering_mode"})
+	unbuilt := dispatch(c, Command{ID: "2", Command: "export_html"})
 	if unbuilt.OK || unbuilt.Error.Kind != FailUnimplemented {
 		t.Fatalf("a real Pi command was not unimplemented: %+v", unbuilt.Error)
 	}
@@ -845,5 +845,46 @@ func TestAutoCompactionCanBeSwitchedAndIsInTheState(t *testing.T) {
 	}
 	if bad := dispatch(c, Command{ID: "3", Command: "set_auto_compaction"}); bad.OK || bad.Error.Kind != FailBadArgument {
 		t.Fatalf("set_auto_compaction with no value answered %+v", bad)
+	}
+}
+
+type queueFakeHost struct {
+	*fakeHost
+	steering, followUp string
+}
+
+func (h *queueFakeHost) QueueModes() (string, string) { return h.steering, h.followUp }
+func (h *queueFakeHost) SetQueueMode(which, mode string) error {
+	if which == "steering" {
+		h.steering = mode
+	} else {
+		h.followUp = mode
+	}
+	return nil
+}
+
+// TestQueueModesCanBeSetAndAreInTheState, as Pi's steeringMode and
+// followUpMode are; a mode it does not take is a bad argument naming both.
+func TestQueueModesCanBeSetAndAreInTheState(t *testing.T) {
+	host := &queueFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go.")}, steering: "one-at-a-time", followUp: "one-at-a-time"}
+	c := NewChannel(host)
+
+	if resp := dispatch(c, Command{ID: "1", Command: "set_steering_mode", Mode: "all"}); !resp.OK {
+		t.Fatalf("set_steering_mode failed: %+v", resp.Error)
+	}
+	if resp := dispatch(c, Command{ID: "2", Command: "set_follow_up_mode", Mode: "all"}); !resp.OK {
+		t.Fatalf("set_follow_up_mode failed: %+v", resp.Error)
+	}
+	var state stateData
+	decode(t, dispatch(c, Command{ID: "3", Command: "get_state"}), &state)
+	if state.SteeringMode != "all" || state.FollowUpMode != "all" {
+		t.Fatalf("get_state reports %q and %q", state.SteeringMode, state.FollowUpMode)
+	}
+	bad := dispatch(c, Command{ID: "4", Command: "set_steering_mode", Mode: "some"})
+	if bad.OK || bad.Error.Kind != FailBadArgument || !strings.Contains(bad.Error.Detail, "one-at-a-time") {
+		t.Fatalf("an invented mode answered %+v", bad)
+	}
+	if host.steering != "all" {
+		t.Fatalf("a refused mode still changed it to %q", host.steering)
 	}
 }

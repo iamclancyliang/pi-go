@@ -61,6 +61,11 @@ type Config struct {
 	// depend on it.
 	AutoCompaction AutoCompaction
 
+	// SteeringMode and FollowUpMode are how many queued messages each drain
+	// point takes. Empty is Pi's default, one at a time.
+	SteeringMode QueueMode
+	FollowUpMode QueueMode
+
 	// Tools is the tool registration seam. Required, may be empty.
 	Tools *tools.Registry
 
@@ -121,6 +126,8 @@ type Agent struct {
 	compactMu   sync.Mutex
 	compact     AutoCompaction
 	lastContext int
+
+	queues *queues
 }
 
 // New builds an Agent.
@@ -144,8 +151,20 @@ func New(cfg Config) (*Agent, error) {
 		thinking: cfg.Thinking,
 		retry:    &retrier{policy: cfg.Retry},
 		compact:  cfg.AutoCompaction,
+		queues:   newQueues(cfg.SteeringMode, cfg.FollowUpMode),
 	}, nil
 }
+
+// SteeringMode and FollowUpMode report how many queued messages each drain
+// point takes.
+func (a *Agent) SteeringMode() QueueMode { s, _ := a.queues.modes(); return s }
+func (a *Agent) FollowUpMode() QueueMode { _, f := a.queues.modes(); return f }
+
+// SetSteeringMode and SetFollowUpMode change the mode from the next drain
+// point on. What is already queued stays queued; only how much of it the
+// next point takes changes, as in Pi.
+func (a *Agent) SetSteeringMode(m QueueMode) { a.queues.setSteering(m) }
+func (a *Agent) SetFollowUpMode(m QueueMode) { a.queues.setFollowUp(m) }
 
 // AutoRetry reports whether a transient model failure is retried.
 func (a *Agent) AutoRetry() bool { return a.retry.snapshot().Enabled }
@@ -232,6 +251,7 @@ func (a *Agent) Start(ctx context.Context, prompt string) (*Run, error) {
 		return nil, err
 	}
 
+	a.queues.attach(loop)
 	if ok, _ := loop.Push(schema.UserMessage(prompt)); !ok {
 		err := errors.New("runtime: loop rejected the prompt")
 		_ = a.cfg.Session.EndAgentRun()
@@ -256,7 +276,9 @@ func (a *Agent) failStart(err error) {
 // the in-flight turn finishes untouched and the message is consumed only once
 // the current run would otherwise stop.
 func (r *Run) Follow(text string) error {
-	if ok, _ := r.loop.Push(schema.UserMessage(text)); !ok {
+	message := schema.UserMessage(text)
+	r.agent.queues.tag(message, queueFollow)
+	if ok, _ := r.loop.Push(message); !ok {
 		return errors.New("runtime: loop rejected the follow-up")
 	}
 	return nil
@@ -273,8 +295,10 @@ func (r *Run) Follow(text string) error {
 // containing only the system and steering messages, and every completed tool
 // result is gone.
 func (r *Run) Steer(text string) error {
+	message := schema.UserMessage(text)
+	r.agent.queues.tag(message, queueSteer)
 	ok, resolved := r.loop.Push(
-		schema.UserMessage(text),
+		message,
 		adk.WithPreempt[*schema.Message, *schema.Message](adk.AfterToolCalls),
 	)
 	if !ok {
@@ -382,6 +406,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		summarize:     a.cfg.Summarize,
 		retry:         a.retry,
 		noteContext:   a.noteContext,
+		onRequest:     a.queues.rearmIfQueued,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -432,6 +457,9 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 
 	loop := adk.NewTurnLoop(adk.TurnLoopConfig[*schema.Message, *schema.Message]{
 		GenInput: func(_ context.Context, l *adk.TurnLoop[*schema.Message, *schema.Message], items []*schema.Message) (*adk.GenInputResult[*schema.Message, *schema.Message], error) {
+			// What this drain point takes, by queue and mode; the rest is
+			// handed back to stay queued.
+			items, remaining := a.queues.split(items)
 			if len(items) == 0 {
 				// Nothing buffered: the conversation is done for
 				// now. Stopping here is what makes Run return
@@ -475,6 +503,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			proj := a.cfg.Session.Project()
 			_, streams := a.cfg.Model.(ai.StreamingPort)
 			return &adk.GenInputResult[*schema.Message, *schema.Message]{
+				Remaining: remaining,
 				Input: &adk.TypedAgentInput[*schema.Message]{
 					Messages: toEinoMessages(proj.Messages),
 					// Asked for only when the provider can actually do it. A
@@ -661,6 +690,9 @@ type observingPort struct {
 	// measures nothing.
 	noteContext func(ai.Usage)
 
+	// onRequest runs as each model request is made, before it is sent.
+	onRequest func()
+
 	// failed is why recovery could not be attempted, when that is a different
 	// failure from the one being recovered from.
 	failedMu sync.Mutex
@@ -800,6 +832,9 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	requested := req.Model
 	if requested == "" {
 		requested = o.currentModel()
+	}
+	if o.onRequest != nil {
+		o.onRequest()
 	}
 
 	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
@@ -958,6 +993,9 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 	requested := req.Model
 	if requested == "" {
 		requested = o.currentModel()
+	}
+	if o.onRequest != nil {
+		o.onRequest()
 	}
 	o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
 		e.Detail.MessageCount = len(req.Messages)

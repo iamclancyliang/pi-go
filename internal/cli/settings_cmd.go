@@ -103,6 +103,10 @@ var settingKeys = []settingKey{
 			return nil
 		},
 	},
+	queueModeKey("steeringMode", "steering messages taken per drain point: one-at-a-time or all",
+		func(s *settings.Settings) *string { return &s.SteeringMode }),
+	queueModeKey("followUpMode", "follow-up messages taken per drain point: one-at-a-time or all",
+		func(s *settings.Settings) *string { return &s.FollowUpMode }),
 	{
 		name: "compaction.enabled", hint: "compact before the context overflows (default true)",
 		get: func(s *settings.Settings) string {
@@ -331,4 +335,19 @@ func runReload(c *commandContext, _ string) bool {
 		fmt.Fprintln(c.out, "note: the model, provider and tool set were built at startup; a new run picks those up")
 	}
 	return false
+}
+
+// queueModeKey is a queue mode setting, which can also be unset.
+func queueModeKey(name, hint string, field func(*settings.Settings) *string) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string { return *field(s) },
+		set: func(s *settings.Settings, v string) error {
+			if v != "" && v != "all" && v != "one-at-a-time" {
+				return fmt.Errorf("%s takes all or one-at-a-time", name)
+			}
+			*field(s) = v
+			return nil
+		},
+	}
 }

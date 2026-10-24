@@ -163,7 +163,7 @@ func TestAbortEndsARunningPromptAndTheStreamSaysAborted(t *testing.T) {
 // commands ADR-0010 records as incomplete: one at a time, named, rather than
 // the mode refusing wholesale.
 func TestAnUnbuiltCommandFailsWithATypedKind(t *testing.T) {
-	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"set_steering_mode"}`)
+	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"export_html"}`)
 	got := responses(lines)
 	errObj := got[0]["error"].(map[string]any)
 	if got[0]["ok"] != false || errObj["kind"] != "unimplemented" {
@@ -418,5 +418,30 @@ func TestSwitchingConversationsCarriesEachOnWithItsOwnThinkingLevel(t *testing.T
 	}
 	if state := got[4]["data"].(map[string]any); state["thinking_level"] != "low" {
 		t.Fatalf("back in the original the level is %v, want the low it was set to there", state["thinking_level"])
+	}
+}
+
+// TestRPCQueueModesAreReportedAndRemembered, as Pi saves them.
+func TestRPCQueueModesAreReportedAndRemembered(t *testing.T) {
+	rt := runtimeFor(t, scripted("ok"))
+	rt.Config.AgentDir = t.TempDir()
+
+	got := runRPCWith(t, rt,
+		`{"id":"1","command":"get_state"}`,
+		`{"id":"2","command":"set_follow_up_mode","mode":"all"}`,
+		`{"id":"3","command":"get_state"}`)
+	if len(got) != 3 || got[1]["ok"] != true {
+		t.Fatalf("responses %v", got)
+	}
+	before, after := got[0]["data"].(map[string]any), got[2]["data"].(map[string]any)
+	if before["steering_mode"] != "one-at-a-time" || before["follow_up_mode"] != "one-at-a-time" {
+		t.Fatalf("the defaults are not Pi's: %v", before)
+	}
+	if after["follow_up_mode"] != "all" || after["steering_mode"] != "one-at-a-time" {
+		t.Fatalf("after setting follow-up to all: %v", after)
+	}
+	saved, err := settings.Load(settings.GlobalPath(rt.Config.AgentDir))
+	if err != nil || saved.FollowUpMode != "all" {
+		t.Fatalf("followUpMode saved as %q (%v)", saved.FollowUpMode, err)
 	}
 }
