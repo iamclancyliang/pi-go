@@ -52,6 +52,10 @@ type Config struct {
 	// turn that did not would otherwise be indistinguishable in the record.
 	Thinking ai.ThinkingLevel
 
+	// Retry is how a model call that failed transiently is tried again. The
+	// zero value retries nothing; SetAutoRetry switches it during a run.
+	Retry RetryPolicy
+
 	// Tools is the tool registration seam. Required, may be empty.
 	Tools *tools.Registry
 
@@ -106,6 +110,8 @@ type Agent struct {
 
 	thinkingMu sync.Mutex
 	thinking   ai.ThinkingLevel
+
+	retry *retrier
 }
 
 // New builds an Agent.
@@ -127,8 +133,21 @@ func New(cfg Config) (*Agent, error) {
 		caps:     V0Capabilities(),
 		state:    NewStateNamespace(),
 		thinking: cfg.Thinking,
+		retry:    &retrier{policy: cfg.Retry},
 	}, nil
 }
+
+// AutoRetry reports whether a transient model failure is retried.
+func (a *Agent) AutoRetry() bool { return a.retry.snapshot().Enabled }
+
+// SetAutoRetry switches retrying, from the next failure on. A wait already
+// in progress is not cut short; AbortRetry does that.
+func (a *Agent) SetAutoRetry(enabled bool) { a.retry.setEnabled(enabled) }
+
+// AbortRetry ends a retry wait in progress, so the failure it was waiting to
+// retry stands; it reports whether there was one. The run itself goes on to
+// end the way that failure ends it.
+func (a *Agent) AbortRetry() bool { return a.retry.abort() }
 
 // Thinking is the reasoning level the next model request asks for.
 func (a *Agent) Thinking() ai.ThinkingLevel {
@@ -344,6 +363,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		batch:         batch,
 		sequentialFor: a.sequentialFor,
 		summarize:     a.cfg.Summarize,
+		retry:         a.retry,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -614,6 +634,10 @@ type observingPort struct {
 	sequentialFor func(name string) bool
 	summarize     func(ctx context.Context, truth []ai.Message) (string, []ai.Message, error)
 
+	// retry is shared with the agent, so switching it or cutting a wait short
+	// reaches a run already in flight. Nil retries nothing.
+	retry *retrier
+
 	// failed is why recovery could not be attempted, when that is a different
 	// failure from the one being recovered from.
 	failedMu sync.Mutex
@@ -761,6 +785,29 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 	})
 
 	resp, err := o.inner.Generate(ctx, req)
+	attempt := 0
+	for o.canRetry(ctx, err, attempt) {
+		// The failed attempt is ledgered and announced like any other failed
+		// call before the next one is asked for: a retry that hid the attempt
+		// it replaced would make the bill disagree with the record.
+		o.recordConsumed(err)
+		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+			e.Detail.Model = requested
+			e.Detail.Err = err.Error()
+		})
+		if waitErr := o.retry.wait(ctx, &attempt, err, o.emitter); waitErr != nil {
+			if !errors.Is(waitErr, errRetryCancelled) {
+				err = waitErr
+			}
+			break
+		}
+		o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+			e.Detail.MessageCount = len(req.Messages)
+			e.Detail.Model = requested
+		})
+		resp, err = o.inner.Generate(ctx, req)
+	}
+	o.settleRetry(attempt, err)
 	if errors.Is(err, ai.ErrContextOverflow) {
 		// The refused call still reports what it cost, and it was still read.
 		// The counts come from the failure, not from the response: a call that
@@ -892,6 +939,7 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 	})
 
 	events0, err := streaming.Stream(ctx, req)
+	attempt := 0
 	if err != nil {
 		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
 			e.Detail.Model = requested
@@ -900,6 +948,14 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 		// A failure that knows what it consumed is ledgered even though no reply
 		// ever arrived: the attempts behind it read the request.
 		o.recordConsumed(err)
+		if retried, retryErr := o.restream(ctx, req, requested, &attempt, err); retryErr == nil {
+			events0, err = retried, nil
+		} else {
+			err = retryErr
+		}
+	}
+	if err != nil {
+		o.settleRetry(attempt, err)
 
 		// A reply that failed before it began is still a reply that ended. An
 		// observer told nothing waits for an end that is not coming, and cannot
@@ -911,9 +967,56 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 	out := make(chan ai.StreamEvent)
 	go func() {
 		defer close(out)
-		o.pump(ctx, req, requested, events0, out, false)
+		o.pump(ctx, req, requested, events0, out, false, attempt)
 	}()
 	return out, nil
+}
+
+// canRetry reports whether a failure after `done` retries earns another.
+func (o *observingPort) canRetry(ctx context.Context, err error, done int) bool {
+	return o.retry != nil && o.retry.eligible(ctx, err, done)
+}
+
+func (o *observingPort) settleRetry(attempt int, final error) {
+	if o.retry != nil {
+		o.retry.settle(attempt, final, o.emitter)
+	}
+}
+
+// restream retries a stream that failed before anything was shown, for as
+// long as its failures stay retryable, and returns the first stream that
+// starts — or the failure that ends the retrying. Each failed attempt is
+// ledgered and announced as it happens.
+func (o *observingPort) restream(ctx context.Context, req ai.Request, requested string,
+	attempt *int, cause error) (<-chan ai.StreamEvent, error) {
+
+	streaming, ok := o.inner.(ai.StreamingPort)
+	if !ok {
+		return nil, cause
+	}
+	for o.canRetry(ctx, cause, *attempt) {
+		if err := o.retry.wait(ctx, attempt, cause, o.emitter); err != nil {
+			if errors.Is(err, errRetryCancelled) {
+				return nil, cause
+			}
+			return nil, err
+		}
+		o.emitter.emit(events.KindModelRequest, func(e *events.Event) {
+			e.Detail.MessageCount = len(req.Messages)
+			e.Detail.Model = requested
+		})
+		next, err := streaming.Stream(ctx, req)
+		if err == nil {
+			return next, nil
+		}
+		o.emitter.emit(events.KindModelResponse, func(e *events.Event) {
+			e.Detail.Model = requested
+			e.Detail.Err = err.Error()
+		})
+		o.recordConsumed(err)
+		cause = err
+	}
+	return nil, cause
 }
 
 // pump forwards one attempt, and may replace it with a shortened retry.
@@ -921,7 +1024,7 @@ func (o *observingPort) Stream(ctx context.Context, req ai.Request) (<-chan ai.S
 // delivered says whether any content has already reached the consumer. It is the
 // whole reason recovery is conditional here: see the overflow branch.
 func (o *observingPort) pump(ctx context.Context, req ai.Request, requested string,
-	in <-chan ai.StreamEvent, out chan<- ai.StreamEvent, delivered bool) {
+	in <-chan ai.StreamEvent, out chan<- ai.StreamEvent, delivered bool, attempt int) {
 
 	// Iterative rather than recursive. A retry replaces the attempt rather than
 	// nesting inside it, so the recovery budget is what limits attempts and
@@ -939,6 +1042,31 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 					continue
 				}
 				announced = true
+			}
+
+			// A transient failure is retried on the same terms as an overflow
+			// is recovered: only before anything was shown, since a retry's
+			// blocks arriving after ones already delivered would read as one
+			// reply saying both things.
+			if event.Kind == ai.StreamError && event.Final != nil && !delivered &&
+				o.canRetry(ctx, event.Final.Cause, attempt) {
+				// Ledgered and announced, but not published: the reply has not
+				// ended, it is being attempted again.
+				o.recordTerminal(ctx, event, requested)
+				next, err := o.restream(ctx, req, requested, &attempt, event.Final.Cause)
+				if err == nil {
+					retried = next
+					break
+				}
+				o.settleRetry(attempt, err)
+				if err != event.Final.Cause {
+					event = unrecordable(event, err)
+				}
+				// Its usage is already in the ledger, so the ending is passed
+				// on without being recorded a second time.
+				o.publishReply(ctx, event)
+				forward(ctx, out, event)
+				return
 			}
 
 			if event.Kind == ai.StreamError && event.Final != nil &&
@@ -960,6 +1088,7 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 						event = unrecordable(event, cause)
 					}
 				}
+				o.settleRetry(attempt, event.Final.Cause)
 				o.publishReply(ctx, event)
 				forward(ctx, out, event)
 				o.recordTerminal(ctx, event, requested)
@@ -967,6 +1096,11 @@ func (o *observingPort) pump(ctx context.Context, req ai.Request, requested stri
 			}
 
 			if event.Terminal() {
+				var final error
+				if event.Kind == ai.StreamError && event.Final != nil {
+					final = event.Final.Cause
+				}
+				o.settleRetry(attempt, final)
 				// Recorded BEFORE the ending goes anywhere: the framework acts on
 				// the calls the ending carries, and it must not act before the
 				// round that governs them has been opened.

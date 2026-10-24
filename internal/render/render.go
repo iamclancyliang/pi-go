@@ -34,6 +34,15 @@ func Event(e events.Event) (string, bool) {
 		return fmt.Sprintf("model=%s text=%q", e.Detail.Model, e.Detail.Text), true
 	case events.KindModelChanged:
 		return fmt.Sprintf("%s -> %s", e.Detail.From, e.Detail.To), true
+	case events.KindRetryStart:
+		return fmt.Sprintf("attempt=%d/%d delay=%dms err=%s",
+			e.Detail.Attempt, e.Detail.MaxAttempts, e.Detail.DelayMs, e.Detail.Err), true
+	case events.KindRetryEnd:
+		succeeded := e.Detail.Succeeded != nil && *e.Detail.Succeeded
+		if e.Detail.Err != "" {
+			return fmt.Sprintf("attempt=%d succeeded=%t err=%s", e.Detail.Attempt, succeeded, e.Detail.Err), true
+		}
+		return fmt.Sprintf("attempt=%d succeeded=%t", e.Detail.Attempt, succeeded), true
 	case events.KindToolStart:
 		return fmt.Sprintf("%s id=%s args=%s", e.ToolName, e.ToolCallID, e.Detail.Args), true
 	case events.KindToolEnd:

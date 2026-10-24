@@ -78,6 +78,11 @@ type Runtime struct {
 	// Thinking is how much reasoning to ask for on every turn.
 	Thinking ai.ThinkingLevel
 
+	// Retry is how a transiently failed model call is tried again. The zero
+	// value retries nothing, which is what a Runtime assembled by hand gets;
+	// the composition root fills it from settings with RetryPolicy.
+	Retry runtime.RetryPolicy
+
 	// ScopedModels limits model cycling when a caller has selected an explicit
 	// ordered set. An empty set means cycle through the provider's reported
 	// listing. The full-screen scope editor is a separate interface feature.
@@ -126,6 +131,7 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		Tools:     rt.Tools,
 		Session:   sess,
 		Thinking:  rt.Thinking,
+		Retry:     rt.Retry,
 		// A one-shot can overflow too, and a refusal with no recovery is a
 		// failed run where a shortened context would have answered.
 		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
@@ -187,6 +193,7 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 		Tools:     rt.Tools,
 		Session:   sess,
 		Thinking:  rt.Thinking,
+		Retry:     rt.Retry,
 		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
 		// The writer is both observers, which is the wiring the shared
 		// counter exists for: one consumer, two families, one order.
@@ -255,6 +262,7 @@ func (h *rpcHost) build() error {
 		Tools:          h.rt.Tools,
 		Session:        h.current.Session,
 		Thinking:       requestThinking(h.prov, h.model, h.rt.Thinking),
+		Retry:          h.rt.Retry,
 		Summarize:      (&compaction.Compactor{Model: h.port, ModelName: h.model}).Summarize,
 		Observers:      []events.Observer{h.writer},
 		ReplyObservers: []runtime.ReplyObserver{h.writer},
@@ -458,6 +466,42 @@ func (h *rpcHost) SetThinkingLevel(level ai.ThinkingLevel) (ai.ThinkingLevel, er
 	return effective, nil
 }
 
+// SetAutoRetry switches retrying from the next failure on, and remembers the
+// choice for later runs as Pi does.
+func (h *rpcHost) SetAutoRetry(enabled bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.rt.Retry.Enabled = enabled
+	h.agent.SetAutoRetry(enabled)
+	if h.rt.Config.AgentDir == "" {
+		return nil
+	}
+	h.rt.Config.Global.Retry.Enabled = &enabled
+	if err := settings.Save(settings.GlobalPath(h.rt.Config.AgentDir), h.rt.Config.Global); err != nil {
+		return fmt.Errorf("the change is in effect, but saving it failed: %w", err)
+	}
+	return nil
+}
+
+// AbortRetry ends a retry wait in progress.
+func (h *rpcHost) AbortRetry() bool {
+	h.mu.Lock()
+	agent := h.agent
+	h.mu.Unlock()
+	return agent.AbortRetry()
+}
+
+// RetryPolicy is the retry policy settings describe, Pi's defaults filling
+// whatever is unset.
+func RetryPolicy(s settings.Settings) runtime.RetryPolicy {
+	enabled, maxRetries, baseDelayMs := s.Retry.Resolved()
+	return runtime.RetryPolicy{
+		Enabled:    enabled,
+		MaxRetries: maxRetries,
+		BaseDelay:  time.Duration(baseDelayMs) * time.Millisecond,
+	}
+}
+
 // requestThinking is what a request asks for at a level: nothing, for a
 // model recorded as not reasoning, whose provider may refuse the field
 // outright, and the level itself otherwise.
@@ -634,6 +678,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			Tools:     rt.Tools,
 			Session:   current.Session,
 			Thinking:  rt.Thinking,
+			Retry:     rt.Retry,
 			// The same summariser /compact uses. Without it an overflow is
 			// terminal: the request is refused, and a conversation long enough
 			// to overflow once will do it again on every turn after.

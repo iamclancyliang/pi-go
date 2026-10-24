@@ -767,3 +767,54 @@ func TestAHostWithoutThinkingSaysItIsUnavailable(t *testing.T) {
 		t.Fatalf("a host with no thinking control answered %+v", resp)
 	}
 }
+
+type retryFakeHost struct {
+	*fakeHost
+	enabled bool
+	waiting bool
+}
+
+func (h *retryFakeHost) SetAutoRetry(enabled bool) error { h.enabled = enabled; return nil }
+func (h *retryFakeHost) AbortRetry() bool {
+	was := h.waiting
+	h.waiting = false
+	return was
+}
+
+// TestAutoRetryCanBeSwitchedAndAWaitCutShort. Neither is refused while a
+// prompt runs: switching applies from the next failure, and cutting a wait
+// short is only meaningful during one.
+func TestAutoRetryCanBeSwitchedAndAWaitCutShort(t *testing.T) {
+	host := &retryFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "scripted-1"}, enabled: true, waiting: true}
+	c := NewChannel(host)
+
+	off := false
+	var set struct {
+		Enabled bool `json:"enabled"`
+	}
+	decode(t, dispatch(c, Command{ID: "1", Command: "set_auto_retry", Enabled: &off}), &set)
+	if set.Enabled || host.enabled {
+		t.Fatalf("set_auto_retry false left retrying on (answered %v)", set.Enabled)
+	}
+
+	var aborted struct {
+		Aborted bool `json:"aborted"`
+	}
+	decode(t, dispatch(c, Command{ID: "2", Command: "abort_retry"}), &aborted)
+	if !aborted.Aborted {
+		t.Fatal("abort_retry did not report the wait it ended")
+	}
+	decode(t, dispatch(c, Command{ID: "3", Command: "abort_retry"}), &aborted)
+	if aborted.Aborted {
+		t.Fatal("abort_retry reported a wait when there was none")
+	}
+}
+
+// TestSetAutoRetryWithoutAValueIsABadArgument, rather than a silent false.
+func TestSetAutoRetryWithoutAValueIsABadArgument(t *testing.T) {
+	host := &retryFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go.")}, enabled: true}
+	resp := dispatch(NewChannel(host), Command{ID: "1", Command: "set_auto_retry"})
+	if resp.OK || resp.Error.Kind != FailBadArgument || !host.enabled {
+		t.Fatalf("set_auto_retry with no value answered %+v and left retrying %v", resp, host.enabled)
+	}
+}

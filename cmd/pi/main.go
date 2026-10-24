@@ -120,6 +120,7 @@ func run(argv []string) int {
 		Provider:      providerName,
 		Conversation:  conversation,
 		Thinking:      thinking,
+		Retry:         cli.RetryPolicy(cfg.Effective),
 		ModelPatterns: args.Models,
 		Args:          args,
 		WorkingDir:    root,

@@ -27,9 +27,16 @@ file carries what a person upgrading would want to know.
   with `get_available_models` and `cycle_model`, shell commands run with
   `bash` and `abort_bash`, and the thinking level is set, cycled and listed
   with `set_thinking_level`, `cycle_thinking_level` and
-  `get_available_thinking_levels`. Twenty-five of Pi's commands answer; the
-  rest fail with a typed reason that says whether they are unknown or not yet
-  built.
+  `get_available_thinking_levels`; retrying is switched with `set_auto_retry`
+  and a wait cut short with `abort_retry`. Twenty-seven of Pi's commands
+  answer; the rest fail with a typed reason that says whether they are
+  unknown or not yet built.
+- A model call that fails for a reason another attempt might survive — a
+  throttle, a server fault — is retried, as Pi retries it: three times, two
+  seconds doubling, announced as `auto_retry_start` and `auto_retry_end`.
+  Every attempt is billed and in the ledger. An exhausted balance and an
+  overflow are never retried. `retry.enabled`, `retry.maxRetries` and
+  `retry.baseDelayMs` change it.
 - Thinking levels reach OpenAI and OpenRouter as well as DeepSeek. A level the
   model does not offer becomes the nearest one it does, and the run says so;
   without a recorded per-model mapping, `xhigh` and `max` land on `high`.

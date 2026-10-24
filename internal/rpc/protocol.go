@@ -59,6 +59,10 @@ type Command struct {
 	// Level is a thinking level, on `set_thinking_level`.
 	Level string `json:"level,omitempty"`
 
+	// Enabled switches a behaviour, on `set_auto_retry`. A pointer so a
+	// command that left it out is refused rather than read as false.
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// BashCommand is the shell text for `bash`; it is separate from Command,
 	// which names the RPC verb. Message is accepted as a compatibility alias
 	// by the dispatcher for callers that use prompt-shaped arguments.

@@ -73,6 +73,14 @@ type ThinkingHost interface {
 	SetThinkingLevel(ai.ThinkingLevel) (ai.ThinkingLevel, error)
 }
 
+// RetryHost is the optional automatic-retry capability of a Host.
+type RetryHost interface {
+	SetAutoRetry(enabled bool) error
+	// AbortRetry ends a retry wait in progress and reports whether there was
+	// one; the failure being waited on then stands.
+	AbortRetry() bool
+}
+
 // BashHost is the optional direct shell capability. The command runs outside
 // the agent turn, so the channel can keep reading abort_bash while it waits.
 type BashHost interface {
@@ -338,6 +346,22 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels":
 		return c.thinking(cmd, resp)
+
+	case "set_auto_retry", "abort_retry":
+		retry, ok := c.host.(RetryHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this session does not retry model calls")
+		}
+		if cmd.Command == "abort_retry" {
+			return okData(resp, map[string]any{"aborted": retry.AbortRetry()})
+		}
+		if cmd.Enabled == nil {
+			return fail(resp, FailBadArgument, "set_auto_retry needs enabled: true or false")
+		}
+		if err := retry.SetAutoRetry(*cmd.Enabled); err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"enabled": *cmd.Enabled})
 
 	case "bash":
 		return c.bash(ctx, cmd, resp)
@@ -722,6 +746,5 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 var pi = map[string]bool{
 	"set_steering_mode": true, "set_follow_up_mode": true,
 	"set_auto_compaction": true,
-	"set_auto_retry":      true, "abort_retry": true,
-	"export_html": true, "get_fork_messages": true,
+	"export_html":         true, "get_fork_messages": true,
 }

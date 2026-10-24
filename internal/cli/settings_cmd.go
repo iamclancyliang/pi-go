@@ -103,6 +103,56 @@ var settingKeys = []settingKey{
 			return nil
 		},
 	},
+	{
+		name: "retry.enabled", hint: "retry a model call that failed transiently (default true)",
+		get: func(s *settings.Settings) string {
+			if s.Retry.Enabled == nil {
+				return ""
+			}
+			return strconv.FormatBool(*s.Retry.Enabled)
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				s.Retry.Enabled = nil
+				return nil
+			}
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				return fmt.Errorf("retry.enabled takes true or false")
+			}
+			s.Retry.Enabled = &parsed
+			return nil
+		},
+	},
+	retryCount("retry.maxRetries", "retries after the first attempt (default 3)",
+		func(s *settings.Settings) **int { return &s.Retry.MaxRetries }),
+	retryCount("retry.baseDelayMs", "wait before the first retry, doubling after (default 2000)",
+		func(s *settings.Settings) **int { return &s.Retry.BaseDelayMs }),
+}
+
+// retryCount is a non-negative number setting that can also be unset.
+func retryCount(name, hint string, field func(*settings.Settings) **int) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string {
+			if *field(s) == nil {
+				return ""
+			}
+			return strconv.Itoa(**field(s))
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				*field(s) = nil
+				return nil
+			}
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed < 0 {
+				return fmt.Errorf("%s takes a non-negative number", name)
+			}
+			*field(s) = &parsed
+			return nil
+		},
+	}
 }
 
 type settingKey struct {

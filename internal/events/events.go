@@ -27,6 +27,14 @@ const (
 	// the session record.
 	KindModelChanged Kind = "model_changed"
 
+	// KindRetryStart and KindRetryEnd bracket an automatic retry of a model
+	// call that failed for a reason another attempt might survive. The start
+	// is announced before the wait, so a client can show why nothing is
+	// arriving; the end says whether a later attempt succeeded. Retrying
+	// happens inside the run, so the run itself never ends between attempts.
+	KindRetryStart Kind = "auto_retry_start"
+	KindRetryEnd   Kind = "auto_retry_end"
+
 	KindToolStart Kind = "tool_start"
 	KindToolEnd   Kind = "tool_end"
 	// KindToolResult is the RESULT becoming history, which is a different
@@ -96,6 +104,17 @@ type Detail struct {
 
 	// Reason explains a turn_end or agent_end ("stop", "error", "aborted").
 	Reason string `json:"reason,omitempty"`
+
+	// Attempt, MaxAttempts and DelayMs describe an auto_retry_start: which
+	// retry this is, how many are allowed, and how long the wait before it
+	// is. Attempt is also on auto_retry_end.
+	Attempt     int   `json:"attempt,omitempty"`
+	MaxAttempts int   `json:"max_attempts,omitempty"`
+	DelayMs     int64 `json:"delay_ms,omitempty"`
+
+	// Succeeded says how an auto_retry_end came out. A pointer, because
+	// "failed" must survive serialisation rather than vanish as a zero.
+	Succeeded *bool `json:"succeeded,omitempty"`
 }
 
 // Observer receives events as they are emitted.
@@ -129,6 +148,8 @@ func AllKinds() []Kind {
 		KindModelRequest,
 		KindModelResponse,
 		KindModelChanged,
+		KindRetryStart,
+		KindRetryEnd,
 		KindToolStart,
 		KindToolEnd,
 		KindToolResult,

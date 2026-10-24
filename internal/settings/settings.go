@@ -50,6 +50,32 @@ type Compaction struct {
 	KeepRecentTokens int `json:"keepRecentTokens,omitempty"`
 }
 
+// Retry is how a model call that failed transiently is tried again — Pi's
+// retry group. Each field is a pointer so "unset" stays distinct from a value
+// that happens to be the zero one: retrying switched off is not the same as
+// nobody having said.
+type Retry struct {
+	Enabled     *bool `json:"enabled,omitempty"`
+	MaxRetries  *int  `json:"maxRetries,omitempty"`
+	BaseDelayMs *int  `json:"baseDelayMs,omitempty"`
+}
+
+// Resolved is the policy these settings describe, with Pi's defaults for
+// whatever is unset: on, three retries, two seconds doubling.
+func (r Retry) Resolved() (enabled bool, maxRetries int, baseDelayMs int) {
+	enabled, maxRetries, baseDelayMs = true, 3, 2000
+	if r.Enabled != nil {
+		enabled = *r.Enabled
+	}
+	if r.MaxRetries != nil {
+		maxRetries = *r.MaxRetries
+	}
+	if r.BaseDelayMs != nil {
+		baseDelayMs = *r.BaseDelayMs
+	}
+	return enabled, maxRetries, baseDelayMs
+}
+
 // Settings are the preferences this build honours.
 type Settings struct {
 	// DefaultProvider and DefaultModel stand in for --provider and --model
@@ -83,6 +109,8 @@ type Settings struct {
 	DefaultProjectTrust DefaultProjectTrust `json:"defaultProjectTrust,omitempty"`
 
 	Compaction Compaction `json:"compaction,omitempty"`
+
+	Retry Retry `json:"retry,omitzero"`
 }
 
 // GlobalPath is where the global scope lives.
@@ -127,6 +155,12 @@ func (s Settings) validate(path string) error {
 	if s.Compaction.KeepRecentTokens < 0 {
 		return fmt.Errorf("settings: %s: compaction.keepRecentTokens is negative", path)
 	}
+	if s.Retry.MaxRetries != nil && *s.Retry.MaxRetries < 0 {
+		return fmt.Errorf("settings: %s: retry.maxRetries is negative", path)
+	}
+	if s.Retry.BaseDelayMs != nil && *s.Retry.BaseDelayMs < 0 {
+		return fmt.Errorf("settings: %s: retry.baseDelayMs is negative", path)
+	}
 	if s.DefaultThinkingLevel != "" {
 		if _, err := ai.ParseThinkingLevel(s.DefaultThinkingLevel); err != nil {
 			return fmt.Errorf("settings: %s: %w", path, err)
@@ -170,6 +204,15 @@ func Merge(global, project Settings) Settings {
 	// project choosing its own trust default is the project trusting itself.
 	if project.Compaction.KeepRecentTokens != 0 {
 		merged.Compaction.KeepRecentTokens = project.Compaction.KeepRecentTokens
+	}
+	if project.Retry.Enabled != nil {
+		merged.Retry.Enabled = project.Retry.Enabled
+	}
+	if project.Retry.MaxRetries != nil {
+		merged.Retry.MaxRetries = project.Retry.MaxRetries
+	}
+	if project.Retry.BaseDelayMs != nil {
+		merged.Retry.BaseDelayMs = project.Retry.BaseDelayMs
 	}
 	return merged
 }

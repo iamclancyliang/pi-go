@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/cli"
@@ -318,5 +319,38 @@ func TestRPCThinkingLevelReachesTheNextPromptAndIsRemembered(t *testing.T) {
 	}
 	if saved.DefaultThinkingLevel != "high" {
 		t.Fatalf("the default saved is %q", saved.DefaultThinkingLevel)
+	}
+}
+
+// TestUnsetRetrySettingsArePisDefaults, and a set value outranks them —
+// including switching retrying off, which a zero value could not say.
+func TestUnsetRetrySettingsArePisDefaults(t *testing.T) {
+	policy := cli.RetryPolicy(settings.Settings{})
+	if !policy.Enabled || policy.MaxRetries != 3 || policy.BaseDelay != 2*time.Second {
+		t.Fatalf("unset settings resolved to %+v", policy)
+	}
+	off, one := false, 1
+	policy = cli.RetryPolicy(settings.Settings{Retry: settings.Retry{Enabled: &off, MaxRetries: &one}})
+	if policy.Enabled || policy.MaxRetries != 1 {
+		t.Fatalf("set values resolved to %+v", policy)
+	}
+}
+
+// TestRPCSetAutoRetryIsRemembered, as Pi remembers it.
+func TestRPCSetAutoRetryIsRemembered(t *testing.T) {
+	rt := runtimeFor(t, scripted("ok"))
+	rt.Config.AgentDir = t.TempDir()
+	rt.Retry = cli.RetryPolicy(settings.Settings{})
+
+	got := runRPCWith(t, rt, `{"id":"1","command":"set_auto_retry","enabled":false}`)
+	if len(got) != 1 || got[0]["ok"] != true {
+		t.Fatalf("set_auto_retry failed: %v", got)
+	}
+	saved, err := settings.Load(settings.GlobalPath(rt.Config.AgentDir))
+	if err != nil {
+		t.Fatalf("reading saved settings: %v", err)
+	}
+	if saved.Retry.Enabled == nil || *saved.Retry.Enabled {
+		t.Fatalf("retry.enabled saved as %v", saved.Retry.Enabled)
 	}
 }
