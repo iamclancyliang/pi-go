@@ -232,6 +232,25 @@ type Projection struct {
 	Complete bool
 }
 
+// SummaryMessage is how a compaction's summary reaches the model: a user
+// message that says what it is, worded as Pi words it
+// (COMPACTION_SUMMARY_PREFIX and _SUFFIX, packages/coding-agent/src/core/
+// messages.ts at the pin).
+//
+// A user message rather than a system one, as in Pi, for two reasons. The
+// summary is content about the conversation, not an instruction about the
+// assistant. And what is kept after it may begin with an assistant reply — a
+// compaction can cut inside a turn — which several providers refuse unless a
+// user message comes before it.
+func SummaryMessage(summary string) ai.Message {
+	return ai.Message{Role: ai.RoleUser, Content: summaryPrefix + summary + summarySuffix}
+}
+
+const (
+	summaryPrefix = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
+	summarySuffix = "\n</summary>"
+)
+
 // Project returns what one model call gets to see.
 //
 // Without a checkpoint this is complete history, losing nothing. With one it is
@@ -252,10 +271,7 @@ func (s *Session) Project() Projection {
 	// context the compaction existed to shorten, so the conversation would keep
 	// paying for history it has already summarised.
 	if s.checkpoint != nil {
-		out = append(out, ai.Message{
-			Role:    ai.RoleSystem,
-			Content: s.checkpoint.Summary,
-		})
+		out = append(out, SummaryMessage(s.checkpoint.Summary))
 		out = append(out, projectMessages(s.checkpoint.RetainedTail)...)
 		out = append(out, projectMessages(s.sinceCheckpoint)...)
 

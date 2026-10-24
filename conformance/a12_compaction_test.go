@@ -61,7 +61,7 @@ func TestA12CompactionProjectsSummaryAndTail(t *testing.T) {
 		}
 
 		got := contentsOf(projection.Messages)
-		want := []string{"You are pi-go.", "SUMMARY-OF-OLD", "RECENT-ONE", "RECENT-TWO", "AFTER"}
+		want := []string{"You are pi-go.", session.SummaryMessage("SUMMARY-OF-OLD").Content, "RECENT-ONE", "RECENT-TWO", "AFTER"}
 		if !equal(got, want) {
 			t.Errorf("projection = %v, want %v", got, want)
 		}
@@ -177,7 +177,7 @@ func TestA12CompactionSurvivesACrashEitherSide(t *testing.T) {
 			t.Fatalf("Restore: %v", err)
 		}
 		got := contentsOf(reopened.Project().Messages)
-		want := []string{"You are pi-go.", "SUMMARY-OF-OLD", "RECENT-ONE", "RECENT-TWO"}
+		want := []string{"You are pi-go.", session.SummaryMessage("SUMMARY-OF-OLD").Content, "RECENT-ONE", "RECENT-TWO"}
 		if !equal(got, want) {
 			t.Errorf("projection after a crash following publication = %v, want the "+
 				"summary with its complete tail %v", got, want)

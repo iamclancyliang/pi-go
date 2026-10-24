@@ -245,3 +245,34 @@ func TestReadingHistoryCannotRewriteIt(t *testing.T) {
 		})
 	}
 }
+
+// TestASummaryReachesTheModelAsAUserMessageThatSaysWhatItIs, worded as Pi
+// words it. As a system message it would leave a kept part that begins with
+// an assistant reply — a compaction that cut inside a turn — with no user
+// message before it, which several providers refuse.
+func TestASummaryReachesTheModelAsAUserMessageThatSaysWhatItIs(t *testing.T) {
+	s := New("you are pi-go")
+	if err := s.Append(ai.Message{Role: ai.RoleUser, Content: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	kept := []ai.Message{{Role: ai.RoleAssistant, ToolCalls: []ai.ToolCall{{ID: "c1", Name: "read", Args: "{}"}}}}
+	if err := s.Compact("the summary", kept); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.Project().Messages
+	if len(got) < 3 {
+		t.Fatalf("projection %v", got)
+	}
+	summary := got[1]
+	if summary.Role != ai.RoleUser {
+		t.Fatalf("the summary is projected as %q", summary.Role)
+	}
+	if !strings.HasPrefix(summary.Content, "The conversation history before this point was compacted into the following summary:\n\n<summary>\nthe summary") ||
+		!strings.HasSuffix(summary.Content, "\n</summary>") {
+		t.Fatalf("the summary does not say what it is: %q", summary.Content)
+	}
+	if got[2].Role != ai.RoleAssistant {
+		t.Fatalf("the kept reply did not follow the summary: %v", got[2])
+	}
+}
