@@ -406,6 +406,12 @@ func decodeCSI(raw []byte, kitty bool) (Key, int, bool) {
 			}
 			return Key{}, consumed, true
 		}
+		if body == "13;2" {
+			// Some terminals send shift+enter as a shifted F3 code; Pi's editor
+			// takes exactly these bytes for a new line, and no key here is F3
+			// with shift.
+			return named("shift+enter"), consumed, true
+		}
 		num, rest, _ := strings.Cut(body, ";")
 		modPart, ev, _ := strings.Cut(rest, ":")
 		mod := 0

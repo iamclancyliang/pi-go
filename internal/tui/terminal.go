@@ -16,7 +16,7 @@ import (
 // questions.
 type Prompter struct {
 	tty    *os.File
-	editor *Editor
+	editor *LineEditor
 }
 
 // NewPrompter opens the controlling terminal.
@@ -28,7 +28,7 @@ func NewPrompter(history []string) (*Prompter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tui: no terminal to edit in: %w", err)
 	}
-	return &Prompter{tty: tty, editor: NewEditor(history)}, nil
+	return &Prompter{tty: tty, editor: NewLineEditor(history)}, nil
 }
 
 // Close releases the terminal.

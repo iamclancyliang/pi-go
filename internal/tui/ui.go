@@ -199,6 +199,13 @@ func (u *UI) RequestRender() {
 	})
 }
 
+// Rows is the terminal's height, which components such as the editor size
+// themselves by.
+func (u *UI) Rows() int {
+	_, height := u.term.Size()
+	return height
+}
+
 // RenderNow draws a frame on the loop at once, redrawing everything when
 // force is set.
 func (u *UI) RenderNow(force bool) {
