@@ -35,6 +35,13 @@ const (
 	KindRetryStart Kind = "auto_retry_start"
 	KindRetryEnd   Kind = "auto_retry_end"
 
+	// KindCompactionStart and KindCompactionEnd bracket a compaction the
+	// runtime decided on: Reason is "overflow" when a request was refused for
+	// size, "threshold" when a run ended with the context close to the
+	// model's window. An end carrying Err did not compact.
+	KindCompactionStart Kind = "compaction_start"
+	KindCompactionEnd   Kind = "compaction_end"
+
 	KindToolStart Kind = "tool_start"
 	KindToolEnd   Kind = "tool_end"
 	// KindToolResult is the RESULT becoming history, which is a different
@@ -150,6 +157,8 @@ func AllKinds() []Kind {
 		KindModelChanged,
 		KindRetryStart,
 		KindRetryEnd,
+		KindCompactionStart,
+		KindCompactionEnd,
 		KindToolStart,
 		KindToolEnd,
 		KindToolResult,

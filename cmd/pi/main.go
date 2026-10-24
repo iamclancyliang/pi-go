@@ -113,19 +113,20 @@ func run(argv []string) int {
 	defer conversation.Close()
 
 	rt := cli.Runtime{
-		Model:         port,
-		ModelName:     model,
-		Tools:         registry,
-		System:        system,
-		Provider:      providerName,
-		Conversation:  conversation,
-		Thinking:      thinking,
-		Retry:         cli.RetryPolicy(cfg.Effective),
-		ModelPatterns: args.Models,
-		Args:          args,
-		WorkingDir:    root,
-		Transport:     http.DefaultTransport,
-		Config:        cfg,
+		Model:          port,
+		ModelName:      model,
+		Tools:          registry,
+		System:         system,
+		Provider:       providerName,
+		Conversation:   conversation,
+		Thinking:       thinking,
+		Retry:          cli.RetryPolicy(cfg.Effective),
+		AutoCompaction: cli.AutoCompactionPolicy(cfg.Effective),
+		ModelPatterns:  args.Models,
+		Args:           args,
+		WorkingDir:     root,
+		Transport:      http.DefaultTransport,
+		Config:         cfg,
 	}
 
 	if mode == cli.AppInteractive {

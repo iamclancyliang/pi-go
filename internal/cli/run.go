@@ -83,6 +83,12 @@ type Runtime struct {
 	// the composition root fills it from settings with RetryPolicy.
 	Retry runtime.RetryPolicy
 
+	// AutoCompaction is whether and with how much reserve to compact before
+	// the context overflows. Its window is filled per model as each agent is
+	// built, from what is recorded about that model; zero values compact
+	// nothing, and AutoCompactionPolicy fills it from settings.
+	AutoCompaction runtime.AutoCompaction
+
 	// ScopedModels limits model cycling when a caller has selected an explicit
 	// ordered set. An empty set means cycle through the provider's reported
 	// listing. The full-screen scope editor is a separate interface feature.
@@ -126,12 +132,13 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 	}
 	sess := rt.Conversation.Session
 	agent, err := runtime.New(runtime.Config{
-		Model:     rt.Model,
-		ModelName: rt.ModelName,
-		Tools:     rt.Tools,
-		Session:   sess,
-		Thinking:  rt.Thinking,
-		Retry:     rt.Retry,
+		Model:          rt.Model,
+		ModelName:      rt.ModelName,
+		Tools:          rt.Tools,
+		Session:        sess,
+		Thinking:       rt.Thinking,
+		Retry:          rt.Retry,
+		AutoCompaction: autoCompactionFor(rt.AutoCompaction, rt.Provider, rt.ModelName),
 		// A one-shot can overflow too, and a refusal with no recovery is a
 		// failed run where a shortened context would have answered.
 		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
@@ -188,13 +195,14 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 
 	sess := rt.Conversation.Session
 	agent, err := runtime.New(runtime.Config{
-		Model:     rt.Model,
-		ModelName: rt.ModelName,
-		Tools:     rt.Tools,
-		Session:   sess,
-		Thinking:  rt.Thinking,
-		Retry:     rt.Retry,
-		Summarize: (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
+		Model:          rt.Model,
+		ModelName:      rt.ModelName,
+		Tools:          rt.Tools,
+		Session:        sess,
+		Thinking:       rt.Thinking,
+		Retry:          rt.Retry,
+		AutoCompaction: autoCompactionFor(rt.AutoCompaction, rt.Provider, rt.ModelName),
+		Summarize:      (&compaction.Compactor{Model: rt.Model, ModelName: rt.ModelName}).Summarize,
 		// The writer is both observers, which is the wiring the shared
 		// counter exists for: one consumer, two families, one order.
 		Observers:      []events.Observer{writer},
@@ -263,6 +271,7 @@ func (h *rpcHost) build() error {
 		Session:        h.current.Session,
 		Thinking:       requestThinking(h.prov, h.model, h.rt.Thinking),
 		Retry:          h.rt.Retry,
+		AutoCompaction: autoCompactionFor(h.rt.AutoCompaction, h.prov, h.model),
 		Summarize:      (&compaction.Compactor{Model: h.port, ModelName: h.model}).Summarize,
 		Observers:      []events.Observer{h.writer},
 		ReplyObservers: []runtime.ReplyObserver{h.writer},
@@ -491,6 +500,47 @@ func (h *rpcHost) AbortRetry() bool {
 	return agent.AbortRetry()
 }
 
+// AutoCompactionPolicy is the threshold compaction settings describe: on
+// unless switched off, as in Pi.
+func AutoCompactionPolicy(s settings.Settings) runtime.AutoCompaction {
+	enabled := s.Compaction.Enabled == nil || *s.Compaction.Enabled
+	return runtime.AutoCompaction{Enabled: enabled, ReserveTokens: s.Compaction.ReserveTokens}
+}
+
+// autoCompactionFor is a policy with the window of the model it is for. A
+// model with no recorded window gets none, which leaves the threshold off for
+// it: guessing would compact conversations nowhere near a limit.
+func autoCompactionFor(policy runtime.AutoCompaction, provider, model string) runtime.AutoCompaction {
+	facts, _ := ai.Facts(provider, model)
+	policy.ContextWindow = facts.ContextWindow
+	return policy
+}
+
+// SetAutoCompaction switches compacting before an overflow, from the next
+// run's end, and remembers the choice for later runs as Pi does. Recovering
+// from an overflow stays on either way.
+func (h *rpcHost) SetAutoCompaction(enabled bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.rt.AutoCompaction.Enabled = enabled
+	h.agent.SetAutoCompaction(enabled)
+	if h.rt.Config.AgentDir == "" {
+		return nil
+	}
+	h.rt.Config.Global.Compaction.Enabled = &enabled
+	if err := settings.Save(settings.GlobalPath(h.rt.Config.AgentDir), h.rt.Config.Global); err != nil {
+		return fmt.Errorf("the change is in effect, but saving it failed: %w", err)
+	}
+	return nil
+}
+
+// AutoCompactionEnabled reports whether compacting before an overflow is on.
+func (h *rpcHost) AutoCompactionEnabled() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rt.AutoCompaction.Enabled
+}
+
 // RetryPolicy is the retry policy settings describe, Pi's defaults filling
 // whatever is unset.
 func RetryPolicy(s settings.Settings) runtime.RetryPolicy {
@@ -673,12 +723,13 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	var agent *runtime.Agent
 	build := func() error {
 		next, err := runtime.New(runtime.Config{
-			Model:     port,
-			ModelName: modelName,
-			Tools:     rt.Tools,
-			Session:   current.Session,
-			Thinking:  rt.Thinking,
-			Retry:     rt.Retry,
+			Model:          port,
+			ModelName:      modelName,
+			Tools:          rt.Tools,
+			Session:        current.Session,
+			Thinking:       rt.Thinking,
+			Retry:          rt.Retry,
+			AutoCompaction: autoCompactionFor(rt.AutoCompaction, provider, modelName),
 			// The same summariser /compact uses. Without it an overflow is
 			// terminal: the request is refused, and a conversation long enough
 			// to overflow once will do it again on every turn after.

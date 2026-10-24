@@ -104,6 +104,48 @@ var settingKeys = []settingKey{
 		},
 	},
 	{
+		name: "compaction.enabled", hint: "compact before the context overflows (default true)",
+		get: func(s *settings.Settings) string {
+			if s.Compaction.Enabled == nil {
+				return ""
+			}
+			return strconv.FormatBool(*s.Compaction.Enabled)
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				s.Compaction.Enabled = nil
+				return nil
+			}
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				return fmt.Errorf("compaction.enabled takes true or false")
+			}
+			s.Compaction.Enabled = &parsed
+			return nil
+		},
+	},
+	{
+		name: "compaction.reserveTokens", hint: "room kept for the next reply before compacting (default 16384)",
+		get: func(s *settings.Settings) string {
+			if s.Compaction.ReserveTokens == 0 {
+				return ""
+			}
+			return strconv.Itoa(s.Compaction.ReserveTokens)
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				s.Compaction.ReserveTokens = 0
+				return nil
+			}
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed < 0 {
+				return fmt.Errorf("compaction.reserveTokens takes a non-negative number")
+			}
+			s.Compaction.ReserveTokens = parsed
+			return nil
+		},
+	},
+	{
 		name: "retry.enabled", hint: "retry a model call that failed transiently (default true)",
 		get: func(s *settings.Settings) string {
 			if s.Retry.Enabled == nil {

@@ -48,6 +48,12 @@ const (
 // Compaction bounds what /compact and overflow recovery keep verbatim.
 type Compaction struct {
 	KeepRecentTokens int `json:"keepRecentTokens,omitempty"`
+
+	// Enabled switches compacting before the context overflows, once a run
+	// leaves it within ReserveTokens of the model's window. Unset means on,
+	// as in Pi. Recovering from an overflow is not governed by it.
+	Enabled       *bool `json:"enabled,omitempty"`
+	ReserveTokens int   `json:"reserveTokens,omitempty"`
 }
 
 // Retry is how a model call that failed transiently is tried again — Pi's
@@ -155,6 +161,9 @@ func (s Settings) validate(path string) error {
 	if s.Compaction.KeepRecentTokens < 0 {
 		return fmt.Errorf("settings: %s: compaction.keepRecentTokens is negative", path)
 	}
+	if s.Compaction.ReserveTokens < 0 {
+		return fmt.Errorf("settings: %s: compaction.reserveTokens is negative", path)
+	}
 	if s.Retry.MaxRetries != nil && *s.Retry.MaxRetries < 0 {
 		return fmt.Errorf("settings: %s: retry.maxRetries is negative", path)
 	}
@@ -204,6 +213,12 @@ func Merge(global, project Settings) Settings {
 	// project choosing its own trust default is the project trusting itself.
 	if project.Compaction.KeepRecentTokens != 0 {
 		merged.Compaction.KeepRecentTokens = project.Compaction.KeepRecentTokens
+	}
+	if project.Compaction.Enabled != nil {
+		merged.Compaction.Enabled = project.Compaction.Enabled
+	}
+	if project.Compaction.ReserveTokens != 0 {
+		merged.Compaction.ReserveTokens = project.Compaction.ReserveTokens
 	}
 	if project.Retry.Enabled != nil {
 		merged.Retry.Enabled = project.Retry.Enabled

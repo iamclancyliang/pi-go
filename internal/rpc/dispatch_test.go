@@ -818,3 +818,32 @@ func TestSetAutoRetryWithoutAValueIsABadArgument(t *testing.T) {
 		t.Fatalf("set_auto_retry with no value answered %+v and left retrying %v", resp, host.enabled)
 	}
 }
+
+type compactionFakeHost struct {
+	*fakeHost
+	enabled bool
+}
+
+func (h *compactionFakeHost) SetAutoCompaction(enabled bool) error { h.enabled = enabled; return nil }
+func (h *compactionFakeHost) AutoCompactionEnabled() bool          { return h.enabled }
+
+// TestAutoCompactionCanBeSwitchedAndIsInTheState, as Pi's
+// autoCompactionEnabled is.
+func TestAutoCompactionCanBeSwitchedAndIsInTheState(t *testing.T) {
+	host := &compactionFakeHost{fakeHost: &fakeHost{sess: session.New("You are pi-go.")}, enabled: true}
+	c := NewChannel(host)
+
+	off := false
+	resp := dispatch(c, Command{ID: "1", Command: "set_auto_compaction", Enabled: &off})
+	if !resp.OK || host.enabled {
+		t.Fatalf("set_auto_compaction false answered %+v and left it %v", resp, host.enabled)
+	}
+	var state stateData
+	decode(t, dispatch(c, Command{ID: "2", Command: "get_state"}), &state)
+	if state.AutoCompaction == nil || *state.AutoCompaction {
+		t.Fatalf("get_state reports auto_compaction %v", state.AutoCompaction)
+	}
+	if bad := dispatch(c, Command{ID: "3", Command: "set_auto_compaction"}); bad.OK || bad.Error.Kind != FailBadArgument {
+		t.Fatalf("set_auto_compaction with no value answered %+v", bad)
+	}
+}

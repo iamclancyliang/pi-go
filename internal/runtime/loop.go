@@ -56,6 +56,11 @@ type Config struct {
 	// zero value retries nothing; SetAutoRetry switches it during a run.
 	Retry RetryPolicy
 
+	// AutoCompaction compacts after a run that left the context close to the
+	// model's window. The zero value never does; overflow recovery does not
+	// depend on it.
+	AutoCompaction AutoCompaction
+
 	// Tools is the tool registration seam. Required, may be empty.
 	Tools *tools.Registry
 
@@ -112,6 +117,10 @@ type Agent struct {
 	thinking   ai.ThinkingLevel
 
 	retry *retrier
+
+	compactMu   sync.Mutex
+	compact     AutoCompaction
+	lastContext int
 }
 
 // New builds an Agent.
@@ -134,6 +143,7 @@ func New(cfg Config) (*Agent, error) {
 		state:    NewStateNamespace(),
 		thinking: cfg.Thinking,
 		retry:    &retrier{policy: cfg.Retry},
+		compact:  cfg.AutoCompaction,
 	}, nil
 }
 
@@ -340,6 +350,13 @@ func (r *Run) Wait() error {
 			e.Detail.Err = exitErr.Error()
 		}
 	})
+	// After the ending, as in Pi: the run's outcome is settled and reported
+	// first, and only a run that ended normally is followed by compaction —
+	// an aborted one was stopped on purpose, and a failed one is the caller's
+	// to look at before anything rewrites what the model will see.
+	if reason == "stop" {
+		r.agent.compactIfNearTheWindow(r.ctx)
+	}
 	return exitErr
 }
 
@@ -364,6 +381,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		sequentialFor: a.sequentialFor,
 		summarize:     a.cfg.Summarize,
 		retry:         a.retry,
+		noteContext:   a.noteContext,
 	}
 
 	einoTools, err := a.einoTools(batch)
@@ -638,6 +656,11 @@ type observingPort struct {
 	// reaches a run already in flight. Nil retries nothing.
 	retry *retrier
 
+	// noteContext receives the usage of every reply that arrived whole, which
+	// is what the agent measures the threshold compaction against. Nil
+	// measures nothing.
+	noteContext func(ai.Usage)
+
 	// failed is why recovery could not be attempted, when that is a different
 	// failure from the one being recovered from.
 	failedMu sync.Mutex
@@ -853,6 +876,9 @@ func (o *observingPort) Generate(ctx context.Context, req ai.Request) (ai.Respon
 		o.session.RecordUsage(earlier)
 	}
 	o.session.RecordUsage(resp.Usage)
+	if o.noteContext != nil {
+		o.noteContext(resp.Usage)
+	}
 
 	// The reply is recorded before it is acted on. A reply that was answered
 	// but never recorded leaves the tool calls that follow it referring to a
@@ -1233,11 +1259,20 @@ func (o *observingPort) shortenForRetry(ctx context.Context, req ai.Request,
 		return nil, nil
 	}
 
+	o.emitter.emit(events.KindCompactionStart, func(e *events.Event) { e.Detail.Reason = "overflow" })
 	summary, retained, err := o.summarize(ctx, o.session.Truth())
 	if err != nil {
-		return nil, fmt.Errorf("runtime: shortening the context: %w", err)
+		err = fmt.Errorf("runtime: shortening the context: %w", err)
+	} else {
+		err = o.session.Compact(summary, retained)
 	}
-	if err := o.session.Compact(summary, retained); err != nil {
+	o.emitter.emit(events.KindCompactionEnd, func(e *events.Event) {
+		e.Detail.Reason = "overflow"
+		if err != nil {
+			e.Detail.Err = err.Error()
+		}
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -1299,6 +1334,9 @@ func (o *observingPort) observeTerminal(ctx context.Context, event ai.StreamEven
 	// the model did not finish would leave history asserting something was said.
 	if event.Kind != ai.StreamDone {
 		return nil
+	}
+	if o.noteContext != nil {
+		o.noteContext(final.Usage)
 	}
 
 	// Recorded before it is acted on, exactly as a whole answer is: tool calls

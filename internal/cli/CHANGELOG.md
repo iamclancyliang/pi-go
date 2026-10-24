@@ -28,7 +28,8 @@ file carries what a person upgrading would want to know.
   `bash` and `abort_bash`, and the thinking level is set, cycled and listed
   with `set_thinking_level`, `cycle_thinking_level` and
   `get_available_thinking_levels`; retrying is switched with `set_auto_retry`
-  and a wait cut short with `abort_retry`. Twenty-seven of Pi's commands
+  and a wait cut short with `abort_retry`, and compacting before an overflow
+  is switched with `set_auto_compaction`. Twenty-eight of Pi's commands
   answer; the rest fail with a typed reason that says whether they are
   unknown or not yet built.
 - A model call that fails for a reason another attempt might survive — a
@@ -64,7 +65,10 @@ file carries what a person upgrading would want to know.
   provider that words it the way pi has recorded, not only from the providers
   whose own messages were measured. A single long turn — one question and
   many rounds of tool work — can be compacted too: the cut lands inside it,
-  and the part dropped is summarised on its own.
+  and the part dropped is summarised on its own. A run that leaves the
+  context within `compaction.reserveTokens` (16384) of a model's recorded
+  window is compacted when it ends, before the next request can overflow;
+  `compaction.enabled` switches that off, and leaves overflow recovery on.
 
 ### The session
 - Slash commands: `/help`, `/session`, `/name`, `/export`, `/import`, `/copy`,

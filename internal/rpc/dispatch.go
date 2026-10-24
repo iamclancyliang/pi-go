@@ -73,6 +73,13 @@ type ThinkingHost interface {
 	SetThinkingLevel(ai.ThinkingLevel) (ai.ThinkingLevel, error)
 }
 
+// CompactionHost is the optional switch for compacting before an overflow.
+// Recovering from an overflow is not governed by it.
+type CompactionHost interface {
+	SetAutoCompaction(enabled bool) error
+	AutoCompactionEnabled() bool
+}
+
 // RetryHost is the optional automatic-retry capability of a Host.
 type RetryHost interface {
 	SetAutoRetry(enabled bool) error
@@ -170,6 +177,9 @@ type stateData struct {
 	// ThinkingLevel is the level the next model request asks for. Empty when
 	// the host has no thinking control.
 	ThinkingLevel ai.ThinkingLevel `json:"thinking_level,omitempty"`
+	// AutoCompaction says whether the conversation is compacted before it
+	// overflows; absent when the host has no such switch.
+	AutoCompaction *bool `json:"auto_compaction,omitempty"`
 }
 
 // statsData is the get_session_stats payload. Token counts keep the ledger's
@@ -249,6 +259,10 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		}
 		if thinking, ok := c.host.(ThinkingHost); ok {
 			state.ThinkingLevel = thinking.ThinkingLevel()
+		}
+		if compacting, ok := c.host.(CompactionHost); ok {
+			enabled := compacting.AutoCompactionEnabled()
+			state.AutoCompaction = &enabled
 		}
 		return okData(resp, state)
 
@@ -346,6 +360,19 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels":
 		return c.thinking(cmd, resp)
+
+	case "set_auto_compaction":
+		compacting, ok := c.host.(CompactionHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this session has no automatic compaction to switch")
+		}
+		if cmd.Enabled == nil {
+			return fail(resp, FailBadArgument, "set_auto_compaction needs enabled: true or false")
+		}
+		if err := compacting.SetAutoCompaction(*cmd.Enabled); err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"enabled": *cmd.Enabled})
 
 	case "set_auto_retry", "abort_retry":
 		retry, ok := c.host.(RetryHost)
@@ -745,6 +772,5 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
 	"set_steering_mode": true, "set_follow_up_mode": true,
-	"set_auto_compaction": true,
-	"export_html":         true, "get_fork_messages": true,
+	"export_html": true, "get_fork_messages": true,
 }

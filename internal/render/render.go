@@ -34,6 +34,13 @@ func Event(e events.Event) (string, bool) {
 		return fmt.Sprintf("model=%s text=%q", e.Detail.Model, e.Detail.Text), true
 	case events.KindModelChanged:
 		return fmt.Sprintf("%s -> %s", e.Detail.From, e.Detail.To), true
+	case events.KindCompactionStart:
+		return fmt.Sprintf("reason=%s", e.Detail.Reason), true
+	case events.KindCompactionEnd:
+		if e.Detail.Err != "" {
+			return fmt.Sprintf("reason=%s err=%s", e.Detail.Reason, e.Detail.Err), true
+		}
+		return fmt.Sprintf("reason=%s", e.Detail.Reason), true
 	case events.KindRetryStart:
 		return fmt.Sprintf("attempt=%d/%d delay=%dms err=%s",
 			e.Detail.Attempt, e.Detail.MaxAttempts, e.Detail.DelayMs, e.Detail.Err), true

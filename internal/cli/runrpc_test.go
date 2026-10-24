@@ -354,3 +354,36 @@ func TestRPCSetAutoRetryIsRemembered(t *testing.T) {
 		t.Fatalf("retry.enabled saved as %v", saved.Retry.Enabled)
 	}
 }
+
+// TestCompactingBeforeAnOverflowIsOnUnlessSwitchedOff, as in Pi.
+func TestCompactingBeforeAnOverflowIsOnUnlessSwitchedOff(t *testing.T) {
+	if !cli.AutoCompactionPolicy(settings.Settings{}).Enabled {
+		t.Fatal("unset settings left threshold compaction off")
+	}
+	off := false
+	policy := cli.AutoCompactionPolicy(settings.Settings{Compaction: settings.Compaction{Enabled: &off, ReserveTokens: 500}})
+	if policy.Enabled || policy.ReserveTokens != 500 {
+		t.Fatalf("set values resolved to %+v", policy)
+	}
+}
+
+// TestRPCSetAutoCompactionIsRememberedAndReported.
+func TestRPCSetAutoCompactionIsRememberedAndReported(t *testing.T) {
+	rt := runtimeFor(t, scripted("ok"))
+	rt.Config.AgentDir = t.TempDir()
+	rt.AutoCompaction = cli.AutoCompactionPolicy(settings.Settings{})
+
+	got := runRPCWith(t, rt,
+		`{"id":"1","command":"set_auto_compaction","enabled":false}`,
+		`{"id":"2","command":"get_state"}`)
+	if len(got) != 2 || got[0]["ok"] != true {
+		t.Fatalf("responses %v", got)
+	}
+	if data, _ := got[1]["data"].(map[string]any); data["auto_compaction"] != false {
+		t.Fatalf("get_state reports %v", got[1]["data"])
+	}
+	saved, err := settings.Load(settings.GlobalPath(rt.Config.AgentDir))
+	if err != nil || saved.Compaction.Enabled == nil || *saved.Compaction.Enabled {
+		t.Fatalf("compaction.enabled saved as %v (%v)", saved.Compaction.Enabled, err)
+	}
+}
