@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -49,5 +50,33 @@ func TestTheRealTerminalStartsDrawsAndRestores(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the interface did not stop")
+	}
+}
+
+// TestTheKeyboardProtocolFollowsTheTerminalsAnswer, written where a terminal
+// would read it: modifyOtherKeys for a terminal that answers only the
+// sentinel, then off again if a Kitty answer follows, and the protocol popped
+// on the way out.
+func TestTheKeyboardProtocolFollowsTheTerminalsAnswer(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	tty := &TTY{file: w, kittyPushed: true}
+
+	tty.HandleReport("device-attributes")
+	tty.HandleReport("device-attributes")
+	tty.HandleReport("kitty:7")
+	if !tty.KittyActive() {
+		t.Fatal("a Kitty answer did not turn the protocol on")
+	}
+	tty.HandleReport("device-attributes") // late sentinel: Kitty stays
+	_ = tty.Stop()
+	w.Close()
+	written, _ := io.ReadAll(r)
+	want := "\x1b[>4;2m" + "\x1b[>4;0m" + "\x1b[?2004l" + "\x1b[<u"
+	if string(written) != want {
+		t.Fatalf("wrote %q, want %q", written, want)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,12 @@ type TTY struct {
 	stopping  bool
 	readDone  chan struct{}
 	stopWatch func()
+
+	// The keyboard protocol in force: Kitty's when the terminal answered
+	// the query, xterm's modifyOtherKeys when it said it does not speak it.
+	kittyPushed     bool
+	kittyActive     bool
+	modifyOtherKeys bool
 }
 
 // OpenTTY opens the controlling terminal.
@@ -44,6 +51,18 @@ func (t *TTY) Start(onInput func([]byte), onResize func()) error {
 	if _, err := t.file.WriteString("\x1b[?2004h"); err != nil {
 		_ = term.Restore(fd, previous)
 		return fmt.Errorf("tui: %w", err)
+	}
+	// Ask for the Kitty keyboard protocol, as Pi does: push the flags
+	// wanted — disambiguated escapes, event types, alternate keys — then
+	// query them, then send a device-attributes query as a sentinel. A
+	// terminal that knows the protocol answers the query; one that does not
+	// answers only the sentinel, and gets modifyOtherKeys instead. Either way
+	// there is no wait: the answers arrive as input and HandleReport acts on
+	// them.
+	if _, err := t.file.WriteString("\x1b[>7u\x1b[?u\x1b[c"); err == nil {
+		t.mu.Lock()
+		t.kittyPushed = true
+		t.mu.Unlock()
 	}
 	t.stopWatch = watchResize(onResize)
 	t.readDone = make(chan struct{})
@@ -96,6 +115,16 @@ func (t *TTY) Stop() error {
 		t.stopWatch()
 	}
 	_, _ = t.file.WriteString("\x1b[?2004l")
+	t.mu.Lock()
+	if t.kittyPushed || t.kittyActive {
+		_, _ = t.file.WriteString("\x1b[<u")
+		t.kittyPushed, t.kittyActive = false, false
+	}
+	if t.modifyOtherKeys {
+		_, _ = t.file.WriteString("\x1b[>4;0m")
+		t.modifyOtherKeys = false
+	}
+	t.mu.Unlock()
 	if t.readDone != nil {
 		select {
 		case <-t.readDone:
@@ -108,6 +137,44 @@ func (t *TTY) Stop() error {
 		}
 	}
 	return nil
+}
+
+// KittyActive reports whether the terminal answered with the Kitty keyboard
+// protocol on, which changes how two legacy sequences decode.
+func (t *TTY) KittyActive() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.kittyActive
+}
+
+// HandleReport acts on the terminal's answers to the keyboard protocol query.
+func (t *TTY) HandleReport(report string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case report == "device-attributes":
+		if !t.kittyActive {
+			t.enableModifyOtherKeysLocked()
+		}
+	case strings.HasPrefix(report, "kitty:"):
+		if strings.TrimPrefix(report, "kitty:") != "0" {
+			if t.modifyOtherKeys {
+				_, _ = t.file.WriteString("\x1b[>4;0m")
+				t.modifyOtherKeys = false
+			}
+			t.kittyActive = true
+		} else {
+			t.enableModifyOtherKeysLocked()
+		}
+	}
+}
+
+func (t *TTY) enableModifyOtherKeysLocked() {
+	if t.kittyActive || t.modifyOtherKeys {
+		return
+	}
+	_, _ = t.file.WriteString("\x1b[>4;2m")
+	t.modifyOtherKeys = true
 }
 
 // Close releases the terminal. Stop first.

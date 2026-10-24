@@ -772,7 +772,7 @@ func TestReloadSaysWhatOnlyANewRunPicksUp(t *testing.T) {
 // here without anyone remembering the help.
 func TestHotkeysListsTheBindingTable(t *testing.T) {
 	out, _ := interactive(t, cli.Args{NoSession: true}, t.TempDir(), "/hotkeys")
-	for _, want := range []string{"ctrl+w", "ctrl+y", "ctrl+j", "Delete word backward", "Send the prompt"} {
+	for _, want := range []string{"ctrl+w", "ctrl+y", "ctrl+j", "Delete word backward", "Submit input"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("/hotkeys does not show %q:\n%s", want, out)
 		}

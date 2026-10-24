@@ -273,3 +273,45 @@ func TestTheEscapeTimeoutFollowsPi(t *testing.T) {
 		}
 	}
 }
+
+// protocolTerm is a fakeTerm that negotiates.
+type protocolTerm struct {
+	*fakeTerm
+	kitty   bool
+	reports []string
+}
+
+func (p *protocolTerm) KittyActive() bool { return p.kitty }
+func (p *protocolTerm) HandleReport(r string) {
+	p.reports = append(p.reports, r)
+	if r == "kitty:7" {
+		p.kitty = true
+	}
+}
+
+// TestProtocolRepliesGoToTheTerminalAndChangeDecoding. The terminal's answer
+// arrives among the keystrokes; delivered as one, it would type its bytes.
+// Once Kitty's protocol is on, a line feed is shift+enter, as Pi reads it.
+func TestProtocolRepliesGoToTheTerminalAndChangeDecoding(t *testing.T) {
+	term := &protocolTerm{fakeTerm: &fakeTerm{vt: newVT(t, 40, 5)}}
+	ui := NewUI(term)
+	e := &echo{}
+	ui.AddChild(e)
+	ui.SetFocus(e)
+	done := make(chan error, 1)
+	go func() { done <- ui.Run() }()
+	defer func() { ui.Stop(); <-done }()
+	time.Sleep(20 * time.Millisecond)
+
+	term.send("\x1b[?7u")
+	term.send("\n")
+	term.send("\x1b[97;1:3u") // a released a
+	finished := make(chan struct{})
+	ui.Do(func() { close(finished) })
+	<-finished
+	got := make(chan string, 1)
+	ui.Do(func() { got <- strings.Join(e.keys, " ") + "|" + strings.Join(term.reports, ",") })
+	if s := <-got; s != "shift+enter|kitty:7" {
+		t.Fatalf("keys|reports = %q", s)
+	}
+}

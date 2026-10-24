@@ -20,6 +20,14 @@ type Terminal interface {
 	Size() (width, height int)
 }
 
+// KeyboardProtocol is a terminal that negotiates a keyboard protocol: it
+// says whether Kitty's is on, and acts on the terminal's answers to its
+// query, which arrive among the keystrokes.
+type KeyboardProtocol interface {
+	KittyActive() bool
+	HandleReport(report string)
+}
+
 // minFrameInterval is the shortest time between two throttled frames — Pi's
 // MIN_RENDER_INTERVAL_MS. Requests in between are folded into one frame;
 // keystrokes do not wait for it.
@@ -230,7 +238,8 @@ func (u *UI) receive(data []byte) {
 			u.inputTimer = nil
 		}
 		u.input = append(u.input, data...)
-		keys, rest := Decode(u.input)
+		protocol, _ := u.term.(KeyboardProtocol)
+		keys, rest := DecodeKeys(u.input, protocol != nil && protocol.KittyActive())
 		u.input = append([]byte(nil), rest...)
 		if len(rest) > 0 {
 			wait := sequenceTimeout
@@ -265,7 +274,19 @@ func (u *UI) deliver(keys []Key) {
 	if len(keys) == 0 {
 		return
 	}
+	protocol, _ := u.term.(KeyboardProtocol)
 	for _, key := range keys {
+		if key.Report != "" {
+			if protocol != nil {
+				protocol.HandleReport(key.Report)
+			}
+			continue
+		}
+		if key.Release {
+			// A release reports a key let go, not one pressed; no component
+			// here asks for them.
+			continue
+		}
 		taken := false
 		for _, listener := range u.listeners {
 			if listener(key) {

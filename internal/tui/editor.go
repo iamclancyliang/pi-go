@@ -70,9 +70,9 @@ func (e *Editor) Apply(k Key) Result {
 	// anything but a yank invalidates yank-pop's target.
 	defer func() {
 		switch action {
-		case "editor.deleteWordBackward", "editor.deleteWordForward",
-			"editor.deleteToLineStart", "editor.deleteToLineEnd",
-			"editor.yank", "editor.yankPop":
+		case "tui.editor.deleteWordBackward", "tui.editor.deleteWordForward",
+			"tui.editor.deleteToLineStart", "tui.editor.deleteToLineEnd",
+			"tui.editor.yank", "tui.editor.yankPop":
 		default:
 			e.lastKilled = false
 			e.yankedFrom = -1
@@ -83,10 +83,10 @@ func (e *Editor) Apply(k Key) Result {
 	case "insert":
 		e.snapshotForText()
 		e.insert(string(k.Text))
-	case "input.newLine":
+	case "tui.input.newLine":
 		e.snapshot()
 		e.insert("\n")
-	case "input.submit":
+	case "tui.input.submit":
 		text := string(e.buffer)
 		e.remember(text)
 		e.buffer, e.cursor = nil, 0
@@ -96,32 +96,32 @@ func (e *Editor) Apply(k Key) Result {
 		if len(e.buffer) == 0 {
 			return Result{Exit: true}
 		}
-	case "editor.cursorLeft":
+	case "tui.editor.cursorLeft":
 		if e.cursor > 0 {
 			e.cursor--
 		}
-	case "editor.cursorRight":
+	case "tui.editor.cursorRight":
 		if e.cursor < len(e.buffer) {
 			e.cursor++
 		}
-	case "editor.cursorWordLeft":
+	case "tui.editor.cursorWordLeft":
 		e.cursor = e.wordLeft()
-	case "editor.cursorWordRight":
+	case "tui.editor.cursorWordRight":
 		e.cursor = e.wordRight()
-	case "editor.cursorLineStart":
+	case "tui.editor.cursorLineStart":
 		e.cursor = e.lineStart()
-	case "editor.cursorLineEnd":
+	case "tui.editor.cursorLineEnd":
 		e.cursor = e.lineEnd()
-	case "editor.cursorUp":
+	case "tui.editor.cursorUp":
 		e.upOrHistoryBack()
-	case "editor.cursorDown":
+	case "tui.editor.cursorDown":
 		e.downOrHistoryForward()
-	case "editor.deleteCharBackward":
+	case "tui.editor.deleteCharBackward":
 		if e.cursor > 0 {
 			e.snapshot()
 			e.deleteRange(e.cursor-1, e.cursor)
 		}
-	case "editor.deleteCharForward":
+	case "tui.editor.deleteCharForward":
 		// Ctrl+D doubles as end-of-input, and which it is depends on the
 		// buffer: with nothing typed it is the exit a shell user means. The
 		// delete key never exits — only the chord with that history does.
@@ -132,15 +132,15 @@ func (e *Editor) Apply(k Key) Result {
 			e.snapshot()
 			e.deleteRange(e.cursor, e.cursor+1)
 		}
-	case "editor.deleteWordBackward":
+	case "tui.editor.deleteWordBackward":
 		e.kill(e.wordLeft(), e.cursor, true)
-	case "editor.deleteWordForward":
+	case "tui.editor.deleteWordForward":
 		e.kill(e.cursor, e.wordRight(), false)
-	case "editor.deleteToLineStart":
+	case "tui.editor.deleteToLineStart":
 		e.kill(e.lineStart(), e.cursor, true)
-	case "editor.deleteToLineEnd":
+	case "tui.editor.deleteToLineEnd":
 		e.kill(e.cursor, e.lineEnd(), false)
-	case "editor.yank":
+	case "tui.editor.yank":
 		if len(e.killRing) > 0 {
 			e.snapshot()
 			e.yankedFrom = 0
@@ -148,7 +148,7 @@ func (e *Editor) Apply(k Key) Result {
 			e.insert(e.killRing[0])
 			e.yankedRange = [2]int{start, e.cursor}
 		}
-	case "editor.yankPop":
+	case "tui.editor.yankPop":
 		// Only straight after a yank: pop replaces what the yank pasted, and
 		// with nothing just pasted there is nothing to replace.
 		if e.yankedFrom >= 0 && len(e.killRing) > 1 {
@@ -158,7 +158,7 @@ func (e *Editor) Apply(k Key) Result {
 			e.insert(e.killRing[e.yankedFrom])
 			e.yankedRange = [2]int{start, e.cursor}
 		}
-	case "editor.undo":
+	case "tui.editor.undo":
 		if n := len(e.undo); n > 0 {
 			state := e.undo[n-1]
 			e.undo = e.undo[:n-1]
