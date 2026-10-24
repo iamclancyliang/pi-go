@@ -38,7 +38,9 @@
 
 每个阶段都要满足四点：**能单独合并**、**先调研再实现**、**有自动化测试**、**在 parity matrix 里有对应的行**。
 
-### T0：调研和 ADR（不写产品代码）
+### T0：调研和 ADR（不写产品代码）— **已完成 2026-10-24**
+
+结果：特性清单 §11.4–11.6（regular 模式的渲染语义、终端会话、42 个 `app.*` 动作）；ADR-0011（照 Pi 的行模型自己实现，依赖 `rivo/uniseg` 和已有的 goldmark）；测试方法定为“渲染输出喂给测试里的小型终端模拟器，断言屏幕和滚动历史”。
 
 - 读 `docs/tui.md`、`keybindings.md`、`terminal-setup.md`，以及 `tui.ts` 和 `tui-main-screen.ts` 的渲染语义，补齐特性清单 §11，把 `semantics-needed` 推进到 `enumerated`。
 - 写 ADR-0011（渲染器由谁实现）。

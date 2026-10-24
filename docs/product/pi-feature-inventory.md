@@ -40,7 +40,7 @@ always get distinct IDs.
 | Auth / OAuth | `enumerated` (files) · storage shape read (§27.6); flows still `semantics-needed` |
 | Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
-| TUI | `enumerated` (components) · `semantics-needed` |
+| TUI | `enumerated` (components) · rendering core, terminal session and key actions `read` (§11.4–11.6) · components, selectors and fullscreen `semantics-needed` |
 | Telemetry | `enumerated` (files) · `schema-needed` |
 | Evals | `enumerated` (files) · `semantics-needed` |
 | server / client / session-backends | `enumerated` (files) · `semantics-needed` |
@@ -745,7 +745,84 @@ Subsystems: `alt-screen-search` · `autocomplete` · `editor-component` · `fuzz
 `undo-stack` · `word-navigation`
 
 Docs: `docs/tui.md`, `docs/themes.md`, `docs/keybindings.md`, `docs/terminal-setup.md`,
-`docs/tmux.md`, `docs/termux.md`, `docs/windows.md`. Semantics `semantics-needed`.
+`docs/tmux.md`, `docs/termux.md`, `docs/windows.md`. Semantics: the regular-mode rendering core,
+the terminal session and the key actions are read (§11.4–11.6); each component's own behaviour,
+the selectors and fullscreen mode remain `semantics-needed`, read slice by slice as the interface
+plan reaches them.
+
+### 11.4 Rendering semantics, regular mode — read 2026-10-24
+
+Read from `tui.ts`, `tui-main-screen.ts` and `docs/tui.md` at the pin, for the rendering core of the
+interface plan (`docs/specs/tui-split-plan.md`, slice T1). Regular is Pi's default mode
+(`settings-manager.ts:1132`); fullscreen is marked experimental and is not covered here.
+
+* **A component renders itself to lines** — `render(width) → string[]` (`tui.ts:23`). Every line
+  must fit `width`; `docs/tui.md` "Line Width" calls this critical, and the renderer enforces it: a
+  line wider than the terminal writes a crash log, stops the TUI and throws
+  (`tui-main-screen.ts`, inside `doRender`). Containers concatenate their children's lines
+  (`tui.ts:235`). `invalidate()` drops cached output; state changes call `requestRender()`.
+* **Frames are throttled to one per 16 ms** (`MIN_RENDER_INTERVAL_MS`, `tui.ts:343`). Requests
+  coalesce; a forced request resets render state and renders on the next tick, preempting a
+  throttled frame, which is how user input stays immediate (`tui.ts:772–830`).
+* **Every line ends with a reset** — SGR reset plus a closed OSC 8 hyperlink (`SEGMENT_RESET`,
+  `tui.ts:250`; `applyLineResets`) — so no style or link bleeds into the next line or into what
+  the terminal writes after the TUI.
+* **The hardware cursor follows a zero-width marker.** A focused component emits `CURSOR_MARKER`
+  (`ESC _ pi:c BEL`, an APC the terminal ignores, `tui.ts:79`) where its cursor is. The renderer
+  finds it in the bottom `height` lines only, strips it, and moves the real cursor there with
+  relative row moves and an absolute column (`CSI n A/B`, `CSI col G`); with no marker the cursor
+  is hidden (`tui-main-screen.ts:554`). This is what places an input method's candidate window.
+* **Differential output, in this order** (`tui-main-screen.ts:180` onward). Each frame renders all
+  lines, composites overlays, extracts the cursor, then:
+  1. first frame with no size change → write everything without clearing;
+  2. width changed → full redraw that clears screen **and scrollback** (`ESC[2J ESC[H ESC[3J`),
+     because wrapping changed;
+  3. height changed → the same full redraw, except under Termux, where the soft keyboard changes
+     the height and a redraw would replay the whole history on every toggle;
+  4. content shrank below the most lines ever rendered and no overlay is open → full redraw to clear
+     the rows left behind (`clearOnShrink`, switchable by `PI_CLEAR_ON_SHRINK=0`);
+  5. otherwise find the first and last changed line; nothing changed → move only the cursor;
+     only deletions → clear the trailing rows in place; first change above the previous viewport →
+     full redraw (what scrolled away cannot be edited); else move to the first changed line,
+     scrolling with newlines when it lies below the viewport, and rewrite **only** the changed range,
+     each line cleared first (`ESC[2K`) — which keeps a spinner from repainting the screen.
+  Every write is wrapped in synchronized output (`ESC[?2026h` … `ESC[?2026l`).
+* **The conversation lives in the terminal's scrollback.** Regular mode never enters the alternate
+  screen; earlier output stays where the terminal scrolled it, and only the region still on screen
+  is ever rewritten.
+
+### 11.5 Terminal session — read 2026-10-24
+
+From `terminal.ts` at the pin:
+
+* `start` (`:161`): raw mode, UTF-8, **bracketed paste on** (`ESC[?2004h`), a resize handler, a
+  self-sent `SIGWINCH` to refresh a size that went stale while suspended, then a query for the
+  **Kitty keyboard protocol** (flags 7, `:15–17`), falling back to xterm `modifyOtherKeys` when the
+  device-attributes reply shows no Kitty support. `stop` restores each of these.
+* Input passes through a buffer that splits batched input into single sequences (`stdin-buffer.ts`),
+  so a key handler sees one key at a time.
+* A lone `ESC` is told from the start of a sequence by a timeout: 10 ms, 100 ms over SSH,
+  overridable by `PI_TUI_ESC_TIMEOUT` (`:104–113`).
+* While the agent works the terminal is told so through OSC 9;4 progress (`:11–13`, `setProgress`).
+* Apple Terminal and native Shift+Enter reports are normalised to the same input as elsewhere
+  (`:44–58`).
+
+### 11.6 Application key actions — `app.*`, **42 actions** — read 2026-10-24
+
+From `docs/keybindings.md` at the pin, beside the 47 `tui.*` actions of §11.1. Split: 6 application
+(interrupt `escape`, clear `ctrl+c` — a second press exits —, exit `ctrl+d` on an empty editor,
+suspend `ctrl+z`, external editor `ctrl+g`, paste image `ctrl+v`) · 10 sessions (four unbound
+openers for new/tree/fork/resume, six selector keys) · 5 models and thinking (select `ctrl+l`,
+cycle `ctrl+p` / `shift+ctrl+p`, cycle thinking `shift+tab`, toggle thinking blocks `ctrl+t`) ·
+4 display and queue (expand tools `ctrl+o`, copy `ctrl+x`, queue follow-up `alt+enter`, dequeue
+`alt+up`) · 11 tree navigation · 6 scoped-models selector.
+
+Rules the doc states, which a port must keep: a key may serve different actions in different
+contexts (`ctrl+d` exits from the editor, deletes in the session selector, resets the tree
+filter); explicitly bound history actions take precedence over application actions while the
+main editor is focused; user bindings in `keybindings.json` **replace** an action's defaults
+rather than adding to them; pre-namespaced ids in older configs are migrated on startup; `/reload`
+re-reads the file.
 
 ## 12. server / client / session-backends
 
