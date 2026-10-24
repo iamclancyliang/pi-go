@@ -61,6 +61,18 @@ type ModelHost interface {
 	CycleModel(context.Context) (*ai.ModelCycle, error)
 }
 
+// ThinkingHost is the optional reasoning-level capability of a Host.
+//
+// SetThinkingLevel answers with the level now in effect, which is the nearest
+// one the model offers rather than necessarily the one asked for. The level is
+// read per model request, so a change made while a prompt runs applies from
+// its next turn and is not refused as busy.
+type ThinkingHost interface {
+	ThinkingLevel() ai.ThinkingLevel
+	AvailableThinkingLevels() []ai.ThinkingLevel
+	SetThinkingLevel(ai.ThinkingLevel) (ai.ThinkingLevel, error)
+}
+
 // BashHost is the optional direct shell capability. The command runs outside
 // the agent turn, so the channel can keep reading abort_bash while it waits.
 type BashHost interface {
@@ -147,6 +159,9 @@ type stateData struct {
 	// Running says whether a prompt is in flight — the fact a client needs
 	// before choosing between prompt and steer.
 	Running bool `json:"running"`
+	// ThinkingLevel is the level the next model request asks for. Empty when
+	// the host has no thinking control.
+	ThinkingLevel ai.ThinkingLevel `json:"thinking_level,omitempty"`
 }
 
 // statsData is the get_session_stats payload. Token counts keep the ledger's
@@ -217,13 +232,17 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		return ok(resp, nil)
 
 	case "get_state":
-		return okData(resp, stateData{
+		state := stateData{
 			Provider:     c.host.Provider(),
 			Model:        c.host.ModelName(),
 			SessionName:  sess.Name(),
 			MessageCount: len(sess.Snapshot().Messages),
 			Running:      c.running() != nil,
-		})
+		}
+		if thinking, ok := c.host.(ThinkingHost); ok {
+			state.ThinkingLevel = thinking.ThinkingLevel()
+		}
+		return okData(resp, state)
 
 	case "get_messages":
 		return okData(resp, map[string]any{"messages": sess.Snapshot().Messages})
@@ -317,6 +336,9 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 		}
 		return okData(resp, cycled)
 
+	case "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels":
+		return c.thinking(cmd, resp)
+
 	case "bash":
 		return c.bash(ctx, cmd, resp)
 
@@ -353,6 +375,43 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 				"a Pi command this build has not built; the parity matrix tracks it")
 		}
 		return fail(resp, FailUnknownCommand, "no such command")
+	}
+}
+
+// thinking answers the three reasoning-level commands.
+func (c *Channel) thinking(cmd Command, resp Response) Response {
+	host, ok := c.host.(ThinkingHost)
+	if !ok {
+		return fail(resp, FailUnavailable, "this session has no thinking level to change")
+	}
+	available := host.AvailableThinkingLevels()
+	switch cmd.Command {
+	case "get_available_thinking_levels":
+		return okData(resp, map[string]any{"levels": available})
+
+	case "cycle_thinking_level":
+		if len(available) <= 1 {
+			// A model that cannot reason has nothing to cycle through. Pi
+			// answers a successful null rather than a failure, and so does
+			// this: the request was well-formed, there is just no next level.
+			return okData(resp, nil)
+		}
+		level, err := host.SetThinkingLevel(ai.NextThinkingLevel(available, host.ThinkingLevel()))
+		if err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"level": level})
+
+	default: // set_thinking_level
+		asked, err := ai.ParseThinkingLevel(cmd.Level)
+		if err != nil {
+			return fail(resp, FailBadArgument, err.Error())
+		}
+		level, err := host.SetThinkingLevel(asked)
+		if err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		return okData(resp, map[string]any{"level": level})
 	}
 }
 
@@ -661,7 +720,6 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 // here fails as unimplemented; one not here fails as unknown. The list is the
 // 32-command union from the feature inventory §21.1 minus what Dispatch serves.
 var pi = map[string]bool{
-	"set_thinking_level": true, "cycle_thinking_level": true, "get_available_thinking_levels": true,
 	"set_steering_mode": true, "set_follow_up_mode": true,
 	"set_auto_compaction": true,
 	"set_auto_retry":      true, "abort_retry": true,

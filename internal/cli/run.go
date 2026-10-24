@@ -20,6 +20,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/rpc"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
 	"github.com/iamclancyliang/pi-go/internal/session"
+	"github.com/iamclancyliang/pi-go/internal/settings"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
@@ -253,7 +254,7 @@ func (h *rpcHost) build() error {
 		ModelName:      h.model,
 		Tools:          h.rt.Tools,
 		Session:        h.current.Session,
-		Thinking:       h.rt.Thinking,
+		Thinking:       requestThinking(h.prov, h.model, h.rt.Thinking),
 		Summarize:      (&compaction.Compactor{Model: h.port, ModelName: h.model}).Summarize,
 		Observers:      []events.Observer{h.writer},
 		ReplyObservers: []runtime.ReplyObserver{h.writer},
@@ -393,10 +394,16 @@ func (h *rpcHost) SetModel(toProvider, toModel string) error {
 	if err != nil {
 		return err
 	}
-	oldPort, oldProvider, oldModel := h.port, h.prov, h.model
+	oldPort, oldProvider, oldModel, oldThinking := h.port, h.prov, h.model, h.rt.Thinking
 	h.port, h.prov, h.model = opened, openedProvider, openedModel
+	// The level carries over to the new model, clamped to what it offers, as
+	// Pi's model switch does: a level the new model cannot take is not one
+	// the next request should claim to be using.
+	if h.rt.Thinking != "" {
+		h.rt.Thinking = ai.ClampThinkingLevel(ai.AvailableThinkingLevels(openedProvider, openedModel), h.rt.Thinking)
+	}
 	if err := h.build(); err != nil {
-		h.port, h.prov, h.model = oldPort, oldProvider, oldModel
+		h.port, h.prov, h.model, h.rt.Thinking = oldPort, oldProvider, oldModel, oldThinking
 		return err
 	}
 	// Keep later model changes and newly reopened conversations aligned with
@@ -405,6 +412,60 @@ func (h *rpcHost) SetModel(toProvider, toModel string) error {
 	h.rt.Args.Provider = openedProvider
 	h.rt.Args.Model = openedModel
 	return nil
+}
+
+// ThinkingLevel is the level the next model request asks for; empty when
+// nothing was asked for and the provider's own default stands.
+func (h *rpcHost) ThinkingLevel() ai.ThinkingLevel {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rt.Thinking
+}
+
+// AvailableThinkingLevels are what the current model offers.
+func (h *rpcHost) AvailableThinkingLevels() []ai.ThinkingLevel {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return ai.AvailableThinkingLevels(h.prov, h.model)
+}
+
+// SetThinkingLevel clamps a level to what the current model offers and makes
+// it the one the next model request asks for, including the next turn of a
+// prompt already running.
+//
+// A change is remembered as the default for later runs, as Pi's is — unless
+// it is off on a model that cannot reason, where off is not a preference but
+// the only level there was, and saving it would turn reasoning off for every
+// model used afterwards.
+func (h *rpcHost) SetThinkingLevel(level ai.ThinkingLevel) (ai.ThinkingLevel, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	effective := ai.ClampThinkingLevel(ai.AvailableThinkingLevels(h.prov, h.model), level)
+	if effective == h.rt.Thinking {
+		return effective, nil
+	}
+	h.rt.Thinking = effective
+	h.agent.SetThinking(requestThinking(h.prov, h.model, effective))
+
+	if h.rt.Config.AgentDir != "" && (ai.SupportsThinking(h.prov, h.model) || effective != ai.ThinkingOff) {
+		h.rt.Config.Global.DefaultThinkingLevel = string(effective)
+		if err := settings.Save(settings.GlobalPath(h.rt.Config.AgentDir), h.rt.Config.Global); err != nil {
+			// The level is in effect either way; only remembering it failed,
+			// and that is reported rather than undoing what the client asked.
+			return effective, fmt.Errorf("the level is in effect, but saving it as the default failed: %w", err)
+		}
+	}
+	return effective, nil
+}
+
+// requestThinking is what a request asks for at a level: nothing, for a
+// model recorded as not reasoning, whose provider may refuse the field
+// outright, and the level itself otherwise.
+func requestThinking(provider, model string, level ai.ThinkingLevel) ai.ThinkingLevel {
+	if !ai.SupportsThinking(provider, model) {
+		return ""
+	}
+	return level
 }
 
 // AvailableModels asks the currently selected provider for its identifiers.

@@ -775,3 +775,16 @@ func TestAskingForNothingIsNotAComplaint(t *testing.T) {
 		t.Fatalf("asking for nothing produced %q (%s)", got, why)
 	}
 }
+
+// TestALevelTheModelDoesNotOfferLandsOnTheNearestAndSaysSo. No model records a
+// mapping for max, so it becomes high — and the run says which level is in
+// effect, because the one typed is not it.
+func TestALevelTheModelDoesNotOfferLandsOnTheNearestAndSaysSo(t *testing.T) {
+	got, why := cli.ThinkingFor("deepseek", "deepseek-chat", ai.ThinkingMax)
+	if got != ai.ThinkingHigh {
+		t.Fatalf("max became %q, want high", got)
+	}
+	if !strings.Contains(why, "using high") {
+		t.Fatalf("the clamp was not reported: %q", why)
+	}
+}

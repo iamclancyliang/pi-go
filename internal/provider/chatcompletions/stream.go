@@ -58,6 +58,7 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 		// nothing about what was sent, and a reply with no cap is a bill nobody
 		// chose.
 		MaxOutputTokens: outputCap,
+		Thinking:        req.Thinking,
 		HTTPClient:      HTTPClient(held),
 	})
 	if err != nil {

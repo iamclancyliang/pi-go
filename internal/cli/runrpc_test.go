@@ -11,6 +11,7 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/cli"
+	"github.com/iamclancyliang/pi-go/internal/settings"
 	"github.com/iamclancyliang/pi-go/internal/tools"
 )
 
@@ -161,7 +162,7 @@ func TestAbortEndsARunningPromptAndTheStreamSaysAborted(t *testing.T) {
 // commands ADR-0010 records as incomplete: one at a time, named, rather than
 // the mode refusing wholesale.
 func TestAnUnbuiltCommandFailsWithATypedKind(t *testing.T) {
-	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"cycle_thinking_level"}`)
+	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"set_steering_mode"}`)
 	got := responses(lines)
 	errObj := got[0]["error"].(map[string]any)
 	if got[0]["ok"] != false || errObj["kind"] != "unimplemented" {
@@ -284,5 +285,38 @@ func TestAnUnrecordedRunAnswersUnavailableNotInternalError(t *testing.T) {
 		if r["ok"] != false || errObj["kind"] != "unavailable" {
 			t.Fatalf("%s on an unrecorded run was not unavailable: %v", r["command"], r)
 		}
+	}
+}
+
+// TestRPCThinkingLevelReachesTheNextPromptAndIsRemembered, end to end through
+// the real host: the level set over the channel is the one the model request
+// carries, and it is saved as the default for later runs, as Pi saves it.
+func TestRPCThinkingLevelReachesTheNextPromptAndIsRemembered(t *testing.T) {
+	model := scripted("ok")
+	rt := runtimeFor(t, model)
+	rt.Config.AgentDir = t.TempDir()
+
+	got := runRPCWith(t, rt,
+		`{"id":"1","command":"set_thinking_level","level":"max"}`,
+		`{"id":"2","command":"prompt","message":"hi"}`,
+	)
+	if len(got) < 1 || got[0]["ok"] != true {
+		t.Fatalf("set_thinking_level failed: %v", got)
+	}
+	if data, _ := got[0]["data"].(map[string]any); data["level"] != "high" {
+		t.Fatalf("max answered %v, want the clamped high", got[0]["data"])
+	}
+
+	requests := model.Requests()
+	if len(requests) != 1 || requests[0].Thinking != ai.ThinkingHigh {
+		t.Fatalf("the prompt's request asked for %v", requests)
+	}
+
+	saved, err := settings.Load(settings.GlobalPath(rt.Config.AgentDir))
+	if err != nil {
+		t.Fatalf("reading saved settings: %v", err)
+	}
+	if saved.DefaultThinkingLevel != "high" {
+		t.Fatalf("the default saved is %q", saved.DefaultThinkingLevel)
 	}
 }

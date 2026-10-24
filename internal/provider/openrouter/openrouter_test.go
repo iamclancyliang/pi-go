@@ -2,6 +2,7 @@ package openrouter_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -317,5 +318,56 @@ func TestAThrottleIsNotReadAsAnOverflow(t *testing.T) {
 	_, err := ask(t, newPort(t, tr, nil))
 	if errors.Is(err, ai.ErrContextOverflow) {
 		t.Fatalf("a throttle was read as an overflow: %v", err)
+	}
+}
+
+// bodyTransport answers one streamed reply and keeps the request body.
+type bodyTransport struct{ sent []byte }
+
+func (b *bodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	b.sent, _ = io.ReadAll(req.Body)
+	return streamed(
+		`{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`,
+	), nil
+}
+
+func reasoningSent(t *testing.T, level ai.ThinkingLevel) (map[string]any, bool) {
+	t.Helper()
+	tr := &bodyTransport{}
+	if _, err := newPort(t, tr, nil).Generate(context.Background(), ai.Request{
+		Model:    "anthropic/claude-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+		Thinking: level,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(tr.sent, &body); err != nil {
+		t.Fatalf("the request is not JSON: %v (%s)", err, tr.sent)
+	}
+	reasoning, present := body["reasoning"].(map[string]any)
+	return reasoning, present
+}
+
+// TestAThinkingLevelReachesTheWireAsOpenRoutersReasoningEffort. OpenRouter
+// normalises reasoning across the models behind it with one nested object,
+// and Pi sends the level as its effort.
+func TestAThinkingLevelReachesTheWireAsOpenRoutersReasoningEffort(t *testing.T) {
+	reasoning, present := reasoningSent(t, ai.ThinkingMedium)
+	if !present || reasoning["effort"] != "medium" {
+		t.Fatalf("medium was sent as reasoning %v", reasoning)
+	}
+}
+
+// TestOffIsSentAsNoEffortAndNothingAskedSendsNothing. "none" is OpenRouter's
+// own value rather than a backend's, so unlike OpenAI's it does not depend on
+// which model sits behind the aggregator.
+func TestOffIsSentAsNoEffortAndNothingAskedSendsNothing(t *testing.T) {
+	if reasoning, _ := reasoningSent(t, ai.ThinkingOff); reasoning["effort"] != "none" {
+		t.Fatalf("off was sent as reasoning %v", reasoning)
+	}
+	if reasoning, present := reasoningSent(t, ""); present {
+		t.Fatalf("asking for nothing sent reasoning %v", reasoning)
 	}
 }

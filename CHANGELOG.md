@@ -23,9 +23,16 @@ file carries what a person upgrading would want to know.
   `get_entries`, `fork`, `clone`, `switch_session`, `new_session`,
   `set_session_name`, `compact` — the model switched with `set_model`, and
   the session inspected with `get_state`, `get_messages`, `get_session_stats`,
-  `get_last_assistant_text` and `get_commands`. Eighteen of Pi's commands
-  answer; the rest fail with a typed reason that says whether they are
-  unknown or not yet built.
+  `get_last_assistant_text` and `get_commands`. Models are listed and cycled
+  with `get_available_models` and `cycle_model`, shell commands run with
+  `bash` and `abort_bash`, and the thinking level is set, cycled and listed
+  with `set_thinking_level`, `cycle_thinking_level` and
+  `get_available_thinking_levels`. Twenty-five of Pi's commands answer; the
+  rest fail with a typed reason that says whether they are unknown or not yet
+  built.
+- Thinking levels reach OpenAI and OpenRouter as well as DeepSeek. A level the
+  model does not offer becomes the nearest one it does, and the run says so;
+  without a recorded per-model mapping, `xhigh` and `max` land on `high`.
 - Seven built-in tools, ported against the pinned Pi source: `read`, `ls`,
   `find`, `grep`, `write`, `edit`, `bash`. Searches honour `.gitignore`; edits
   match against the original file and refuse ambiguity; bash output keeps the

@@ -113,7 +113,24 @@ func newModel(ctx context.Context, req cc.ModelRequest) (model.ToolCallingChatMo
 		Model:      req.Model,
 		MaxTokens:  &outputCap,
 		HTTPClient: req.HTTPClient,
+		Reasoning:  reasoningFor(req.Thinking),
 	})
+}
+
+// reasoningFor maps a thinking level onto OpenRouter's reasoning object, the
+// way Pi's openrouter format does: the level as the effort, and off as
+// "none". That value is OpenRouter's own, normalised across the models behind
+// it, so — unlike OpenAI's — sending it does not depend on which model answers.
+// Asking for nothing sends nothing, leaving the model's default.
+func reasoningFor(level ai.ThinkingLevel) *einoopenrouter.Reasoning {
+	switch level {
+	case "":
+		return nil
+	case ai.ThinkingOff:
+		return &einoopenrouter.Reasoning{Effort: einoopenrouter.EffortOfNone}
+	default:
+		return &einoopenrouter.Reasoning{Effort: einoopenrouter.Effort(level)}
+	}
 }
 
 // scrub removes a credential from text about to become an error.

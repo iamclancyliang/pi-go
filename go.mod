@@ -14,6 +14,7 @@ require (
 	github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
 	github.com/eino-contrib/jsonschema v1.0.3
+	github.com/openai/openai-go/v3 v3.35.0
 	golang.org/x/term v0.33.0
 	golang.org/x/text v0.27.0
 	google.golang.org/genai v1.36.0
@@ -72,7 +73,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
-	github.com/openai/openai-go/v3 v3.35.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

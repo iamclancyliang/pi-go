@@ -416,5 +416,13 @@ func ThinkingFor(provider, model string, asked ai.ThinkingLevel) (ai.ThinkingLev
 		return "", fmt.Sprintf("%s/%s is recorded as not reasoning; --thinking %s was not sent",
 			provider, model, asked)
 	}
+	// A level the model does not offer becomes the nearest one it does, the
+	// way Pi clamps it, and says so: the level shown afterwards is the one
+	// in effect, not the one typed.
+	available := ai.AvailableThinkingLevels(provider, model)
+	if level := ai.ClampThinkingLevel(available, asked); level != asked {
+		return level, fmt.Sprintf("%s/%s offers thinking up to %s; --thinking %s is using %s",
+			provider, model, available[len(available)-1], asked, level)
+	}
 	return asked, ""
 }

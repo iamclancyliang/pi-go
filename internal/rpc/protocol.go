@@ -56,6 +56,9 @@ type Command struct {
 	// Instructions is what to focus a summary on, on `compact`.
 	Instructions string `json:"instructions,omitempty"`
 
+	// Level is a thinking level, on `set_thinking_level`.
+	Level string `json:"level,omitempty"`
+
 	// BashCommand is the shell text for `bash`; it is separate from Command,
 	// which names the RPC verb. Message is accepted as a compatibility alias
 	// by the dispatcher for callers that use prompt-shaped arguments.

@@ -222,7 +222,7 @@ func TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers(t *testing.T) {
 	if unknown.OK || unknown.Error.Kind != FailUnknownCommand {
 		t.Fatalf("an invented command was not unknown: %+v", unknown.Error)
 	}
-	unbuilt := dispatch(c, Command{ID: "2", Command: "cycle_thinking_level"})
+	unbuilt := dispatch(c, Command{ID: "2", Command: "set_steering_mode"})
 	if unbuilt.OK || unbuilt.Error.Kind != FailUnimplemented {
 		t.Fatalf("a real Pi command was not unimplemented: %+v", unbuilt.Error)
 	}
@@ -647,5 +647,123 @@ func TestGetCommandsNamesWhatIsHereAndWhatIsNot(t *testing.T) {
 	decode(t, dispatch(c, Command{ID: "1", Command: "get_commands"}), &data)
 	if len(data.Commands) != 1 || data.Commands[0].Name != "help" || len(data.NotHere) != 1 {
 		t.Fatalf("get_commands did not report both halves: %+v", data)
+	}
+}
+
+// thinkingFakeHost offers a fixed set of levels and clamps the way the real
+// host does, so the channel's own behaviour is what these tests see.
+type thinkingFakeHost struct {
+	*fakeHost
+	level     ai.ThinkingLevel
+	available []ai.ThinkingLevel
+}
+
+func (h *thinkingFakeHost) ThinkingLevel() ai.ThinkingLevel { return h.level }
+func (h *thinkingFakeHost) AvailableThinkingLevels() []ai.ThinkingLevel {
+	return append([]ai.ThinkingLevel(nil), h.available...)
+}
+func (h *thinkingFakeHost) SetThinkingLevel(level ai.ThinkingLevel) (ai.ThinkingLevel, error) {
+	h.level = ai.ClampThinkingLevel(h.available, level)
+	return h.level, nil
+}
+
+func newThinkingChannel(available ...ai.ThinkingLevel) (*Channel, *thinkingFakeHost) {
+	host := &thinkingFakeHost{
+		fakeHost:  &fakeHost{sess: session.New("You are pi-go."), provider: "scripted", model: "scripted-1"},
+		level:     ai.ThinkingOff,
+		available: available,
+	}
+	return NewChannel(host), host
+}
+
+var fiveLevels = []ai.ThinkingLevel{ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow, ai.ThinkingMedium, ai.ThinkingHigh}
+
+// TestSettingAThinkingLevelAnswersWithTheOneInEffect. A model that does not
+// offer the level asked for gets the nearest one, and the response says which,
+// because a client displaying the level it asked for would be showing one that
+// is not in use.
+func TestSettingAThinkingLevelAnswersWithTheOneInEffect(t *testing.T) {
+	c, host := newThinkingChannel(fiveLevels...)
+
+	var data struct {
+		Level ai.ThinkingLevel `json:"level"`
+	}
+	decode(t, dispatch(c, Command{ID: "1", Command: "set_thinking_level", Level: "max"}), &data)
+	if data.Level != ai.ThinkingHigh || host.level != ai.ThinkingHigh {
+		t.Fatalf("max answered %q and set %q, want high for both", data.Level, host.level)
+	}
+
+	var state stateData
+	decode(t, dispatch(c, Command{ID: "2", Command: "get_state"}), &state)
+	if state.ThinkingLevel != ai.ThinkingHigh {
+		t.Fatalf("get_state reports %q", state.ThinkingLevel)
+	}
+}
+
+// TestAnUnknownThinkingLevelIsABadArgument, naming the ones there are.
+func TestAnUnknownThinkingLevelIsABadArgument(t *testing.T) {
+	c, host := newThinkingChannel(fiveLevels...)
+	resp := dispatch(c, Command{ID: "1", Command: "set_thinking_level", Level: "very hard"})
+	if resp.OK || resp.Error.Kind != FailBadArgument {
+		t.Fatalf("an invented level was not a bad argument: %+v", resp)
+	}
+	if !strings.Contains(resp.Error.Detail, "medium") {
+		t.Fatalf("the refusal does not name the levels: %q", resp.Error.Detail)
+	}
+	if host.level != ai.ThinkingOff {
+		t.Fatalf("a refused level still changed the setting to %q", host.level)
+	}
+}
+
+// TestCyclingStepsThroughWhatTheModelOffers and wraps round.
+func TestCyclingStepsThroughWhatTheModelOffers(t *testing.T) {
+	c, host := newThinkingChannel(fiveLevels...)
+	host.level = ai.ThinkingMedium
+
+	var data struct {
+		Level ai.ThinkingLevel `json:"level"`
+	}
+	decode(t, dispatch(c, Command{ID: "1", Command: "cycle_thinking_level"}), &data)
+	if data.Level != ai.ThinkingHigh {
+		t.Fatalf("after medium came %q", data.Level)
+	}
+	decode(t, dispatch(c, Command{ID: "2", Command: "cycle_thinking_level"}), &data)
+	if data.Level != ai.ThinkingOff {
+		t.Fatalf("after high came %q, want the cycle to wrap", data.Level)
+	}
+}
+
+// TestCyclingAModelThatCannotReasonIsNull, not a failure: Pi answers a
+// successful null, and the client learns there is nothing to cycle through.
+func TestCyclingAModelThatCannotReasonIsNull(t *testing.T) {
+	c, host := newThinkingChannel(ai.ThinkingOff)
+	resp := dispatch(c, Command{ID: "1", Command: "cycle_thinking_level"})
+	if !resp.OK || string(resp.Data) != "null" {
+		t.Fatalf("cycling a non-reasoning model answered %+v (data %s)", resp.Error, resp.Data)
+	}
+	if host.level != ai.ThinkingOff {
+		t.Fatalf("the level moved to %q", host.level)
+	}
+}
+
+// TestTheAvailableLevelsAreTheModelsOwn.
+func TestTheAvailableLevelsAreTheModelsOwn(t *testing.T) {
+	c, _ := newThinkingChannel(fiveLevels...)
+	var data struct {
+		Levels []ai.ThinkingLevel `json:"levels"`
+	}
+	decode(t, dispatch(c, Command{ID: "1", Command: "get_available_thinking_levels"}), &data)
+	if len(data.Levels) != 5 || data.Levels[4] != ai.ThinkingHigh {
+		t.Fatalf("levels %v", data.Levels)
+	}
+}
+
+// TestAHostWithoutThinkingSaysItIsUnavailable rather than pretending to set
+// something nothing reads.
+func TestAHostWithoutThinkingSaysItIsUnavailable(t *testing.T) {
+	c, _ := newChannel(t)
+	resp := dispatch(c, Command{ID: "1", Command: "set_thinking_level", Level: "low"})
+	if resp.OK || resp.Error.Kind != FailUnavailable {
+		t.Fatalf("a host with no thinking control answered %+v", resp)
 	}
 }

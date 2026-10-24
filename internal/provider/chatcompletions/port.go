@@ -25,6 +25,11 @@ type ModelRequest struct {
 	// the construction: a cap that exists in a config and not on the wire is a
 	// bill nobody chose.
 	MaxOutputTokens int
+
+	// Thinking is the level this call asks for. How it reaches the wire, if
+	// at all, is the provider's own format, so each port's builder decides;
+	// one that ignores it sends the provider's default.
+	Thinking ai.ThinkingLevel
 }
 
 // Config is a chat-completions port.

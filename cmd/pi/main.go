@@ -102,6 +102,9 @@ func run(argv []string) int {
 	if why != "" {
 		fmt.Fprintf(streams.Err, "pi: %s\n", why)
 	}
+	// What /session shows is the level in effect, which a clamp may have
+	// changed from the one typed.
+	args.Thinking = thinking
 	conversation, err := cli.OpenConversation(args, root, system)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)

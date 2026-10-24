@@ -47,9 +47,9 @@ type Config struct {
 	ModelName string
 
 	// Thinking is how much reasoning to ask for, on every request this agent
-	// makes. Held here rather than passed per call because it is a property of
-	// the run: a turn that reasoned and a turn that did not would otherwise be
-	// indistinguishable in the record.
+	// makes until SetThinking changes it. Held by the agent rather than passed
+	// per call because it is a property of the run: a turn that reasoned and a
+	// turn that did not would otherwise be indistinguishable in the record.
 	Thinking ai.ThinkingLevel
 
 	// Tools is the tool registration seam. Required, may be empty.
@@ -103,6 +103,9 @@ type Agent struct {
 	emitter *emitter
 	caps    Capabilities
 	state   *StateNamespace
+
+	thinkingMu sync.Mutex
+	thinking   ai.ThinkingLevel
 }
 
 // New builds an Agent.
@@ -119,11 +122,30 @@ func New(cfg Config) (*Agent, error) {
 		cfg.Policy = AllowAll
 	}
 	return &Agent{
-		cfg:     cfg,
-		emitter: newEmitter(cfg.Now, cfg.Observers, cfg.ReplyObservers),
-		caps:    V0Capabilities(),
-		state:   NewStateNamespace(),
+		cfg:      cfg,
+		emitter:  newEmitter(cfg.Now, cfg.Observers, cfg.ReplyObservers),
+		caps:     V0Capabilities(),
+		state:    NewStateNamespace(),
+		thinking: cfg.Thinking,
 	}, nil
+}
+
+// Thinking is the reasoning level the next model request asks for.
+func (a *Agent) Thinking() ai.ThinkingLevel {
+	a.thinkingMu.Lock()
+	defer a.thinkingMu.Unlock()
+	return a.thinking
+}
+
+// SetThinking changes the reasoning level from the next model request on,
+// including one later in a run already in flight — the level is read per
+// request, so a change made mid-run reaches the next turn rather than waiting
+// for the run to end. Which levels a model offers is the caller's decision;
+// this holds whatever it is given.
+func (a *Agent) SetThinking(level ai.ThinkingLevel) {
+	a.thinkingMu.Lock()
+	defer a.thinkingMu.Unlock()
+	a.thinking = level
 }
 
 // Capabilities reports what this host provides (host capability discovery seam).
@@ -337,7 +359,7 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 		// every request; passing it here as well puts it in the context twice,
 		// which is a change to the prompt the model actually sees.
 		Instruction: "",
-		Model:       newEinoChatModel(observed, observed.currentModel, a.cfg.Thinking),
+		Model:       newEinoChatModel(observed, observed.currentModel, a.Thinking),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: einoTools,

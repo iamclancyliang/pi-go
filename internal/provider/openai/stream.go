@@ -12,6 +12,7 @@ import (
 	agenticopenai "github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/iamclancyliang/pi-go/internal/ai"
 )
@@ -65,6 +66,9 @@ func (p *Port) Stream(ctx context.Context, req ai.Request) (<-chan ai.StreamEven
 	var opts []einomodel.Option
 	if specs := toolSpecs(req.Tools); len(specs) > 0 {
 		opts = append(opts, einomodel.WithTools(specs))
+	}
+	if reasoning := reasoningFor(req.Thinking); reasoning != nil {
+		opts = append(opts, agenticopenai.WithResponsesReasoning(reasoning))
 	}
 
 	reader, err := chat.Stream(ctx, messages, opts...)
@@ -429,4 +433,25 @@ func checkAnnounced(held *capture) error {
 		}
 	}
 	return nil
+}
+
+// reasoningFor maps a thinking level onto the Responses API's reasoning
+// parameter, the way Pi's openai-responses request does: the level as the
+// effort, and a summary asked for so the reasoning the model does comes back
+// to be shown.
+//
+// Off sends nothing, where Pi sends the effort "none" to a model its catalogue
+// records as reasoning. That value is one only some models accept — the SDK's
+// own documentation gives it from gpt-5.1 and says the models before refuse
+// it — and Pi knows which is which from per-model data this repository does
+// not have. Sending it blind would turn a request to stop reasoning into a
+// refused request.
+func reasoningFor(level ai.ThinkingLevel) *responses.ReasoningParam {
+	if level == "" || level == ai.ThinkingOff {
+		return nil
+	}
+	return &responses.ReasoningParam{
+		Effort:  responses.ReasoningEffort(level),
+		Summary: responses.ReasoningSummaryAuto,
+	}
 }

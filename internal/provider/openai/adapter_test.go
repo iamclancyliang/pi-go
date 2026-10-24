@@ -2,6 +2,7 @@ package openai_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1454,5 +1455,56 @@ func TestAnOrdinaryReadFailureStillEndsAsAFailure(t *testing.T) {
 	}
 	if _, classified := ai.FailureOf(final.Cause); !classified {
 		t.Fatalf("a caller cannot branch on %v", final.Cause)
+	}
+}
+
+// completedReply is the smallest successful exchange, for tests about what
+// was SENT.
+func completedReply() *http.Response {
+	return recorded(
+		`{"type":"response.created","response":{"id":"r","model":"gpt-test","status":"in_progress"}}`,
+		`{"type":"response.completed","response":{"id":"r","model":"gpt-test","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`,
+	)
+}
+
+func sentFor(t *testing.T, level ai.ThinkingLevel) map[string]any {
+	t.Helper()
+	tr := &recordedTransport{responses: []*http.Response{completedReply()}}
+	if _, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}}, Thinking: level,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(tr.sent) != 1 {
+		t.Fatalf("%d requests sent", len(tr.sent))
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(tr.sent[0]), &body); err != nil {
+		t.Fatalf("the request is not JSON: %v", err)
+	}
+	return body
+}
+
+// TestAThinkingLevelReachesTheWireAsReasoningEffort, with a summary asked for
+// as Pi asks for one, so the reasoning the model does comes back to be shown.
+// Asserted on the bytes sent: a level that exists in the request type and not
+// on the wire asks for nothing.
+func TestAThinkingLevelReachesTheWireAsReasoningEffort(t *testing.T) {
+	reasoning, _ := sentFor(t, ai.ThinkingLow)["reasoning"].(map[string]any)
+	if reasoning["effort"] != "low" || reasoning["summary"] != "auto" {
+		t.Fatalf("low was sent as reasoning %v", reasoning)
+	}
+}
+
+// TestNoThinkingLevelAndOffSendNoReasoning. Saying nothing leaves the
+// provider's default. Off sends nothing either: the effort that turns
+// reasoning off, "none", is one only some models accept — the SDK documents it
+// from gpt-5.1 and its predecessors refuse it — and nothing here records which
+// model is which.
+func TestNoThinkingLevelAndOffSendNoReasoning(t *testing.T) {
+	for _, level := range []ai.ThinkingLevel{"", ai.ThinkingOff} {
+		if reasoning, present := sentFor(t, level)["reasoning"]; present {
+			t.Errorf("thinking %q sent reasoning %v", level, reasoning)
+		}
 	}
 }
