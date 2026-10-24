@@ -50,6 +50,23 @@ type Entry struct {
 	Settlement *ToolSettlement
 	Failure    *OperationFailure
 	Info       *SessionInfo
+	Model      *ModelChange
+	Thinking   *ThinkingChange
+}
+
+// ModelChange records which model the conversation used from this point —
+// Pi's model_change entry. Recorded when a conversation starts and whenever
+// the model is switched, so resuming it continues with the model it was last
+// using rather than whichever the next run happens to default to.
+type ModelChange struct {
+	Provider string
+	Model    string
+}
+
+// ThinkingChange records the reasoning level from this point — Pi's
+// thinking_level_change entry.
+type ThinkingChange struct {
+	Level ai.ThinkingLevel
 }
 
 // SessionInfo records something about the conversation rather than something
@@ -184,6 +201,14 @@ func cloneEntry(e Entry) Entry {
 		info := *e.Info
 		return Entry{Info: &info}
 	}
+	if e.Model != nil {
+		model := *e.Model
+		return Entry{Model: &model}
+	}
+	if e.Thinking != nil {
+		level := *e.Thinking
+		return Entry{Thinking: &level}
+	}
 	return Entry{}
 }
 
@@ -235,6 +260,17 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			continue
 		case e.Settlement != nil:
 			s.settled[e.Settlement.ResultID] = *e.Settlement
+			continue
+		case e.Model != nil:
+			// The latest on the path wins: it is what the conversation was
+			// last using. Never projected, since it says how the conversation
+			// runs, not what was said in it.
+			model := *e.Model
+			s.model = &model
+			continue
+		case e.Thinking != nil:
+			level := e.Thinking.Level
+			s.thinking = &level
 			continue
 		case e.Info != nil:
 			// The latest one wins, which is what makes a rename a rename. An

@@ -78,13 +78,11 @@ func run(argv []string) int {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
-	args = cli.ApplyDefaults(args, cfg.Effective)
-
-	port, providerName, model, err := cli.Open(args, http.DefaultTransport)
-	if err != nil {
-		fmt.Fprintf(streams.Err, "pi: %v\n", err)
-		return 1
-	}
+	// The conversation is opened before the model, because a conversation
+	// being continued says which model it was using. Everything opening it
+	// needs comes from the flags and settings, not from the model: the tool
+	// set and the system prompt are the same whichever one answers.
+	opening := cli.ApplyDefaults(args, cfg.Effective)
 
 	registry := tools.NewRegistry()
 	if !args.NoTools {
@@ -96,7 +94,36 @@ func run(argv []string) int {
 
 	// Built from the tool set this run offers and the project's own
 	// instructions, not from a constant.
-	system := cli.BuildSystemPrompt(args, registry, root, cfg.AgentDir)
+	system := cli.BuildSystemPrompt(opening, registry, root, cfg.AgentDir)
+
+	conversation, err := cli.OpenConversation(opening, root, system)
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+	defer conversation.Close()
+
+	// What the run did not choose for itself comes from the conversation
+	// first and the settings second, as in Pi.
+	restored, fromRecord := cli.RestoreRecorded(args, conversation.Session)
+	args = cli.ApplyDefaults(restored, cfg.Effective)
+
+	port, providerName, model, err := cli.Open(args, http.DefaultTransport)
+	if err != nil && fromRecord {
+		// The model the conversation was using cannot be opened — its
+		// credential is gone, say. Said, and the run carries on with the
+		// default rather than refusing to continue at all.
+		fmt.Fprintf(streams.Err, "pi: could not restore %s/%s (%v); using the default\n",
+			restored.Provider, restored.Model, err)
+		fallback := opening
+		fallback.Thinking = args.Thinking
+		args = fallback
+		port, providerName, model, err = cli.Open(args, http.DefaultTransport)
+	}
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
 
 	thinking, why := cli.ThinkingFor(providerName, model, args.Thinking)
 	if why != "" {
@@ -105,12 +132,6 @@ func run(argv []string) int {
 	// What /session shows is the level in effect, which a clamp may have
 	// changed from the one typed.
 	args.Thinking = thinking
-	conversation, err := cli.OpenConversation(args, root, system)
-	if err != nil {
-		fmt.Fprintf(streams.Err, "pi: %v\n", err)
-		return 1
-	}
-	defer conversation.Close()
 
 	rt := cli.Runtime{
 		Model:          port,

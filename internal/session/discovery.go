@@ -66,6 +66,8 @@ type Info struct {
 	// Entries is how much was recorded, across every branch. A session holding
 	// nothing is passed over: resuming one is indistinguishable from starting
 	// fresh, and it is almost always the empty file a previous run left behind.
+	// The model and thinking records a new conversation opens with are not
+	// counted: they say how it was going to run, not that anything happened.
 	Entries int
 
 	// Opening is the first thing the user asked, which is how a person
@@ -140,7 +142,7 @@ func Describe(path string) (Info, error) {
 		// Everything recorded, not just the current branch. A listing answers
 		// "is there anything here", and a conversation the user branched away
 		// from is still something they may want back.
-		Entries: len(records),
+		Entries: countHappened(records),
 	}
 	if started, err := time.Parse(time.RFC3339Nano, header.Timestamp); err == nil {
 		info.Started = started
@@ -176,4 +178,16 @@ func MostRecent(agentDir, workingDir string) (Info, bool, error) {
 		}
 	}
 	return Info{}, false, nil
+}
+
+// countHappened counts the records that are something happening in the
+// conversation, leaving out the ones that only say how it runs.
+func countHappened(records []fileRecord) int {
+	n := 0
+	for _, r := range records {
+		if r.Kind != kindModel && r.Kind != kindThinking {
+			n++
+		}
+	}
+	return n
 }

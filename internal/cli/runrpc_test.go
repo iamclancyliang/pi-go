@@ -226,9 +226,16 @@ func TestTheRecordedConversationCanBeWalkedForkedAndLeft(t *testing.T) {
 	// First pass: read the tree to learn the entry ids.
 	got := runRPCWith(t, rt, `{"id":"1","command":"get_tree"}`)
 	tree := got[0]["data"].(map[string]any)
-	entries := tree["entries"].([]any)
+	// The model the run uses is recorded beside the exchange, as Pi records
+	// it; only the messages are the exchange.
+	var entries []any
+	for _, e := range tree["entries"].([]any) {
+		if e.(map[string]any)["kind"] == "message" {
+			entries = append(entries, e)
+		}
+	}
 	if len(entries) != 2 {
-		t.Fatalf("the seeded exchange is not two entries: %v", entries)
+		t.Fatalf("the seeded exchange is not two messages: %v", tree["entries"])
 	}
 	firstID := entries[0].(map[string]any)["id"].(string)
 
@@ -385,5 +392,31 @@ func TestRPCSetAutoCompactionIsRememberedAndReported(t *testing.T) {
 	saved, err := settings.Load(settings.GlobalPath(rt.Config.AgentDir))
 	if err != nil || saved.Compaction.Enabled == nil || *saved.Compaction.Enabled {
 		t.Fatalf("compaction.enabled saved as %v (%v)", saved.Compaction.Enabled, err)
+	}
+}
+
+// TestSwitchingConversationsCarriesEachOnWithItsOwnThinkingLevel, as Pi's
+// session switch does: the level is recorded in the conversation it was set
+// in, and coming back to that conversation restores it.
+func TestSwitchingConversationsCarriesEachOnWithItsOwnThinkingLevel(t *testing.T) {
+	rt, originalID := recordedRuntime(t)
+
+	got := runRPCWith(t, rt,
+		`{"id":"1","command":"set_thinking_level","level":"low"}`,
+		`{"id":"2","command":"new_session"}`,
+		`{"id":"3","command":"set_thinking_level","level":"high"}`,
+		`{"id":"4","command":"switch_session","session":"`+originalID+`"}`,
+		`{"id":"5","command":"get_state"}`,
+	)
+	if len(got) != 5 {
+		t.Fatalf("responses %v", got)
+	}
+	for _, r := range got[:4] {
+		if r["ok"] != true {
+			t.Fatalf("%s failed: %v", r["command"], r["error"])
+		}
+	}
+	if state := got[4]["data"].(map[string]any); state["thinking_level"] != "low" {
+		t.Fatalf("back in the original the level is %v, want the low it was set to there", state["thinking_level"])
 	}
 }

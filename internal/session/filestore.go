@@ -94,6 +94,8 @@ type fileRecord struct {
 	Settlement *ToolSettlement   `json:"settlement,omitempty"`
 	Failure    *OperationFailure `json:"failure,omitempty"`
 	Info       *SessionInfo      `json:"info,omitempty"`
+	Model      *ModelChange      `json:"model_change,omitempty"`
+	Thinking   *ThinkingChange   `json:"thinking_level_change,omitempty"`
 }
 
 // wireIntent is a ToolIntent with its replay policy written as the word a
@@ -120,6 +122,8 @@ const (
 	kindSettlement = "tool_settlement"
 	kindFailure    = "failure"
 	kindInfo       = "session_info"
+	kindModel      = "model_change"
+	kindThinking   = "thinking_level_change"
 	kindHeader     = "session"
 )
 
@@ -476,6 +480,10 @@ func (r fileRecord) summary() string {
 			return "named: (cleared)"
 		}
 		return "named: " + r.Info.Name
+	case r.Model != nil:
+		return "model: " + r.Model.Provider + "/" + r.Model.Model
+	case r.Thinking != nil:
+		return "thinking: " + string(r.Thinking.Level)
 	case r.Overflow != nil:
 		return "overflow"
 	default:
@@ -577,6 +585,10 @@ func (s *FileStore) encode(e Entry, parent string) (fileRecord, error) {
 		record.Kind, record.Failure = kindFailure, e.Failure
 	case e.Info != nil:
 		record.Kind, record.Info = kindInfo, e.Info
+	case e.Model != nil:
+		record.Kind, record.Model = kindModel, e.Model
+	case e.Thinking != nil:
+		record.Kind, record.Thinking = kindThinking, e.Thinking
 	default:
 		// Exactly one field is set, by the type's own contract. An empty entry
 		// is a caller's mistake, and writing it would put a record in the file
@@ -622,6 +634,16 @@ func (r fileRecord) decode() (Entry, error) {
 			return Entry{Info: &SessionInfo{}}, nil
 		}
 		return Entry{Info: r.Info}, nil
+	case kindModel:
+		if r.Model == nil {
+			return Entry{}, fmt.Errorf("session: a %s record carries no model", r.Kind)
+		}
+		return Entry{Model: r.Model}, nil
+	case kindThinking:
+		if r.Thinking == nil {
+			return Entry{}, fmt.Errorf("session: a %s record carries no level", r.Kind)
+		}
+		return Entry{Thinking: r.Thinking}, nil
 	default:
 		// Refused rather than skipped. A record this build does not understand
 		// may be the tool call that changed a file, and silently reading past

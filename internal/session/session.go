@@ -38,6 +38,10 @@ type Session struct {
 	// appended before it.
 	checkpoint *Checkpoint
 
+	// model and thinking are the latest recorded on the path, if any.
+	model    *ModelChange
+	thinking *ai.ThinkingLevel
+
 	// sinceCheckpoint is what has been appended after that checkpoint, in order.
 	sinceCheckpoint []ai.Message
 
@@ -705,4 +709,77 @@ func (s *Session) Name() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.name
+}
+
+// RecordModel records that the conversation uses this model from now on.
+// Recording the model already recorded writes nothing: the record is of
+// changes, and a resumed run that kept its model has not changed it.
+func (s *Session) RecordModel(provider, model string) error {
+	s.mu.Lock()
+	if s.model != nil && s.model.Provider == provider && s.model.Model == model {
+		s.mu.Unlock()
+		return nil
+	}
+	previous := s.model
+	change := ModelChange{Provider: provider, Model: model}
+	s.model = &change
+	store := s.store
+	s.mu.Unlock()
+	if store == nil {
+		return nil
+	}
+	if err := store.Append(context.Background(), Entry{Model: &change}); err != nil {
+		// A change that is only in memory would be forgotten by the next run
+		// while this one believes it was kept.
+		s.mu.Lock()
+		s.model = previous
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// RecordThinking records the reasoning level from now on, writing nothing
+// when it is the level already recorded.
+func (s *Session) RecordThinking(level ai.ThinkingLevel) error {
+	s.mu.Lock()
+	if s.thinking != nil && *s.thinking == level {
+		s.mu.Unlock()
+		return nil
+	}
+	previous := s.thinking
+	s.thinking = &level
+	store := s.store
+	s.mu.Unlock()
+	if store == nil {
+		return nil
+	}
+	if err := store.Append(context.Background(), Entry{Thinking: &ThinkingChange{Level: level}}); err != nil {
+		s.mu.Lock()
+		s.thinking = previous
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// RecordedModel is the model the conversation was last recorded using.
+func (s *Session) RecordedModel() (provider, model string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.model == nil {
+		return "", "", false
+	}
+	return s.model.Provider, s.model.Model, true
+}
+
+// RecordedThinking is the reasoning level the conversation was last recorded
+// using.
+func (s *Session) RecordedThinking() (ai.ThinkingLevel, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.thinking == nil {
+		return "", false
+	}
+	return *s.thinking, true
 }

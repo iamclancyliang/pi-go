@@ -175,3 +175,33 @@ type sessionInfo struct {
 	Entries int
 	ID      string
 }
+
+// TestAContinuedConversationCarriesOnWithWhatItWasUsing, for whatever the run
+// did not choose itself — and only for a conversation that has something to
+// continue.
+func TestAContinuedConversationCarriesOnWithWhatItWasUsing(t *testing.T) {
+	sess := session.New("sys")
+	if err := sess.RecordModel("openai", "gpt-test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RecordThinking(ai.ThinkingLow); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, restored := cli.RestoreRecorded(cli.Args{}, sess); restored || got.Model != "" || got.Thinking != "" {
+		t.Fatalf("a conversation with no messages restored %+v", got)
+	}
+
+	if err := sess.Append(ai.Message{Role: ai.RoleUser, Content: "q"}); err != nil {
+		t.Fatal(err)
+	}
+	got, restored := cli.RestoreRecorded(cli.Args{}, sess)
+	if !restored || got.Provider != "openai" || got.Model != "gpt-test" || got.Thinking != ai.ThinkingLow {
+		t.Fatalf("restored %+v (%v)", got, restored)
+	}
+
+	chosen, restored := cli.RestoreRecorded(cli.Args{Model: "deepseek-chat", Thinking: ai.ThinkingHigh}, sess)
+	if restored || chosen.Model != "deepseek-chat" || chosen.Provider != "" || chosen.Thinking != ai.ThinkingHigh {
+		t.Fatalf("what the run chose was overridden: %+v (%v)", chosen, restored)
+	}
+}

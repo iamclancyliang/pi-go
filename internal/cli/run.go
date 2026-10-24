@@ -131,6 +131,10 @@ func RunPrint(ctx context.Context, rt Runtime, streams Streams, prompts []string
 		return 1
 	}
 	sess := rt.Conversation.Session
+	if err := recordInUse(sess, rt.Provider, rt.ModelName, rt.Thinking); err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
 	agent, err := runtime.New(runtime.Config{
 		Model:          rt.Model,
 		ModelName:      rt.ModelName,
@@ -194,6 +198,10 @@ func RunJSON(ctx context.Context, rt Runtime, streams Streams, prompts []string)
 	writer := jsonstream.NewWriter(streams.Out)
 
 	sess := rt.Conversation.Session
+	if err := recordInUse(sess, rt.Provider, rt.ModelName, rt.Thinking); err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
 	agent, err := runtime.New(runtime.Config{
 		Model:          rt.Model,
 		ModelName:      rt.ModelName,
@@ -264,6 +272,9 @@ func newRPCHost(rt Runtime, writer *jsonstream.Writer) (*rpcHost, error) {
 // build makes the agent for the current conversation and model. The writer is
 // wired as both observers, which is how the run's events reach the stream.
 func (h *rpcHost) build() error {
+	if err := recordInUse(h.current.Session, h.prov, h.model, h.rt.Thinking); err != nil {
+		return err
+	}
 	next, err := runtime.New(runtime.Config{
 		Model:          h.port,
 		ModelName:      h.model,
@@ -334,10 +345,31 @@ func (h *rpcHost) reopen(args Args) (rpc.Opened, error) {
 	}
 	_ = h.current.Close()
 	h.current = next
+	h.restoreFrom(next.Session)
 	if err := h.build(); err != nil {
 		return rpc.Opened{}, err
 	}
 	return h.opened(), nil
+}
+
+// restoreFrom carries on with what a conversation just switched to was last
+// using, as Pi's session switch does: its model, when one is recorded and can
+// be opened, and its thinking level, clamped to whichever model answers. A
+// recorded model that cannot be opened — its credential gone, say — leaves
+// the current one answering rather than failing the switch.
+func (h *rpcHost) restoreFrom(sess *session.Session) {
+	restored, fromRecord := RestoreRecorded(Args{}, sess)
+	if fromRecord && (restored.Provider != h.prov || restored.Model != h.model) {
+		next := h.rt.Args
+		next.Provider, next.Model = restored.Provider, restored.Model
+		if opened, provider, model, err := h.rt.openModel(next); err == nil {
+			h.port, h.prov, h.model = opened, provider, model
+			h.rt.Args.Provider, h.rt.Args.Model = provider, model
+		}
+	}
+	if restored.Thinking != "" {
+		h.rt.Thinking = ai.ClampThinkingLevel(ai.AvailableThinkingLevels(h.prov, h.model), restored.Thinking)
+	}
 }
 
 func (h *rpcHost) Fork(entryID string) (rpc.Opened, error) {
@@ -460,6 +492,9 @@ func (h *rpcHost) SetThinkingLevel(level ai.ThinkingLevel) (ai.ThinkingLevel, er
 	effective := ai.ClampThinkingLevel(ai.AvailableThinkingLevels(h.prov, h.model), level)
 	if effective == h.rt.Thinking {
 		return effective, nil
+	}
+	if err := h.current.Session.RecordThinking(effective); err != nil {
+		return h.rt.Thinking, err
 	}
 	h.rt.Thinking = effective
 	h.agent.SetThinking(requestThinking(h.prov, h.model, effective))
@@ -722,6 +757,9 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	port, provider, modelName := rt.Model, rt.Provider, rt.ModelName
 	var agent *runtime.Agent
 	build := func() error {
+		if err := recordInUse(current.Session, provider, modelName, rt.Thinking); err != nil {
+			return err
+		}
 		next, err := runtime.New(runtime.Config{
 			Model:          port,
 			ModelName:      modelName,
@@ -863,6 +901,25 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		_ = current.Close()
 		current = opened
 		ctxt.session, ctxt.conversation = opened.Session, opened
+		// Carry on with what the conversation was last using, as Pi's
+		// session switch does. A recorded model that cannot be opened leaves
+		// the current one answering rather than failing the switch.
+		restored, fromRecord := RestoreRecorded(Args{}, opened.Session)
+		if fromRecord && (restored.Provider != provider || restored.Model != modelName) {
+			next := rt.Args
+			next.Provider, next.Model = restored.Provider, restored.Model
+			if reopened, openedProvider, openedModel, err := rt.openModel(next); err == nil {
+				port, provider, modelName = reopened, openedProvider, openedModel
+				rt.Args, ctxt.args = next, next
+			} else {
+				fmt.Fprintf(streams.Err, "could not restore %s/%s (%v); keeping %s/%s\n",
+					restored.Provider, restored.Model, err, provider, modelName)
+			}
+		}
+		if restored.Thinking != "" {
+			rt.Thinking = ai.ClampThinkingLevel(ai.AvailableThinkingLevels(provider, modelName), restored.Thinking)
+			ctxt.args.Thinking = rt.Thinking
+		}
 		return build()
 	}
 	defer func() { _ = current.Close() }()

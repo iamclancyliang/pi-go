@@ -55,7 +55,10 @@ file carries what a person upgrading would want to know.
 
 ### Conversations
 - Sessions are recorded without being asked, grouped by the directory they ran
-  in. `--continue` carries on, `--resume` reopens by id prefix.
+  in. `--continue` carries on, `--resume` reopens by id prefix. A
+  conversation remembers the model and thinking level it was using, and
+  continuing it — or switching to it — picks them back up unless the run
+  chose its own.
 - A conversation is a tree: `/tree` shows its shape and goes back to any point;
   `/fork` and `/clone` copy into a new conversation, leaving the original
   alone. What a branch left behind never reaches the model.

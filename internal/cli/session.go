@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamclancyliang/pi-go/internal/ai"
 	"github.com/iamclancyliang/pi-go/internal/session"
 )
 
@@ -173,4 +174,49 @@ func resolveSessionName(agentDir, workingDir, name string) (string, error) {
 		}
 		return "", fmt.Errorf("%q matches more than one session: %s", name, strings.Join(ids, ", "))
 	}
+}
+
+// RestoreRecorded fills in, from a conversation being continued, what this
+// run did not choose for itself: the model it was last using, when neither
+// --provider nor --model was given, and its thinking level, when --thinking
+// was not. Pi restores both the same way (createAgentSession at the pin), and
+// before any default from settings, so a resumed conversation carries on as
+// it was rather than as the next run happens to default.
+//
+// A conversation with no messages has nothing to continue, and is left to
+// the defaults like a new one. Restored reports whether a model came from the
+// record, so a caller that cannot open it can say so and fall back.
+func RestoreRecorded(args Args, sess *session.Session) (out Args, restored bool) {
+	if len(sess.Snapshot().Messages) == 0 {
+		return args, false
+	}
+	if args.Provider == "" && args.Model == "" {
+		if provider, model, ok := sess.RecordedModel(); ok {
+			args.Provider, args.Model, restored = provider, model, true
+		}
+	}
+	if args.Thinking == "" {
+		if level, ok := sess.RecordedThinking(); ok {
+			args.Thinking = level
+		}
+	}
+	return args, restored
+}
+
+// recordInUse writes the model and thinking level a run is about to use into
+// its conversation, so the next run that continues it can restore them.
+// Recording what is already recorded writes nothing, and asking for nothing
+// records nothing.
+func recordInUse(sess *session.Session, provider, model string, thinking ai.ThinkingLevel) error {
+	if provider != "" && model != "" {
+		if err := sess.RecordModel(provider, model); err != nil {
+			return err
+		}
+	}
+	if thinking != "" {
+		if err := sess.RecordThinking(thinking); err != nil {
+			return err
+		}
+	}
+	return nil
 }
