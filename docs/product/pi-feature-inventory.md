@@ -772,6 +772,8 @@ interface plan (`docs/specs/tui-split-plan.md`, slice T1). Regular is Pi's defau
   finds it in the bottom `height` lines only, strips it, and moves the real cursor there with
   relative row moves and an absolute column (`CSI n A/B`, `CSI col G`); with no marker the cursor
   is hidden (`tui-main-screen.ts:554`). This is what places an input method's candidate window.
+  The cursor is positioned either way but **shown only when `PI_HARDWARE_CURSOR=1`**
+  (`tui.ts:344`); by default the editor draws its own.
 * **Differential output, in this order** (`tui-main-screen.ts:180` onward). Each frame renders all
   lines, composites overlays, extracts the cursor, then:
   1. first frame with no size change → write everything without clearing;
@@ -779,8 +781,10 @@ interface plan (`docs/specs/tui-split-plan.md`, slice T1). Regular is Pi's defau
      because wrapping changed;
   3. height changed → the same full redraw, except under Termux, where the soft keyboard changes
      the height and a redraw would replay the whole history on every toggle;
-  4. content shrank below the most lines ever rendered and no overlay is open → full redraw to clear
-     the rows left behind (`clearOnShrink`, switchable by `PI_CLEAR_ON_SHRINK=0`);
+  4. content shrank below the most lines ever rendered, no overlay is open and `clearOnShrink` is on
+     → full redraw to clear the rows left behind. **Off by default**: the field is initialised from
+     `PI_CLEAR_ON_SHRINK === "1"` (`tui.ts:345`), although the setter's doc comment calls it the
+     default — the field is what runs;
   5. otherwise find the first and last changed line; nothing changed → move only the cursor;
      only deletions → clear the trailing rows in place; first change above the previous viewport →
      full redraw (what scrolled away cannot be edited); else move to the first changed line,

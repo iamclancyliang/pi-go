@@ -1,17 +1,23 @@
 // Package tui is the terminal the interactive mode runs in.
 //
-// This is the INPUT slice: raw mode, key decoding, a line editor and the
-// bindings between them. It is not Pi's full-screen interface — there is no
-// alternate screen, no chat rendering, no selector lists yet. The seam between
-// the two is the editor: what Pi's interface does with a keystroke is decided
-// by the same kind of binding table this one reads.
+// Two layers. The input layer — key decoding, a line editor and the bindings
+// between them — is what the line-based prompt uses today. The rendering
+// core under it is Pi's regular-mode interface model (ADR-0011): components
+// render themselves to lines for a width, and a renderer draws only the lines
+// that changed into the terminal's main screen, leaving the conversation in
+// its scrollback. What the renderer must do is recorded in
+// docs/product/pi-feature-inventory.md §11.4–11.5.
 //
-// Decoding, editing and layout are pure; only terminal.go touches the
-// terminal. That split is what makes an editor testable — a keystroke's effect
-// is a function of the buffer, not of the device it came from.
+// Decoding, editing, layout and rendering are pure over their inputs and
+// outputs; only tty.go and terminal.go touch a real terminal. That split is
+// what makes them testable — a frame is a screen a test terminal can be
+// asked about, and a keystroke's effect is a function of the buffer.
 package tui
 
 import "strings"
+
+// pasteEnd closes a bracketed paste.
+const pasteEnd = "\x1b[201~"
 
 // Key is one decoded keystroke, named the way Pi names them: "enter", "ctrl+a",
 // "alt+left", "shift+enter". Printable text arrives as Text instead.
@@ -21,6 +27,11 @@ type Key struct {
 
 	// Text is the printable input, when the keystroke is one.
 	Text rune
+
+	// Paste is what was pasted, for the "paste" key: the terminal's
+	// bracketed paste delivered whole, line breaks and all, so none of it is
+	// taken for keystrokes.
+	Paste string
 }
 
 // IsText reports a keystroke that types something rather than commands
@@ -199,6 +210,13 @@ func decodeCSI(raw []byte) (Key, int, bool) {
 			base = "pageUp"
 		case "6":
 			base = "pageDown"
+		case "200":
+			// Bracketed paste: everything up to the end marker is the paste.
+			end := strings.Index(string(raw[consumed:]), pasteEnd)
+			if end < 0 {
+				return Key{}, 0, false
+			}
+			return Key{Name: "paste", Paste: string(raw[consumed : consumed+end])}, consumed + end + len(pasteEnd), true
 		default:
 			return Key{}, consumed, true
 		}

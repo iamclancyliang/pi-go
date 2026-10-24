@@ -102,3 +102,25 @@ func TestASplitRuneWaitsForItsTail(t *testing.T) {
 		t.Fatalf("reassembly decoded %+v", keys)
 	}
 }
+
+// TestAPasteArrivesAsOneKeyWithItsText. With bracketed paste on, the terminal
+// wraps what was pasted in markers; decoding it as keystrokes would run every
+// newline in it as enter and every control character as a command.
+func TestAPasteArrivesAsOneKeyWithItsText(t *testing.T) {
+	keys, rest := tui.Decode([]byte("a\x1b[200~line one\r\nline\ttwo\x1b[201~b"))
+	if len(rest) != 0 || len(keys) != 3 {
+		t.Fatalf("decoded %+v, rest %q", keys, rest)
+	}
+	if keys[1].Name != "paste" || keys[1].Paste != "line one\r\nline\ttwo" {
+		t.Fatalf("the paste decoded as %+v", keys[1])
+	}
+	if keys[0].Text != 'a' || keys[2].Text != 'b' {
+		t.Fatalf("the keys around the paste were lost: %+v", keys)
+	}
+
+	// A paste still arriving waits for its end marker.
+	keys, rest = tui.Decode([]byte("\x1b[200~half of it"))
+	if len(keys) != 0 || string(rest) != "\x1b[200~half of it" {
+		t.Fatalf("an unfinished paste decoded as %+v, rest %q", keys, rest)
+	}
+}

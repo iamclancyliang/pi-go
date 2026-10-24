@@ -206,7 +206,7 @@ Pi source: `packages/tui`, `src/modes/interactive/`. Class B/R. Target v2.
 | key decoding | `internal/tui/keys.go` | `TestDecodingTheKeysTheBindingsName`, `TestAReadEndingMidSequenceWaitsForTheRest` | compatible |
 | line editor, kill ring, undo, history | `internal/tui/editor.go` | `TestConsecutiveKillsYankBackAsOne`, `TestHistoryBrowsingKeepsTheLineBeingWritten` | compatible |
 | key assignments | `internal/tui/bindings.go` | table is Pi's verbatim for the actions implemented | compatible |
-| full-screen interface, chat rendering, selectors, overlays | — | — | **incomplete** (#28) — the bulk of `packages/tui` (16.7k lines) and `interactive-mode.ts`; planned as slices T0–T7 in `docs/specs/tui-split-plan.md`, T0 done (inventory §11.4–11.6, ADR-0011) |
+| full-screen interface, chat rendering, selectors, overlays | — | — | **incomplete** (#28) — the bulk of `packages/tui` (16.7k lines) and `interactive-mode.ts`; planned as slices T0–T7 in `docs/specs/tui-split-plan.md`; T0 done (inventory §11.4–11.6, ADR-0011), T1 done — the rendering core in `internal/tui` (`screen.go`, `ui.go`, `width.go`, `component.go`, `tty.go`), with Pi's width, wrap, truncate and render scenarios as tests on a test terminal; nothing user-visible until T3 switches the interactive mode over |
 
 ## Deviation register — decided 2026-08-29
 

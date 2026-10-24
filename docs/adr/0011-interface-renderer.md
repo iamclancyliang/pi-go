@@ -52,7 +52,11 @@ Two dependencies follow, and no more:
 * **`github.com/yuin/goldmark`**, already a dependency for the HTML export, parses Markdown for the
   chat transcript. Its tree is rendered to terminal lines here, as Pi renders `marked`'s tokens.
 
-`golang.org/x/term`, already used, provides raw mode and the terminal size.
+`golang.org/x/term`, already used, provides raw mode and the terminal size. `golang.org/x/sys`,
+already in the graph beneath it, is used directly for `select(2)`: a terminal device cannot join
+Go's poller on macOS, so read deadlines do nothing there, and the reader waits for input with a
+timeout instead in order to notice when it should stop. macOS's `poll(2)` reports a terminal as
+invalid, which is why it is `select`.
 
 ## Consequences
 
