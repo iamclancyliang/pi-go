@@ -51,26 +51,41 @@ func EstimateConversation(messages []ai.Message) int {
 	return total
 }
 
-// CutPoint is the index of the first message to keep verbatim.
+// Cut says where to compact a conversation.
+type Cut struct {
+	// Keep is the index of the first message kept verbatim.
+	Keep int
+
+	// TurnStart is the index of the user message that opened the turn Keep
+	// falls inside, and Split says whether it falls inside one at all. When it
+	// does, the messages from TurnStart up to Keep are that turn's prefix,
+	// summarised on their own, and only those before TurnStart are history.
+	TurnStart int
+	Split     bool
+}
+
+// FindCut walks back from the end adding up what each message costs and,
+// once the budget is used, cuts at the nearest point it is SAFE to cut at —
+// Pi's findCutPoint, at the level of messages.
 //
-// Walks back from the end adding up what each message costs, and once the
-// budget is used, cuts at the nearest point it is SAFE to cut at.
-//
-// Safe means the start of a turn. A tool result must follow its call, so a cut
-// between them produces a request the provider refuses; and an assistant reply
-// separated from the question it answered reads as an answer to whatever came
-// before. Pi will cut inside a turn and summarise the part it dropped
-// separately; this does not, so it keeps slightly more than Pi would. Keeping
-// too much costs tokens, and cutting in the wrong place costs the call.
-func CutPoint(messages []ai.Message, keepRecentTokens int) int {
+// Safe means a user message or an assistant reply, never a tool result: a
+// result must follow its call, and a conversation that begins with one is a
+// request the provider refuses. Cutting at an assistant reply keeps the
+// results that follow it. When that reply is inside a turn, the turn is
+// split, and its dropped start is summarised separately so the kept part is
+// not an answer to a question nobody can see.
+func FindCut(messages []ai.Message, keepRecentTokens int) Cut {
 	if keepRecentTokens <= 0 {
 		keepRecentTokens = DefaultKeepRecentTokens
 	}
-	starts := turnStarts(messages)
-	if len(starts) == 0 {
-		return 0
+	points := cutPoints(messages)
+	if len(points) == 0 {
+		return Cut{TurnStart: -1}
 	}
 
+	// The whole conversation fits in the budget unless the walk below finds
+	// otherwise, so by default everything from the first cut point is kept.
+	keep := points[0]
 	accumulated := 0
 	for i := len(messages) - 1; i >= 0; i-- {
 		cost := EstimateTokens(messages[i])
@@ -81,35 +96,55 @@ func CutPoint(messages []ai.Message, keepRecentTokens int) int {
 		if accumulated < keepRecentTokens {
 			continue
 		}
-		// The first safe point at or after here. Going forward rather than back
-		// keeps the budget an upper bound on what is retained.
-		for _, start := range starts {
-			if start >= i {
-				return start
+		// The first safe point at or after here. Going forward rather than
+		// back keeps the budget an upper bound on what is retained.
+		keep = points[len(points)-1]
+		for _, p := range points {
+			if p >= i {
+				keep = p
+				break
 			}
 		}
-		// Everything before the last turn is over budget on its own, so keep
-		// only that turn rather than nothing.
-		return starts[len(starts)-1]
+		// When nothing safe lies at or after here — the newest tool results
+		// alone are over budget — the last safe point is kept rather than
+		// everything. Pi keeps everything in that case, which leaves an
+		// overflow with nothing to summarise and no way to recover.
+		break
 	}
-	// The whole conversation fits in the budget, so the first turn is kept and
-	// there is nothing before it to summarise.
-	return starts[0]
+
+	if startsTurn(messages[keep]) {
+		return Cut{Keep: keep, TurnStart: -1}
+	}
+	for i := keep - 1; i >= 0; i-- {
+		if startsTurn(messages[i]) {
+			return Cut{Keep: keep, TurnStart: i, Split: true}
+		}
+	}
+	return Cut{Keep: keep, TurnStart: -1}
 }
 
-// turnStarts are the indices where a turn begins: a message from the user.
-//
-// Not every message is one. An assistant reply, a tool call and its result all
-// belong to the turn the user opened, and a conversation cut anywhere but a
-// turn start is one that begins mid-exchange.
-func turnStarts(messages []ai.Message) []int {
+// CutPoint is the index of the first message to keep verbatim.
+func CutPoint(messages []ai.Message, keepRecentTokens int) int {
+	return FindCut(messages, keepRecentTokens).Keep
+}
+
+// cutPoints are the indices a cut may land on: what the context shows as a
+// user message, and assistant replies.
+func cutPoints(messages []ai.Message) []int {
 	var out []int
 	for i, m := range messages {
-		if m.Role == ai.RoleUser && (m.BashExecution == nil || !m.BashExecution.ExcludeFromContext) {
+		if startsTurn(m) || m.Role == ai.RoleAssistant {
 			out = append(out, i)
 		}
 	}
 	return out
+}
+
+// startsTurn reports a message that opens a turn: a user message the context
+// shows. A shell record kept out of the context opens nothing, since the
+// model never sees it.
+func startsTurn(m ai.Message) bool {
+	return m.Role == ai.RoleUser && (m.BashExecution == nil || !m.BashExecution.ExcludeFromContext)
 }
 
 // Compactor turns the front of a conversation into a summary.
@@ -143,22 +178,7 @@ func (e *ErrNothingToCompact) Error() string { return e.Why }
 //
 // Returns the summary and the messages to keep verbatim after it.
 func (c *Compactor) Summarize(ctx context.Context, truth []ai.Message) (string, []ai.Message, error) {
-	cut := CutPoint(truth, c.KeepRecentTokens)
-	if cut <= 0 {
-		return "", nil, &ErrNothingToCompact{
-			Why: "there is nothing before the recent part to summarise"}
-	}
-
-	head, tail := truth[:cut], truth[cut:]
-	summary, err := c.summarise(ctx, head, "")
-	if err != nil {
-		return "", nil, err
-	}
-	// The tail is copied: the caller keeps its own slice, and a checkpoint that
-	// shares memory with the live conversation is not a record of anything.
-	kept := make([]ai.Message, len(tail))
-	copy(kept, tail)
-	return summary, kept, nil
+	return c.compact(ctx, truth, "", "there is nothing before the recent part to summarise")
 }
 
 // Recompact summarises again, folding what has happened since into an existing
@@ -169,25 +189,67 @@ func (c *Compactor) Summarize(ctx context.Context, truth []ai.Message) (string, 
 // would ask it to summarise a conversation it can no longer see, and the
 // earliest goals and decisions would quietly disappear at the second compaction.
 func (c *Compactor) Recompact(ctx context.Context, previous string, since []ai.Message) (string, []ai.Message, error) {
-	cut := CutPoint(since, c.KeepRecentTokens)
-	if cut <= 0 {
-		return "", nil, &ErrNothingToCompact{
-			Why: "nothing has happened since the last summary that is worth summarising"}
+	return c.compact(ctx, since, previous,
+		"nothing has happened since the last summary that is worth summarising")
+}
+
+// compact summarises what comes before the cut and keeps the rest.
+//
+// A split turn costs two summaries, joined the way Pi joins them so that one
+// checkpoint carries both: the history before the turn, then the turn's
+// dropped start under its own heading.
+func (c *Compactor) compact(ctx context.Context, messages []ai.Message, previous, nothing string) (string, []ai.Message, error) {
+	cut := FindCut(messages, c.KeepRecentTokens)
+	historyEnd := cut.Keep
+	if cut.Split {
+		historyEnd = cut.TurnStart
 	}
-	head, tail := since[:cut], since[cut:]
-	summary, err := c.summarise(ctx, head, previous)
-	if err != nil {
-		return "", nil, err
+	if historyEnd <= 0 && !cut.Split {
+		return "", nil, &ErrNothingToCompact{Why: nothing}
 	}
-	kept := make([]ai.Message, len(tail))
-	copy(kept, tail)
+
+	var summary string
+	if cut.Split {
+		// Pi writes "No prior history." whenever nothing precedes the split
+		// turn, dropping a previous summary on the floor. Keeping it is the
+		// whole point of recompacting rather than starting over.
+		history := "No prior history."
+		if previous != "" {
+			history = previous
+		}
+		if historyEnd > 0 {
+			var err error
+			if history, err = c.summarise(ctx, messages[:historyEnd], previous); err != nil {
+				return "", nil, err
+			}
+		}
+		prefix, err := c.summarisePrefix(ctx, messages[cut.TurnStart:cut.Keep])
+		if err != nil {
+			return "", nil, err
+		}
+		summary = history + "\n\n---\n\n**Turn Context (split turn):**\n\n" + prefix
+	} else {
+		var err error
+		if summary, err = c.summarise(ctx, messages[:historyEnd], previous); err != nil {
+			return "", nil, err
+		}
+	}
+
+	// The tail is copied: the caller keeps its own slice, and a checkpoint that
+	// shares memory with the live conversation is not a record of anything.
+	kept := make([]ai.Message, len(messages)-cut.Keep)
+	copy(kept, messages[cut.Keep:])
 	return summary, kept, nil
 }
 
+// summarisePrefix summarises the dropped start of a split turn, for the part
+// of it that is kept. Pi gives it no custom focus: what it needs is whatever
+// makes the kept work make sense.
+func (c *Compactor) summarisePrefix(ctx context.Context, messages []ai.Message) (string, error) {
+	return c.ask(ctx, "<conversation>\n"+serialize(messages)+"\n</conversation>\n\n"+turnPrefixSummarizationPrompt)
+}
+
 func (c *Compactor) summarise(ctx context.Context, messages []ai.Message, previous string) (string, error) {
-	if c.Model == nil {
-		return "", fmt.Errorf("compaction: no model to summarise with")
-	}
 	base := summarizationPrompt
 	if previous != "" {
 		base = updateSummarizationPrompt
@@ -209,12 +271,19 @@ func (c *Compactor) summarise(ctx context.Context, messages []ai.Message, previo
 		prompt.WriteString("\n</previous-summary>\n\n")
 	}
 	prompt.WriteString(base)
+	return c.ask(ctx, prompt.String())
+}
 
+// ask sends one summarisation prompt and returns what came back.
+func (c *Compactor) ask(ctx context.Context, prompt string) (string, error) {
+	if c.Model == nil {
+		return "", fmt.Errorf("compaction: no model to summarise with")
+	}
 	reply, err := c.Model.Generate(ctx, ai.Request{
 		Model: c.ModelName,
 		Messages: []ai.Message{
 			{Role: ai.RoleSystem, Content: summarizationSystemPrompt},
-			{Role: ai.RoleUser, Content: prompt.String()},
+			{Role: ai.RoleUser, Content: prompt},
 		},
 	})
 	if err != nil {

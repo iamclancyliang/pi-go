@@ -151,7 +151,7 @@ Pi source: `src/core/slash-commands.ts:20-41` and the handlers in
 | --- | --- | --- |
 | `session`, `new`, `resume`, `quit`, `help` | `internal/cli/commands.go` | compatible |
 | `tree`, `fork`, `clone` | `internal/cli/commands.go` + `internal/session/filestore.go` | compatible-via-adapter — selectors are line-based, not Pi's TUI pickers |
-| `compact` | `internal/compaction/` | compatible, less D-3 |
+| `compact` | `internal/compaction/` | compatible |
 | `name`, `export`, `import`, `copy` | `internal/cli/commands.go` | compatible, less D-4 (import), D-5 (export/share format) |
 | `share` | `internal/cli/commands.go` | compatible, less D-5, D-6 |
 | `model` | `internal/cli/commands.go` | partial — typed `<provider/model>` selection plus on-demand provider-reported listing; the full-screen picker remains #28. Accepting a name no listing contains is D-15, not a gap |
@@ -172,7 +172,7 @@ Pi source: `src/core/session-manager.ts`, `agent-session-runtime.ts`. Class B/W/
 | durable session record | `internal/session/filestore.go` | `TestAConversationOutlivesTheProcessThatWroteIt`, `TestAppendingIsAllOrNone`, `TestEveryKindOfEntrySurvives` | compatible-via-adapter — format is pi-go's own under ADR-0006 (D-9) |
 | discovery, `--continue`, `--resume` | `internal/session/discovery.go`, `internal/cli/session.go` | `TestSessionsAreGroupedByWhereTheyRan`, `TestAnEmptySessionIsNotWhatContinueResumes`, live `TestLiveDeepSeekRemembersAcrossTwoRuns` | compatible |
 | session tree, branch, fork | `internal/session/filestore.go` | `TestBranchingLeavesTheOldLineWhereItWas`, `TestForkingCopiesIntoANewFileAndLeavesTheOldOne`, live `TestLiveDeepSeekDoesNotSeeAnAbandonedBranch` | compatible |
-| compaction | `internal/compaction/` | `TestACutNeverSeparatesAToolCallFromItsResult`, live `TestLiveDeepSeekSummarisesAConversation` | compatible, less D-3 |
+| compaction | `internal/compaction/`, `internal/session/session.go` `SummaryMessage` | `TestACutNeverSeparatesAToolCallFromItsResult`, `TestALongSingleTurnIsSplitRatherThanLeftWhole`, `TestASplitSummarisesTheHistoryAndThePrefixSeparately` (both confirmed to fail when no turn is split), `TestASplitTurnNeverKeepsAToolResultFirst`, `TestA12ASplitTurnLeavesAContextAProviderAccepts`, `TestASummaryReachesTheModelAsAUserMessageThatSaysWhatItIs`, live `TestLiveDeepSeekSummarisesAConversation` | compatible — two differences from Pi are kept on purpose: when the newest tool results alone exceed the budget the last safe point is kept rather than everything, and a split recompaction with no new history keeps the previous summary rather than writing "No prior history." |
 | session name | `internal/session/store.go` | `TestNamingAConversationOutlivesTheRun` | compatible |
 | labels, branch summaries, `session_info` beyond name | — | — | **incomplete** (#32) — entry kinds not ported |
 
@@ -241,9 +241,14 @@ statement that Pi's behaviour is wrong.
 
 | # | Issue | Where | Pi | pi-go | What closing it needs |
 | --- | --- | --- | --- | --- | --- |
-| D-3 | #26 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
 | D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
+
+`D-3` (#26, compaction only at turn starts) **was closed on 2026-10-24**: a cut may land on an
+assistant reply inside a turn, whose dropped start is summarised with Pi's turn-prefix prompt and
+joined to the history summary the way Pi joins them. It needed the summary projected as Pi
+projects it — a user message saying what it is — rather than as a system message, which would
+have left a kept reply with no user message before it.
 
 `D-2` (#25, `edit` without fuzzy matching) **was closed on 2026-10-24**: the fallback and
 the line-preserving overlay are ported, and the overlay's property — every line no edit touches

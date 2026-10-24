@@ -21,7 +21,8 @@ func calling(id, name, args string) ai.Message {
 
 // TestACutNeverSeparatesAToolCallFromItsResult is the constraint that costs a
 // call when it is broken: a provider refuses a conversation whose first message
-// is a tool result with nothing to answer.
+// is a tool result with nothing to answer. A cut may land on an assistant
+// reply, inside a turn; never on a result.
 func TestACutNeverSeparatesAToolCallFromItsResult(t *testing.T) {
 	long := strings.Repeat("x", 4000) // 1000 tokens each
 	var messages []ai.Message
@@ -38,9 +39,8 @@ func TestACutNeverSeparatesAToolCallFromItsResult(t *testing.T) {
 		if cut < 0 || cut >= len(messages) {
 			t.Fatalf("budget %d cut at %d, outside the conversation", budget, cut)
 		}
-		if got := messages[cut].Role; got != ai.RoleUser {
-			t.Fatalf("budget %d cut at a %s message; a kept conversation must start with a question",
-				budget, got)
+		if got := messages[cut].Role; got == ai.RoleTool {
+			t.Fatalf("budget %d cut at a tool result, separating it from the call it answers", budget)
 		}
 	}
 }
@@ -211,4 +211,131 @@ type refusingModel struct{}
 
 func (refusingModel) Generate(context.Context, ai.Request) (ai.Response, error) {
 	return ai.Response{}, errors.New("this model must not be reached")
+}
+
+// recordingModel answers every request with the next reply and keeps them all.
+type recordingModel struct {
+	replies  []string
+	requests []ai.Request
+}
+
+func (r *recordingModel) Generate(_ context.Context, req ai.Request) (ai.Response, error) {
+	r.requests = append(r.requests, req)
+	reply := "summary"
+	if len(r.requests) <= len(r.replies) {
+		reply = r.replies[len(r.requests)-1]
+	}
+	return ai.Response{Content: reply}, nil
+}
+
+// oneLongTurn is a single question followed by rounds of tool work, each far
+// larger than a small budget: the shape that used to leave nothing to
+// summarise, because the only turn start is the first message.
+func oneLongTurn(rounds int) []ai.Message {
+	long := strings.Repeat("x", 4000) // 1000 tokens each
+	messages := []ai.Message{user("refactor the parser")}
+	for i := 0; i < rounds; i++ {
+		id := "call-" + string(rune('a'+i))
+		messages = append(messages, calling(id, "read", `{"path":"p.go"}`), toolResult(id, long))
+	}
+	return append(messages, assistant("done"))
+}
+
+// TestALongSingleTurnIsSplitRatherThanLeftWhole. With a turn start the only
+// place to cut, one long turn could not be compacted at all, and an overflow
+// inside it could not be recovered. Pi cuts inside the turn and summarises
+// the part it dropped with its own prompt.
+func TestALongSingleTurnIsSplitRatherThanLeftWhole(t *testing.T) {
+	messages := oneLongTurn(10)
+	cut := compaction.FindCut(messages, 2500)
+	if !cut.Split || cut.TurnStart != 0 || cut.Keep <= 0 {
+		t.Fatalf("one long turn was not split: %+v", cut)
+	}
+	if messages[cut.Keep].Role != ai.RoleAssistant {
+		t.Fatalf("the split kept from a %s message", messages[cut.Keep].Role)
+	}
+
+	model := &recordingModel{replies: []string{"PREFIX-SUMMARY"}}
+	c := &compaction.Compactor{Model: model, ModelName: "m", KeepRecentTokens: 2500}
+	summary, kept, err := c.Summarize(context.Background(), messages)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	// Nothing came before the turn, so only the prefix is summarised: one call.
+	if len(model.requests) != 1 {
+		t.Fatalf("%d summarisation calls, want 1", len(model.requests))
+	}
+	prompt := model.requests[0].Messages[1].Content
+	if !strings.Contains(prompt, "This is the PREFIX of a turn that was too large to keep") ||
+		!strings.Contains(prompt, "refactor the parser") {
+		t.Fatalf("the prefix was not summarised with the turn-prefix prompt:\n%s", prompt)
+	}
+	want := "No prior history.\n\n---\n\n**Turn Context (split turn):**\n\nPREFIX-SUMMARY"
+	if summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
+	}
+	if len(kept) != len(messages)-cut.Keep || kept[0].Role != ai.RoleAssistant {
+		t.Fatalf("kept %d messages starting with %v", len(kept), kept[0].Role)
+	}
+}
+
+// TestASplitSummarisesTheHistoryAndThePrefixSeparately, then joins them the
+// way Pi does, so one checkpoint carries both.
+func TestASplitSummarisesTheHistoryAndThePrefixSeparately(t *testing.T) {
+	long := strings.Repeat("x", 4000)
+	messages := append([]ai.Message{user("earlier question " + long), assistant("earlier answer " + long)},
+		oneLongTurn(10)...)
+
+	model := &recordingModel{replies: []string{"HISTORY-SUMMARY", "PREFIX-SUMMARY"}}
+	c := &compaction.Compactor{Model: model, ModelName: "m", KeepRecentTokens: 2500, Instructions: "focus on the parser"}
+	summary, _, err := c.Summarize(context.Background(), messages)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("%d summarisation calls, want one for the history and one for the prefix", len(model.requests))
+	}
+	history, prefix := model.requests[0].Messages[1].Content, model.requests[1].Messages[1].Content
+	if !strings.Contains(history, "earlier question") || strings.Contains(history, "refactor the parser") {
+		t.Fatalf("the history summary saw the wrong messages:\n%s", history)
+	}
+	if !strings.Contains(history, "focus on the parser") {
+		t.Fatal("the user's focus did not reach the history summary")
+	}
+	if !strings.Contains(prefix, "refactor the parser") || strings.Contains(prefix, "earlier question") {
+		t.Fatalf("the prefix summary saw the wrong messages:\n%s", prefix)
+	}
+	if summary != "HISTORY-SUMMARY\n\n---\n\n**Turn Context (split turn):**\n\nPREFIX-SUMMARY" {
+		t.Fatalf("summary = %q", summary)
+	}
+}
+
+// TestASplitRecompactionKeepsThePreviousSummary when nothing new came before
+// the split turn. Pi writes "No prior history." there and loses every goal
+// the previous summary held; keeping it is what recompaction is for.
+func TestASplitRecompactionKeepsThePreviousSummary(t *testing.T) {
+	model := &recordingModel{replies: []string{"PREFIX-SUMMARY"}}
+	c := &compaction.Compactor{Model: model, ModelName: "m", KeepRecentTokens: 2500}
+	summary, _, err := c.Recompact(context.Background(), "THE EARLIER SUMMARY", oneLongTurn(10))
+	if err != nil {
+		t.Fatalf("Recompact: %v", err)
+	}
+	if !strings.HasPrefix(summary, "THE EARLIER SUMMARY\n\n---\n\n**Turn Context (split turn):**") {
+		t.Fatalf("the previous summary was lost: %q", summary)
+	}
+}
+
+// TestASplitTurnNeverKeepsAToolResultFirst, at every budget: the property the
+// split has to keep that a turn-start cut kept for free.
+func TestASplitTurnNeverKeepsAToolResultFirst(t *testing.T) {
+	messages := oneLongTurn(12)
+	for budget := 100; budget <= 20000; budget += 300 {
+		cut := compaction.FindCut(messages, budget)
+		if messages[cut.Keep].Role == ai.RoleTool {
+			t.Fatalf("budget %d kept from a tool result", budget)
+		}
+		if cut.Split && (cut.TurnStart < 0 || cut.TurnStart >= cut.Keep || messages[cut.TurnStart].Role != ai.RoleUser) {
+			t.Fatalf("budget %d split without the turn's start before it: %+v", budget, cut)
+		}
+	}
 }

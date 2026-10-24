@@ -55,7 +55,9 @@ file carries what a person upgrading would want to know.
   decisions, next steps — and the same summariser recovers automatically when
   a request overflows the model's context. An overflow is recognised from any
   provider that words it the way pi has recorded, not only from the providers
-  whose own messages were measured.
+  whose own messages were measured. A single long turn — one question and
+  many rounds of tool work — can be compacted too: the cut lands inside it,
+  and the part dropped is summarised on its own.
 
 ### The session
 - Slash commands: `/help`, `/session`, `/name`, `/export`, `/import`, `/copy`,

@@ -53,3 +53,20 @@ Update the existing structured summary with new information. RULES:
 - If something is no longer relevant, you may remove it
 
 Use the same structured format as the previous summary. Keep each section concise. Preserve exact file paths, function names, and error messages.`
+
+// turnPrefixSummarizationPrompt summarises the start of a turn too large to
+// keep whole, for the part of it that is kept.
+const turnPrefixSummarizationPrompt = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained.
+
+Summarize the prefix to provide context for the retained suffix:
+
+## Original Request
+[What did the user ask for in this turn?]
+
+## Early Progress
+- [Key decisions and work done in the prefix]
+
+## Context for Suffix
+- [Information needed to understand the retained recent work]
+
+Be concise. Focus on what's needed to understand the kept suffix.`
