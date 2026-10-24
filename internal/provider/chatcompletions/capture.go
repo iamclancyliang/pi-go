@@ -243,7 +243,12 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// Classified here, where the status and the provider's own error code
 		// both exist. After this the adapter turns it into prose, and a
 		// classification rebuilt from prose is one a change of wording breaks.
-		refused := t.classifier.Refusal(resp.StatusCode, raw, t.key)
+		//
+		// The port's own classifier speaks first; the shared overflow wordings
+		// are the fallback for a provider whose overflow message nobody here
+		// recorded, so the one refusal the runtime can recover from is not
+		// left as an ordinary one.
+		refused := ai.RecogniseOverflow(t.classifier.Refusal(resp.StatusCode, raw, t.key))
 		var classified *ai.ProviderError
 		if errors.As(refused, &classified) {
 			// The provider's own instruction about retrying travels with the

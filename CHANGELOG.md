@@ -46,7 +46,9 @@ file carries what a person upgrading would want to know.
   alone. What a branch left behind never reaches the model.
 - `/compact` summarises the older part into a structured checkpoint — goal,
   decisions, next steps — and the same summariser recovers automatically when
-  a request overflows the model's context.
+  a request overflows the model's context. An overflow is recognised from any
+  provider that words it the way pi has recorded, not only from the providers
+  whose own messages were measured.
 
 ### The session
 - Slash commands: `/help`, `/session`, `/name`, `/export`, `/import`, `/copy`,

@@ -233,7 +233,10 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// Classified here, where the status and the provider's own error code
 		// both exist. After this the adapter turns it into prose, and a
 		// classification rebuilt from prose is one a change of wording breaks.
-		refused := failureFrom(resp.StatusCode, raw, t.key)
+		// The provider's own overflow code is checked inside failureFrom; the
+		// shared wordings catch the same condition relayed by a proxy, where
+		// the code is gone and only the message survives.
+		refused := ai.RecogniseOverflow(failureFrom(resp.StatusCode, raw, t.key))
 		var classified *ai.ProviderError
 		if errors.As(refused, &classified) {
 			// The provider's own instruction about retrying travels with the

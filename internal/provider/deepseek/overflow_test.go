@@ -135,3 +135,22 @@ func TestAnOverflowRefusalIsNotRetriedAsTransient(t *testing.T) {
 		t.Fatalf("an overflow refusal was sent %d times", tr.requests)
 	}
 }
+
+// TestAnOverflowInAnotherRecordedWordingIsRecognised. The two-number
+// comparison above is this provider's own wording; a refusal worded the way
+// another backend words it — here Together AI's, as pi recorded it — still
+// reaches the recovery path through the shared list, and is sent once.
+func TestAnOverflowInAnotherRecordedWordingIsRecognised(t *testing.T) {
+	tr := &countingTransport{respond: func(int) *http.Response {
+		return status(400, `{"error":{"type":"invalid_request_error","message":"The input (516368 tokens) is longer than the model's context length (262144 tokens)."}}`)
+	}}
+	p := newPort(t, tr, env{"DEEPSEEK_API_KEY": "sk-probe-test-credential"})
+
+	_, err := p.Generate(context.Background(), ai.Request{Model: "m"})
+	if !errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("an overflow produced %v, so the shortening path never runs", err)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("an overflow refusal was sent %d times", tr.requests)
+	}
+}

@@ -300,7 +300,9 @@ func failureFromBytes(status int, raw []byte, key string) error {
 	if overflow, isOverflow := overflowFromRejection(status, raw); isOverflow {
 		return overflow
 	}
-	return failureWith(classifyStatus(status), status, raw, key)
+	// The numbers are this provider's wording; the shared list is the fallback
+	// for an overflow worded any other way.
+	return ai.RecogniseOverflow(failureWith(classifyStatus(status), status, raw, key))
 }
 
 // failureWith builds a failure whose classification was already decided.
@@ -427,6 +429,14 @@ func (p *Port) send(ctx context.Context, body wireRequest) (*http.Response, Cred
 		failure := classifyStatus(resp.StatusCode)
 		if p.cfg.DetectExhaustion != nil && p.cfg.DetectExhaustion(resp.StatusCode, raw) {
 			failure = FailureQuota
+		}
+		// An overflow in a wording recorded elsewhere leaves here too, for the
+		// same reason: whatever status carried it, repeating the request
+		// unchanged sends back exactly what was refused.
+		if refused := ai.RecogniseOverflow(failureWith(failure, resp.StatusCode, raw, cred.Key())); errors.Is(refused, ai.ErrContextOverflow) {
+			resp.Body.Close()
+			final := append(attempts, Attempt{Usage: usageFromBytes(raw)})
+			return nil, cred, final, withAttempts(refused, final)
 		}
 		decision, capErr := decideRetry(resp, failure, attempt, p.cfg.Retry)
 		if capErr != nil {

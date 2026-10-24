@@ -645,6 +645,20 @@ func TestATooLargeRequestReachesTheRecoveryPath(t *testing.T) {
 	}
 }
 
+// TestAnOverflowInARecordedWordingReachesTheRecoveryPath. Behind a proxy the
+// provider's own code is gone and only the wording survives; this is the one
+// pi recorded from a LiteLLM-wrapped OpenAI.
+func TestAnOverflowInARecordedWordingReachesTheRecoveryPath(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refusal(400,
+		`{"error":{"type":"invalid_request_error","message":"Requested token count exceeds the model's maximum context length of 131072 tokens."}}`)}}
+	_, err := newPort(t, tr).Generate(context.Background(), ai.Request{
+		Model: "gpt-test", Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("an overflow produced %v, so the shortening path never runs", err)
+	}
+}
+
 // TestATerminalSplitAcrossDataLinesIsStillRead: an event's data may arrive as
 // several `data:` lines meant to be joined. Parsing them separately drops the
 // terminal of any event large enough to be split.

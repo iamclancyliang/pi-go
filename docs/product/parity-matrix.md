@@ -186,7 +186,7 @@ Pi source: `packages/ai`. Class B. Target v1-v2.
 | one call, one billed request | `internal/provider/*` | `TestOneCallSendsOneRequest`, counted at the transport in every live test; two vendor SDKs retry by default and are switched off — `internal/provider/claude/retry.go` and Ark's `RetryTimes` — each of which would otherwise make one call three | compatible |
 | usage accounting, absent vs zero | `internal/ai/counts.go` | `TestAFailedAttemptThatReportedNothingIsStillAnAttempt`; live run shows `cache_read=0` as a measured zero | compatible |
 | stored credentials | `internal/auth/` | `TestACredentialRefusesToFormatItself`, `TestTheFileIsNotReadableByOthers` | partial — API keys only; Pi's OAuth flows are `semantics-needed` |
-| context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow` | compatible |
+| context-overflow recovery | `internal/provider/deepseek/overflow.go`, `internal/ai/overflow.go`, `internal/compaction/` | `TestTheRecordedRejectionIsRecognisedAsAnOverflow` against the recorded rejection; `TestAnOrdinaryBadRequestIsNotAnOverflow`; shared wordings: `TestTheRecordedOverflowWordingsAreRecognised`, `TestFailuresThatAreNotOverflowsStayUnrecognised` (pi's positives and negatives), `TestAnOverflowReportedMidStreamIsRecognised`, and one per refusal path (`TestAnOverflowInARecordedWordingReachesTheRecoveryPath` in openrouter and openai, `TestAnOverflowInAnotherRecordedWordingIsRecognised` in deepseek), each confirmed to fail without its hook | compatible |
 | model facts (window, output cap, reasoning) | `internal/ai/catalogue.go` | `TestTheMeasuredDeepSeekFactsAreWhatWasMeasured`, `TestAnUnrecordedModelSaysSoRatherThanAnsweringZero` | accepted-deviation — ADR-0007: owned, sourced per entry, one model recorded. Pi's generated catalogue is a `source-gap` (§7.2) and is not reproduced |
 | full per-provider model list | `internal/ai/models.go`, `internal/provider/ollama/port.go` | `TestListingReturnsOnlyTheModelsOllamaReports`, `TestModelListingUnsupportedAndNetworkFailureStayDistinct` | **partial** (#30) — identifiers come from a provider when a person asks (Ollama implements `/api/tags`; other ports report unsupported), and the facts stay owned per ADR-0007, so a "full list with facts" is deliberately never reproduced |
 | OpenRouter, Ollama, Claude, Ark, Gemini, Qianfan ports | `internal/provider/{openrouter,ollama,claude,ark,gemini,qianfan}/` | `TestAModerationRefusalIsNotAnAuthenticationFailure`, `TestAModelThatWasNeverPulledSaysHowToFixIt`, `TestTheStatusesAndTypesThisProviderDocuments`, `TestTheStatusesThisPortClassifiesOn`, `TestTheCanonicalStatusNamesThisProviderSends`, `TestTheBackendIsNotChosenByTheEnvironment`, `TestTheCodesThisProvidersOwnSDKNames`, `TestOneCallSendsOneRequest` | partial — **unverified-against-provider** except Qianfan, which answered a live call on 2026-08-31: no credential exists for the others and no server for Ollama, so the wire semantics are this repository's reading of each vendor SDK's own types and of wordings pi recorded at the pin. A live test per provider is written and skips until a credential exists |
@@ -243,11 +243,17 @@ statement that Pi's behaviour is wrong.
 | D-3 | #26 | `compact` | may cut inside a turn and summarise the dropped prefix separately | cuts only at turn starts, keeping slightly more | a tool result must follow its call; cutting between them produces a request the provider refuses |
 | D-5 | #27 | `export`, `share` | HTML by default | Markdown | there is no HTML renderer; sharing something this build cannot produce would be worse |
 | D-7 | #28 | interactive mode | full-screen interface | line-based loop with an editing prompt | the interface is a separate workstream; a half-drawn one is worse than an honest prompt |
-| D-14 | #37 | context-overflow detection | one shared matcher over six recorded wordings, applied to every provider | per-port detection: two-number comparison (deepseek), error code (qwen, openai), pi's phrase (ollama), up-front counts where a window is recorded | a provider whose wording nobody recorded reports an overflow as an ordinary refusal, losing the one failure this repository can recover from. Pi's six positives and four negatives are recorded in its own tests and can be adopted on that basis |
 
 `D-2` (#25, `edit` without fuzzy matching) **was closed on 2026-10-24**: the fallback and
 the line-preserving overlay are ported, and the overlay's property — every line no edit touches
 keeps its bytes — has its own test.
+
+`D-14` (#37, overflow recognised only per port) **was closed on 2026-10-24**: pi's recorded
+overflow wordings and its exclusions are one shared matcher in `internal/ai/overflow.go`, applied
+where every port classifies a refusal and where every streaming port ends a failed reply. Per-port
+detection stays first — DeepSeek's two-number comparison is stronger than prose. Only the wordings
+pi's tests exercise are adopted; the further patterns its source documents by example stay out
+until a response recording them exists.
 
 `D-13` was reserved for an up-front context-overflow rejection pi-go could not
 recognise. **It is no longer needed** (#29 closed 2026-08-29): an

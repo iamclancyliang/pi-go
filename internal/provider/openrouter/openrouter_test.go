@@ -288,3 +288,34 @@ func itoa(n int) string {
 	}
 	return string(digits)
 }
+
+// TestAnOverflowInARecordedWordingReachesTheRecoveryPath. The aggregator
+// relays its backends' refusals, so an overflow arrives in whatever words the
+// backend chose; this is the one pi recorded from OpenRouter/Poolside. Every
+// port on the shared dialect recognises it, because the dialect is where a
+// refusal is classified.
+func TestAnOverflowInARecordedWordingReachesTheRecoveryPath(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refused(400,
+		`{"error":{"code":400,"message":"Provider returned error: Input length 131393 exceeds the maximum allowed input length of 131040 tokens."}}`)}}
+
+	_, err := ask(t, newPort(t, tr, nil))
+	if !errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("an overflow produced %v, so the shortening path never runs", err)
+	}
+	if tr.requests != 1 {
+		t.Fatalf("an overflow was sent %d times", tr.requests)
+	}
+}
+
+// TestAThrottleIsNotReadAsAnOverflow, even when it talks about tokens: a
+// false overflow spends a second billed request shortening a conversation
+// that was never too long.
+func TestAThrottleIsNotReadAsAnOverflow(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{refused(429,
+		`{"error":{"code":429,"message":"Rate limit exceeded, please retry after 30 seconds."}}`)}}
+
+	_, err := ask(t, newPort(t, tr, nil))
+	if errors.Is(err, ai.ErrContextOverflow) {
+		t.Fatalf("a throttle was read as an overflow: %v", err)
+	}
+}

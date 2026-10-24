@@ -204,6 +204,13 @@ func (a *Accumulator) Fail(reason StopReason, cause error) (StreamEvent, error) 
 	if reason != StopError && reason != StopAborted {
 		return StreamEvent{}, fmt.Errorf("%w: %q does not describe a failure", ErrTerminal, reason)
 	}
+	// Every streaming port ends a failed reply here, so this is where an
+	// overflow reported after the reply began — in a wording no transport-level
+	// classifier saw — is still recognised. Only a failure: a reply the caller
+	// stopped did not overflow anything.
+	if reason == StopError {
+		cause = RecogniseOverflow(cause)
+	}
 	a.ended = true
 	a.message.StopReason = reason
 	a.message.ErrorMessage = "unknown failure"
