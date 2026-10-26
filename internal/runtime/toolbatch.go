@@ -66,7 +66,10 @@ type batchCall struct {
 	name   string
 	args   string
 	result string
-	err    error
+	// details is the tool's structured account of the call, passed to the
+	// result event for display.
+	details any
+	err     error
 	// settled marks a call refused during preparation: it has already ended
 	// and must not run.
 	settled bool
@@ -390,7 +393,7 @@ func (b *toolBatch) settleWithoutRunning(call *batchCall, result string) {
 // Observers are notified from inside the critical section, so an observer that
 // calls back into this batch would deadlock. They are event sinks; they receive
 // the stream and do not drive it.
-func (b *toolBatch) finish(callID, result string, terminate bool, err error) {
+func (b *toolBatch) finish(callID, result string, details any, terminate bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -398,7 +401,7 @@ func (b *toolBatch) finish(callID, result string, terminate bool, err error) {
 	if !known {
 		return
 	}
-	call.result, call.err, call.terminate = result, err, terminate
+	call.result, call.details, call.err, call.terminate = result, details, err, terminate
 	b.remaining--
 
 	// The end is the execution event: emitted the moment this call finished,
@@ -547,6 +550,7 @@ func (b *toolBatch) commit(call *batchCall) {
 		e.ToolCallID = call.id
 		e.ToolName = call.name
 		e.Detail.Result = call.result
+		e.Detail.ToolDetails = call.details
 	})
 }
 

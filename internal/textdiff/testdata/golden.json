@@ -1,0 +1,1422 @@
+[
+	{
+		"old": "",
+		"new": "",
+		"lines": [],
+		"words": []
+	},
+	{
+		"old": "a",
+		"new": "a",
+		"lines": [
+			{
+				"value": "a",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\nb\nc\n",
+		"new": "a\nb\nc\n",
+		"lines": [
+			{
+				"value": "a\nb\nc\n",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\nb\nc\n",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\nb\nc\n",
+		"new": "a\nx\nc\n",
+		"lines": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "x",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "\nc\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\nb\nc",
+		"new": "a\nb\nc\n",
+		"lines": [
+			{
+				"value": "a\nb\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "c",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\nb\nc\n",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\nb\nc\n",
+		"new": "a\nc\n",
+		"lines": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\nc\n",
+		"new": "a\nb\nc\n",
+		"lines": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "c\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "x\na\nb\na\nb\n",
+		"new": "a\nb\nx\na\nb\n",
+		"lines": [
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "a\nb\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "a\nb\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "a\nb\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "a\nb\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "one\ntwo\nthree\nfour\nfive\nsix\n",
+		"new": "one\n2\nthree\nfour\n5\nsix\nseven\n",
+		"lines": [
+			{
+				"value": "one\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "two\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "2\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "three\nfour\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "five\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "5\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "six\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "seven\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "one\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "two",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "2",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "\nthree\nfour\n",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "five",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "5",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "\nsix\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "seven\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a\r\nb\r\nc\r\n",
+		"new": "a\r\nB\r\nc\r\n",
+		"lines": [
+			{
+				"value": "a\r\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b\r\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "B\r\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "c\r\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a\r\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "B",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "\r\nc\r\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "mixed\r\nends\nhere",
+		"new": "mixed\nends\r\nhere",
+		"lines": [
+			{
+				"value": "mixed\r\nends\n",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "mixed\nends\r\n",
+				"count": 2,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "here",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "mixed\nends\r\nhere",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "",
+		"new": "new\nfile\n",
+		"lines": [
+			{
+				"value": "new\nfile\n",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "new\nfile\n",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "old\nfile\n",
+		"new": "",
+		"lines": [
+			{
+				"value": "old\nfile\n",
+				"count": 2,
+				"added": false,
+				"removed": true
+			}
+		],
+		"words": [
+			{
+				"value": "old\nfile\n",
+				"count": 2,
+				"added": false,
+				"removed": true
+			}
+		]
+	},
+	{
+		"old": "}\n}\n",
+		"new": "}\n  x\n}\n}\n",
+		"lines": [
+			{
+				"value": "}\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "  x\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "}\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "}\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "}\n  ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "x\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "}\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "}\n",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "func a() {\n\treturn 1\n}\n\nfunc b() {\n\treturn 2\n}\n",
+		"new": "func a() {\n\treturn 1\n}\n\nfunc c() {\n\treturn 3\n}\n\nfunc b() {\n\treturn 2\n}\n",
+		"lines": [
+			{
+				"value": "func a() {\n\treturn 1\n}\n\n",
+				"count": 4,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "func c() {\n\treturn 3\n}\n\n",
+				"count": 4,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "func b() {\n\treturn 2\n}\n",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "func a() {\n\treturn 1\n}\n\nfunc ",
+				"count": 9,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "c() {\n\treturn 3\n}\n\nfunc ",
+				"count": 8,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "b() {\n\treturn 2\n}\n",
+				"count": 7,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo bar baz",
+		"new": "foo baz",
+		"lines": [
+			{
+				"value": "foo bar baz",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo baz",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "bar ",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo bar baz",
+		"new": "foo qux baz",
+		"lines": [
+			{
+				"value": "foo bar baz",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo qux baz",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "bar",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "qux",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": " baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo\nbar baz",
+		"new": "foo baz",
+		"lines": [
+			{
+				"value": "foo\nbar baz",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo baz",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "\nbar",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": " baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo baz",
+		"new": "foo\nbar baz",
+		"lines": [
+			{
+				"value": "foo baz",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo\nbar baz",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo\n",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "bar ",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo   bar baz",
+		"new": "foo  baz",
+		"lines": [
+			{
+				"value": "foo   bar baz",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo  baz",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo  ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": " bar ",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "foo\tbar\nbaz",
+		"new": "foo baz",
+		"lines": [
+			{
+				"value": "foo\tbar\nbaz",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "foo baz",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "foo ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "\tbar\n",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "baz",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "const x = 1;",
+		"new": "const y = 2;",
+		"lines": [
+			{
+				"value": "const x = 1;",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "const y = 2;",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "const ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "x",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "y",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": " = ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "1",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "2",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": ";",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "    return value",
+		"new": "    return otherValue",
+		"lines": [
+			{
+				"value": "    return value",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "    return otherValue",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "    return ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "value",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "otherValue",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "  if (a && b) {",
+		"new": "  if (a || b) {",
+		"lines": [
+			{
+				"value": "  if (a && b) {",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "  if (a || b) {",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "  if (a ",
+				"count": 3,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "&&",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "||",
+				"count": 2,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": " b) {",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "hello world",
+		"new": "hello brave new world",
+		"lines": [
+			{
+				"value": "hello world",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "hello brave new world",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "hello ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "brave new ",
+				"count": 2,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "world",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "the quick brown fox",
+		"new": "the slow brown dog",
+		"lines": [
+			{
+				"value": "the quick brown fox",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "the slow brown dog",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "the ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "quick",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "slow",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": " brown ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "fox",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "dog",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "café naïve",
+		"new": "cafe naive",
+		"lines": [
+			{
+				"value": "café naïve",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "cafe naive",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "café naïve",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "cafe naive",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "a.b.c",
+		"new": "a.x.c",
+		"lines": [
+			{
+				"value": "a.b.c",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "a.x.c",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "a.",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "b",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "x",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": ".c",
+				"count": 2,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "",
+		"new": "added words",
+		"lines": [
+			{
+				"value": "added words",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "added words",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "removed words",
+		"new": "",
+		"lines": [
+			{
+				"value": "removed words",
+				"count": 1,
+				"added": false,
+				"removed": true
+			}
+		],
+		"words": [
+			{
+				"value": "removed words",
+				"count": 2,
+				"added": false,
+				"removed": true
+			}
+		]
+	},
+	{
+		"old": "  leading",
+		"new": "leading",
+		"lines": [
+			{
+				"value": "  leading",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "leading",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "leading",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "trailing  ",
+		"new": "trailing",
+		"lines": [
+			{
+				"value": "trailing  ",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "trailing",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "trailing",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "one two three four",
+		"new": "four three two one",
+		"lines": [
+			{
+				"value": "one two three four",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "four three two one",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "one two three ",
+				"count": 3,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "four ",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "three two one",
+				"count": 3,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "fmt.Println(\"hi\")",
+		"new": "fmt.Printf(\"hi %s\\n\", name)",
+		"lines": [
+			{
+				"value": "fmt.Println(\"hi\")",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "fmt.Printf(\"hi %s\\n\", name)",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "fmt.",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "Println",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "Printf",
+				"count": 1,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "(\"hi ",
+				"count": 3,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "%s\\n",
+				"count": 4,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": "\"",
+				"count": 1,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": ", name",
+				"count": 2,
+				"added": true,
+				"removed": false
+			},
+			{
+				"value": ")",
+				"count": 1,
+				"added": false,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "中文 文本",
+		"new": "中文 内容",
+		"lines": [
+			{
+				"value": "中文 文本",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "中文 内容",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "中文 ",
+				"count": 2,
+				"added": false,
+				"removed": false
+			},
+			{
+				"value": "文本",
+				"count": 2,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "内容",
+				"count": 2,
+				"added": true,
+				"removed": false
+			}
+		]
+	},
+	{
+		"old": "x  =  1",
+		"new": "x = 1",
+		"lines": [
+			{
+				"value": "x  =  1",
+				"count": 1,
+				"added": false,
+				"removed": true
+			},
+			{
+				"value": "x = 1",
+				"count": 1,
+				"added": true,
+				"removed": false
+			}
+		],
+		"words": [
+			{
+				"value": "x = 1",
+				"count": 3,
+				"added": false,
+				"removed": false
+			}
+		]
+	}
+]

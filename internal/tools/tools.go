@@ -42,6 +42,11 @@ type Result struct {
 	// Content is what the model sees.
 	Content string
 
+	// Details is structured data about the call for whoever displays it —
+	// an edit's diff, a truncated output's limits — and is never sent to
+	// the model. Each tool documents its own type: EditDetails for edit.
+	Details any
+
 	// Terminate asks the loop to stop after this round, without another model
 	// call.
 	//

@@ -122,6 +122,12 @@ type Detail struct {
 	// Succeeded says how an auto_retry_end came out. A pointer, because
 	// "failed" must survive serialisation rather than vanish as a zero.
 	Succeeded *bool `json:"succeeded,omitempty"`
+
+	// ToolDetails is a tool's structured account of a call on tool_result —
+	// an edit's diff, say — for an interface drawing the call in the same
+	// process. It is not serialised: the published trace keeps its shape, and
+	// what each tool puts here is that tool's own type.
+	ToolDetails any `json:"-"`
 }
 
 // Observer receives events as they are emitted.

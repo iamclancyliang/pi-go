@@ -136,38 +136,94 @@ func (e *Edit) Call(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("edit: %s: %w", in.Path, err)
 	}
 
+	var details EditDetails
 	err = fileMutations.do(path, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("could not edit file: %s: %w", in.Path, err)
-		}
-
-		// The byte-order mark is stripped before matching and put back after:
-		// a model will not have included an invisible character in oldText, and
-		// dropping it would rewrite the file's encoding as a side effect of an
-		// unrelated edit.
-		bom, text := stripBOM(string(raw))
-		ending := detectLineEnding(text)
-		normalized := normalizeToLF(text)
-
-		edited, err := applyEdits(normalized, in.Edits, in.Path)
+		planned, err := planEdit(path, in)
 		if err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte(bom+restoreLineEndings(edited, ending)), 0o644)
+		details = planned.details()
+		return os.WriteFile(path, []byte(planned.bom+restoreLineEndings(planned.edited, planned.ending)), 0o644)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("edit: %w", err)
 	}
 
-	return Result{Content: fmt.Sprintf("Successfully replaced %d block(s) in %s",
-		len(in.Edits), in.Path)}, nil
+	return Result{
+		Content: fmt.Sprintf("Successfully replaced %d block(s) in %s", len(in.Edits), in.Path),
+		Details: details,
+	}, nil
+}
+
+// EditDetails is what an edit changed, for display.
+type EditDetails struct {
+	// Diff is the change with line numbers and a little context, in the
+	// form the interface draws: "+12 added", "-12 removed", " 12 context",
+	// and " ..." where unchanged lines are left out.
+	Diff string
+	// FirstChangedLine is the first changed line in the new file, or 0.
+	FirstChangedLine int
+}
+
+type plannedEdit struct {
+	bom, ending        string
+	normalized, edited string
+}
+
+func (p plannedEdit) details() EditDetails {
+	diff, first := DiffString(p.normalized, p.edited, 4)
+	return EditDetails{Diff: diff, FirstChangedLine: first}
+}
+
+// planEdit reads the file and works out the edit without writing it.
+func planEdit(path string, in editArgs) (plannedEdit, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return plannedEdit{}, fmt.Errorf("could not edit file: %s: %w", in.Path, err)
+	}
+	// The byte-order mark is stripped before matching and put back after: a
+	// model will not have included an invisible character in oldText, and
+	// dropping it would rewrite the file's encoding as a side effect of an
+	// unrelated edit.
+	bom, text := stripBOM(string(raw))
+	p := plannedEdit{bom: bom, ending: detectLineEnding(text), normalized: normalizeToLF(text)}
+	if p.edited, err = applyEdits(p.normalized, in.Edits, in.Path); err != nil {
+		return plannedEdit{}, err
+	}
+	return p, nil
+}
+
+// PreviewEdit works out what an edit call would change, without changing
+// anything, so the interface can show the diff while the call is pending.
+// root is the directory relative paths resolve against.
+func PreviewEdit(root, args string) (EditDetails, error) {
+	var in editArgs
+	if err := json.Unmarshal([]byte(args), &in); err != nil {
+		return EditDetails{}, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if in.Path == "" || len(in.Edits) == 0 {
+		return EditDetails{}, fmt.Errorf("edit: path and edits are required")
+	}
+	for i, r := range in.Edits {
+		if r.OldText == nil || r.NewText == nil {
+			return EditDetails{}, fmt.Errorf("edits[%d] must carry both oldText and newText", i)
+		}
+	}
+	path, err := resolvePath(root, in.Path)
+	if err != nil {
+		return EditDetails{}, fmt.Errorf("%s: %w", in.Path, err)
+	}
+	planned, err := planEdit(path, in)
+	if err != nil {
+		return EditDetails{}, err
+	}
+	return planned.details(), nil
 }
 
 // applyEdits locates every replacement in the original content, refuses the

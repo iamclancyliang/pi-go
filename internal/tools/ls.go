@@ -174,5 +174,20 @@ func (l *Ls) Call(ctx context.Context, args string) (Result, error) {
 	if len(notices) == 0 {
 		return Result{Content: cut.Content}, nil
 	}
-	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]"}, nil
+	var details LsDetails
+	if limitReached {
+		details.EntryLimitReached = limit
+	}
+	if cut.Truncated {
+		details.Truncation = &cut
+	}
+	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]", Details: details}, nil
+}
+
+// LsDetails is what limited a listing, for display.
+type LsDetails struct {
+	// Truncation is set when the byte budget cut the output.
+	Truncation *Truncation
+	// EntryLimitReached is the entry limit, when it stopped the listing.
+	EntryLimitReached int
 }

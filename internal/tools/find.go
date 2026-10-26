@@ -149,5 +149,20 @@ func (f *Find) Call(ctx context.Context, args string) (Result, error) {
 	if len(notices) == 0 {
 		return Result{Content: cut.Content}, nil
 	}
-	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]"}, nil
+	var details FindDetails
+	if limitReached {
+		details.ResultLimitReached = limit
+	}
+	if cut.Truncated {
+		details.Truncation = &cut
+	}
+	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]", Details: details}, nil
+}
+
+// FindDetails is what limited a find's output, for display.
+type FindDetails struct {
+	// Truncation is set when the byte budget cut the output.
+	Truncation *Truncation
+	// ResultLimitReached is the result limit, when it stopped the search.
+	ResultLimitReached int
 }

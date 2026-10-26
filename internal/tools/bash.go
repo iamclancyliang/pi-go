@@ -112,7 +112,8 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("bash: command is required")
 	}
 
-	result, err := b.Execute(ctx, in.Command, in.Timeout, nil)
+	var cut Truncation
+	result, err := b.execute(ctx, in.Command, in.Timeout, nil, &cut)
 	if err != nil {
 		return Result{}, err
 	}
@@ -123,10 +124,22 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("bash: %s", appendStatus(result.Output,
 			fmt.Sprintf("Command exited with code %d", *result.ExitCode)))
 	}
-	if result.Output == "" {
-		return Result{Content: "(no output)"}, nil
+	out := Result{Content: result.Output}
+	if out.Content == "" {
+		out.Content = "(no output)"
 	}
-	return Result{Content: result.Output}, nil
+	if result.Truncated {
+		out.Details = BashDetails{Truncation: &cut, FullOutputPath: result.FullOutputPath}
+	}
+	return out, nil
+}
+
+// BashDetails is what limited a command's output, for display.
+type BashDetails struct {
+	// Truncation is how the output was cut.
+	Truncation *Truncation
+	// FullOutputPath is where the whole output was written.
+	FullOutputPath string
 }
 
 // Execute runs a command and optionally reports sanitized output chunks while
@@ -134,6 +147,12 @@ func (b *Bash) Call(ctx context.Context, args string) (Result, error) {
 // clients need the complete BashResult; Call formats those codes as tool
 // failures for model tool-use.
 func (b *Bash) Execute(ctx context.Context, command string, timeoutSeconds *float64, onChunk func(string)) (BashResult, error) {
+	return b.execute(ctx, command, timeoutSeconds, onChunk, nil)
+}
+
+// execute is Execute, also reporting how the output was truncated, when it
+// was, through truncation.
+func (b *Bash) execute(ctx context.Context, command string, timeoutSeconds *float64, onChunk func(string), truncation *Truncation) (BashResult, error) {
 	if strings.TrimSpace(command) == "" {
 		return BashResult{}, fmt.Errorf("%w: command is required", ai.ErrBashArgument)
 	}
@@ -186,6 +205,9 @@ func (b *Bash) Execute(ctx context.Context, command string, timeoutSeconds *floa
 	}
 	cut := TruncateTail(raw, b.Limits)
 	result := BashResult{Output: b.render(raw), Truncated: cut.Truncated}
+	if cut.Truncated && truncation != nil {
+		*truncation = cut
+	}
 	if fullOutputPath != "" {
 		result.FullOutputPath = fullOutputPath
 	} else if cut.Truncated {

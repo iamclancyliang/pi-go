@@ -251,7 +251,24 @@ func (g *Grep) Call(ctx context.Context, args string) (Result, error) {
 	if len(notices) == 0 {
 		return Result{Content: cut.Content}, nil
 	}
-	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]"}, nil
+	details := GrepDetails{LinesTruncated: shortened}
+	if limitReached {
+		details.MatchLimitReached = limit
+	}
+	if cut.Truncated {
+		details.Truncation = &cut
+	}
+	return Result{Content: cut.Content + "\n\n[" + strings.Join(notices, ". ") + "]", Details: details}, nil
+}
+
+// GrepDetails is what limited a grep's output, for display.
+type GrepDetails struct {
+	// Truncation is set when the byte budget cut the output.
+	Truncation *Truncation
+	// MatchLimitReached is the match limit, when it stopped the search.
+	MatchLimitReached int
+	// LinesTruncated says some long lines were shortened.
+	LinesTruncated bool
 }
 
 // readLines reads a text file, normalising the line endings a match's line

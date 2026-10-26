@@ -130,7 +130,11 @@ func (r *Read) Call(ctx context.Context, args string) (Result, error) {
 	}
 
 	cut := TruncateHead(strings.Join(selected, "\n"), r.Limits)
-	return Result{Content: r.render(in.Path, lines, firstLine, limited, cut)}, nil
+	result := Result{Content: r.render(in.Path, lines, firstLine, limited, cut)}
+	if cut.Truncated {
+		result.Details = ReadDetails{Truncation: &cut}
+	}
+	return result, nil
 }
 
 // render is what the model reads: the content, and when anything was withheld,
@@ -171,4 +175,10 @@ func (r *Read) render(path string, lines []string, firstLine, limited int, cut T
 	}
 
 	return cut.Content
+}
+
+// ReadDetails is what limited a read, for display.
+type ReadDetails struct {
+	// Truncation is set when the limits cut the file.
+	Truncation *Truncation
 }
