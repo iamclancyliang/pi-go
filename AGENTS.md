@@ -136,6 +136,10 @@ internal/     product code — every module from architecture §1
   cli/          how a command line becomes a run: flags, mode resolution,
                 provider selection, and the modes themselves. Here rather than
                 in cmd/ so it is testable without building a binary
+  tui/          the terminal interface's machinery: the line renderer, key
+                decoding and bindings, the editor, completion, Markdown
+  interactive/  the coding agent's full-screen mode on top of tui: its theme,
+                the components that show a conversation, the mode itself
 cmd/          composition roots — assemble modules, no behaviour of their own
   pi/            the agent
   pi-tracer/     the v0 contract tracer bullet

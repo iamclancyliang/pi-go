@@ -73,6 +73,8 @@
 
 ### T3：对话渲染，做完后切换默认界面（对应 Pi 约 3000 行）
 
+**进度：** T3 拆成三步：T3a Markdown 组件和配色，T3b 消息与工具组件，T3c 接入交互模式并切换默认界面。**T3a 已完成 2026-10-26**：`internal/tui/markdown.go` 照 Pi 的 `Markdown` 组件实现（标题、强调、删除线、行内代码、链接、列表含任务和嵌套、代码块、引用、分隔线、表格含窄宽度折行、HTML 原样显示）；终端能力检测照 Pi 的 `detectCapabilities`（决定链接用 OSC 8 超链接还是在后面打印地址，tmux 下询问是否转发）。验证方法是对照 Pi 自己的输出：`internal/tui/testdata/markdown/generate.ts` 用固定版本的 Pi 源码在 node 下渲染 106 段 Markdown（含流式输出中途的半截内容），在不同宽度、三种默认样式和有无超链接下共 828 个用例，Go 实现逐字节一致。Pi 用 marked 解析、这里用 goldmark，两者对边角情况的读法不同，凡是影响 Pi 输出的地方（块之间的空行、行尾空格、表格里的 `\|`、还没写完的网址和闭合围栏、链接引用定义）都按 marked 的行为补上了。新增 `internal/interactive` 包放交互模式的组件，先放主题：Pi 内置 dark 主题的全部颜色，真彩色和 256 色两种模式（256 色的就近取色照搬 Pi 的算法），以及 chalk 处理嵌套样式和换行的方式，同样用 Pi 生成的对照数据（`internal/interactive/testdata/theme/`）逐项核对。两处已知缺口：代码块的语法高亮（Pi 用 highlight.js，这里先统一用代码块颜色，和 Pi 遇到不认识的语言时一样）和 LaTeX 渲染（第 4 节已推后），都需要你决定是否引入依赖来做。
+
 - **内容：**
   - Markdown 组件（`markdown.ts`）：用 goldmark 的语法树渲染成 ANSI；
   - 用户消息、assistant 消息的流式更新（接到 runtime 现有的 `ReplyObserver` 上）、思考块的折叠；
