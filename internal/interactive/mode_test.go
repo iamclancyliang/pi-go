@@ -101,6 +101,12 @@ func (h *fakeHost) Footer() FooterState {
 func (h *fakeHost) SlashCommands() []tui.SlashCommand { return []tui.SlashCommand{{Name: "help"}} }
 func (h *fakeHost) Files() tui.PathFinder             { return nil }
 
+func (h *fakeHost) Bash(ctx context.Context, command string, _ bool, onChunk func(string)) (tools.BashResult, error) {
+	onChunk("out of " + command + "\n")
+	code := 0
+	return tools.BashResult{Output: "out of " + command + "\n", ExitCode: &code}, nil
+}
+
 func (h *fakeHost) currentRun() *fakeRun {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -324,5 +330,15 @@ func TestModeShowsTheConversationSoFar(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+func TestModeRunsShellCommandsWithTheirOutput(t *testing.T) {
+	r := startMode(t, Options{})
+	r.typeLine("!ls -la")
+	waitFor(t, "the output", func() bool { return strings.Contains(r.screen(), "out of ls -la") })
+	got := r.screen()
+	if !strings.Contains(got, "$ ls -la") || strings.Contains(got, "Running...") {
+		t.Fatalf("shell command:\n%s", got)
 	}
 }

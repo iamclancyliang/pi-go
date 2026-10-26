@@ -11,6 +11,7 @@ import (
 	"github.com/iamclancyliang/pi-go/internal/compaction"
 	"github.com/iamclancyliang/pi-go/internal/events"
 	"github.com/iamclancyliang/pi-go/internal/session"
+	"github.com/iamclancyliang/pi-go/internal/tools"
 	"github.com/iamclancyliang/pi-go/internal/tui"
 )
 
@@ -44,6 +45,9 @@ type Host interface {
 	SlashCommands() []tui.SlashCommand
 	// Files searches the working directory for "@" completion.
 	Files() tui.PathFinder
+	// Bash runs a shell command the user typed after "!", reporting its
+	// output as it arrives; exclude keeps it out of the model's context.
+	Bash(ctx context.Context, command string, exclude bool, onChunk func(string)) (tools.BashResult, error)
 }
 
 // Options configure the mode.
@@ -95,6 +99,11 @@ type Mode struct {
 	confirming   chan string
 	commandBusy  bool
 	quitting     bool
+	// bashCancel stops the shell command running, if one is; pendingBash
+	// are commands run during an agent run, shown with the queued messages
+	// until it ends.
+	bashCancel  context.CancelFunc
+	pendingBash []*BashExecution
 
 	// replyFailed is set when the last reply ended in an error, which it
 	// shows itself, so the run's error is not shown a second time.
@@ -295,17 +304,13 @@ func (m *Mode) addUserMessage(text string) {
 
 // addBashExecution shows a shell command the user ran, with its output.
 func (m *Mode) addBashExecution(b *ai.BashExecution) {
-	t := m.env.Theme
-	text := t.Fg("bashMode", Bold("$ "+b.Command))
-	if out := strings.TrimRight(sanitizeOutput(b.Output), "\n"); out != "" {
-		lines := strings.Split(out, "\n")
-		for i, l := range lines {
-			lines[i] = t.Fg("toolOutput", l)
-		}
-		text += "\n\n" + strings.Join(lines, "\n")
+	c := NewBashExecution(m.env, b.Command, b.ExcludeFromContext)
+	c.SetExpanded(m.expanded)
+	if b.Output != "" {
+		c.AppendOutput(b.Output)
 	}
-	m.chat.AddChild(&tui.Spacer{Lines: 1})
-	m.chat.AddChild(tui.NewText(text, 1, 0, nil))
+	c.SetComplete(tools.BashResult{ExitCode: b.ExitCode, Cancelled: b.Cancelled, Truncated: b.Truncated, FullOutputPath: b.FullOutputPath})
+	m.chat.AddChild(c)
 }
 
 // --- messages to the user ---
@@ -413,6 +418,9 @@ func (m *Mode) ctrlC() {
 // back in the editor.
 func (m *Mode) interrupt() {
 	if !m.running {
+		if m.bashCancel != nil {
+			m.bashCancel()
+		}
 		return
 	}
 	queued := append(append([]string(nil), m.steering...), m.followUps...)
@@ -441,6 +449,8 @@ func (m *Mode) setExpanded(expanded bool) {
 		case *ToolExecution:
 			c.SetExpanded(expanded)
 		case *CompactionSummary:
+			c.SetExpanded(expanded)
+		case *BashExecution:
 			c.SetExpanded(expanded)
 		}
 	}
@@ -490,7 +500,21 @@ func (m *Mode) submit(text string) {
 		m.showStatus("A command is still running")
 		return
 	}
-	if strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
+	if strings.HasPrefix(text, "!") {
+		exclude := strings.HasPrefix(text, "!!")
+		command := strings.TrimSpace(strings.TrimLeft(text, "!"))
+		if command != "" {
+			if m.bashCancel != nil {
+				m.editor.SetText(text)
+				m.showWarning("A bash command is already running. Press " + m.env.KeyText("app.interrupt") + " to cancel it first.")
+				return
+			}
+			m.editor.AddToHistory(text)
+			m.runBash(command, exclude)
+			return
+		}
+	}
+	if strings.HasPrefix(text, "/") {
 		if m.running {
 			// A command acts on the conversation the run is writing.
 			m.editor.SetText(text)
@@ -644,6 +668,7 @@ func (m *Mode) runFinished(ctx context.Context, err error) {
 	}
 	m.running, m.cancel, m.run, m.unsent = false, nil, nil, nil
 	m.clearStatus("working")
+	m.flushPendingBash()
 	m.streaming = nil
 	if err != nil && !cancelled && !errors.Is(err, context.Canceled) && !m.replyFailed {
 		m.showError(err.Error())
@@ -661,14 +686,58 @@ func (m *Mode) runFinished(ctx context.Context, err error) {
 	m.ui.RequestRender()
 }
 
+func (m *Mode) showWarning(text string) {
+	m.chat.AddChild(&tui.Spacer{Lines: 1})
+	m.chat.AddChild(tui.NewText(m.env.Theme.Fg("warning", "Warning: "+text), 1, 0, nil))
+	m.ui.RequestRender()
+}
+
+// runBash runs a shell command off the loop, its output drawn as it
+// arrives. During an agent run it waits with the queued messages, so the
+// conversation above reads in the order things were said.
+func (m *Mode) runBash(command string, exclude bool) {
+	b := NewBashExecution(m.env, command, exclude)
+	b.SetExpanded(m.expanded)
+	if m.running {
+		m.pendingBash = append(m.pendingBash, b)
+		m.pending.AddChild(b)
+	} else {
+		m.chat.AddChild(b)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.bashCancel = cancel
+	m.ui.RequestRender()
+	go func() {
+		result, err := m.host.Bash(ctx, command, exclude, func(chunk string) {
+			m.ui.Do(func() { b.AppendOutput(chunk) })
+		})
+		m.ui.Do(func() {
+			cancel()
+			m.bashCancel = nil
+			if err != nil {
+				b.SetComplete(tools.BashResult{})
+				m.showError("Bash command failed: " + err.Error())
+				return
+			}
+			b.SetComplete(result)
+		})
+	}()
+}
+
+// flushPendingBash moves shell commands run during the agent's run into the
+// conversation.
+func (m *Mode) flushPendingBash() {
+	for _, b := range m.pendingBash {
+		m.pending.RemoveChild(b)
+		m.chat.AddChild(b)
+	}
+	m.pendingBash = nil
+}
+
 // runCommand runs a command off the loop, showing what it says when done.
 // A question it asks is answered by the next thing the user submits.
 func (m *Mode) runCommand(text string) {
 	m.commandBusy = true
-	if strings.HasPrefix(text, "!") {
-		m.chat.AddChild(&tui.Spacer{Lines: 1})
-		m.chat.AddChild(tui.NewText(m.env.Theme.Fg("bashMode", Bold("$ "+strings.TrimLeft(text, "! "))), 1, 0, nil))
-	}
 	confirm := func(question string) bool {
 		answer := make(chan string, 1)
 		m.ui.Do(func() {
@@ -697,9 +766,8 @@ func (m *Mode) runCommand(text string) {
 				return
 			}
 			// A command that replaced the conversation — a new session, a
-			// resumed one, a compaction — has it drawn again; a shell
-			// command only added to it, and its output is shown below.
-			if !strings.HasPrefix(text, "!") && fingerprint(m.host.Conversation()) != before {
+			// resumed one, a compaction — has it drawn again.
+			if fingerprint(m.host.Conversation()) != before {
 				m.compacted, m.contextTokens, m.contextKnown = false, 0, false
 				m.renderHistory()
 			}

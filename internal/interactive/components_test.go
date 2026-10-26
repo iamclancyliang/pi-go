@@ -101,6 +101,19 @@ type goldenComponent struct {
 	Summary      string `json:"summary"`
 	Expanded     bool   `json:"expanded"`
 
+	Bash struct {
+		Command  string   `json:"command"`
+		Exclude  bool     `json:"exclude"`
+		Chunks   []string `json:"chunks"`
+		Expanded bool     `json:"expanded"`
+		Complete *struct {
+			ExitCode       *int   `json:"exitCode"`
+			Cancelled      bool   `json:"cancelled"`
+			Truncated      bool   `json:"truncated"`
+			FullOutputPath string `json:"fullOutputPath"`
+		} `json:"complete"`
+	} `json:"bash"`
+
 	Tool  string          `json:"tool"`
 	Args  json.RawMessage `json:"args"`
 	Steps struct {
@@ -149,6 +162,20 @@ func (c goldenComponent) render(env *Env) []string {
 		s := NewCompactionSummary(env, c.TokensBefore, c.Summary)
 		s.SetExpanded(c.Expanded)
 		return s.Render(c.Width)
+	case "bashExecution":
+		b := NewBashExecution(env, c.Bash.Command, c.Bash.Exclude)
+		defer b.loader.Stop()
+		if c.Bash.Expanded {
+			b.SetExpanded(true)
+		}
+		for _, chunk := range c.Bash.Chunks {
+			b.AppendOutput(chunk)
+		}
+		if done := c.Bash.Complete; done != nil {
+			b.SetComplete(tools.BashResult{ExitCode: done.ExitCode, Cancelled: done.Cancelled,
+				Truncated: done.Truncated, FullOutputPath: done.FullOutputPath})
+		}
+		return b.Render(c.Width)
 	case "tool":
 		x := NewToolExecution(env, c.Tool, string(c.Args))
 		if c.Steps.Expanded {

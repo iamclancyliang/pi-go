@@ -137,6 +137,29 @@ for (const [name, t] of Object.entries(tools)) {
 	cases.push({ kind: "tool", name, tool: t.name, args: t.args, steps: t.steps, width: 60, lines: c.render(60) });
 }
 
+const { BashExecutionComponent } = await import(join(interactive, "components/bash-execution.ts"));
+const bashCases: Record<string, { command: string; exclude?: boolean; chunks: string[]; complete?: { exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }; expanded?: boolean }> = {
+	bashRunning: { command: "make", chunks: ["building\n", "step 2"] },
+	bashRunningExcluded: { command: "ls", exclude: true, chunks: ["a\n"] },
+	bashDoneShort: { command: "echo hi", chunks: ["hi\n"], complete: { exitCode: 0 } },
+	bashDoneLong: { command: "seq 30", chunks: [Array.from({ length: 30 }, (_, i) => `${i + 1}`).join("\n")], complete: { exitCode: 0 } },
+	bashDoneLongExpanded: { command: "seq 30", chunks: [Array.from({ length: 30 }, (_, i) => `${i + 1}`).join("\n")], complete: { exitCode: 0 }, expanded: true },
+	bashFailed: { command: "false", chunks: ["nope\n"], complete: { exitCode: 2 } },
+	bashCancelled: { command: "sleep 9", chunks: [], complete: { cancelled: true } },
+	bashTruncatedFile: { command: "big", chunks: ["tail\n"], complete: { exitCode: 0, truncated: true, fullOutputPath: "/tmp/out.log" } },
+	bashSplitLines: { command: "x", chunks: ["par", "tial\r\nnext\rlast"], complete: { exitCode: 0 } },
+	bashNoOutput: { command: "true", chunks: [], complete: { exitCode: 0 } },
+};
+for (const [name, b] of Object.entries(bashCases)) {
+	const c = new BashExecutionComponent(b.command, ui as any, !!b.exclude);
+	if (b.expanded) c.setExpanded(true);
+	for (const chunk of b.chunks) c.appendOutput(chunk);
+	if (b.complete) {
+		c.setComplete(b.complete.exitCode, !!b.complete.cancelled, b.complete.truncated ? { truncated: true } : undefined, b.complete.fullOutputPath);
+	}
+	cases.push({ kind: "bashExecution", name, bash: b, width: 60, lines: c.render(60) });
+}
+
 const out = join(dirname(fileURLToPath(import.meta.url)), "golden.json");
 writeFileSync(out, `${JSON.stringify({ cwd, cases }, null, "\t")}\n`);
 console.log(`wrote ${cases.length} cases to ${out}`);

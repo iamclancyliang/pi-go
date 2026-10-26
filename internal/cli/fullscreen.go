@@ -42,7 +42,8 @@ func RunFullScreen(ctx context.Context, rt Runtime, streams Streams, term tui.Te
 	env := interactive.NewEnv(interactive.DarkTheme(tui.Capabilities().TrueColor),
 		interactive.NewKeybindings(goruntime.GOOS, nil), rt.WorkingDir, home)
 	ui := tui.NewUI(term)
-	mode = interactive.NewMode(ui, env, &fullScreenHost{s: s}, interactive.Options{
+	host := &fullScreenHost{s: s, providers: AvailableProviders(rt.Args)}
+	mode = interactive.NewMode(ui, env, host, interactive.Options{
 		Version:         version,
 		QuietStartup:    s.config.Effective.QuietStartup,
 		Notices:         s.startNotices(),
@@ -74,6 +75,8 @@ func quoteIfNeeded(s string) string {
 // it.
 type fullScreenHost struct {
 	s *interactiveSession
+	// providers is how many providers have a credential, counted at start.
+	providers int
 }
 
 func (h *fullScreenHost) Start(ctx context.Context, prompt string) (interactive.Run, error) {
@@ -110,6 +113,7 @@ func (h *fullScreenHost) Footer() interactive.FooterState {
 		AutoCompact:   h.s.rt.AutoCompaction.Enabled,
 		Provider:      provider,
 		Model:         model,
+		ShowProvider:  h.providers > 1,
 	}
 	if used.CacheReadTokens != nil {
 		state.CacheRead = *used.CacheReadTokens
@@ -134,6 +138,13 @@ func (h *fullScreenHost) SlashCommands() []tui.SlashCommand {
 		out = append(out, tui.SlashCommand{Name: name, Description: commands[name].Summary})
 	}
 	return out
+}
+
+func (h *fullScreenHost) Bash(ctx context.Context, command string, exclude bool, onChunk func(string)) (tools.BashResult, error) {
+	if h.s.ctxt.bash == nil {
+		return tools.BashResult{}, fmt.Errorf("shell execution is not configured for this run")
+	}
+	return h.s.ctxt.bash(ctx, command, exclude, onChunk)
 }
 
 func (h *fullScreenHost) Files() tui.PathFinder {

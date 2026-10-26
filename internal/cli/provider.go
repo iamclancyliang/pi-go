@@ -343,6 +343,26 @@ func SelectProvider(args Args) (Provider, error) {
 		strings.Join(credentialVars(), ", "))
 }
 
+// AvailableProviders counts the providers a credential is configured for,
+// stored or in the environment — what Pi counts to decide whether naming the
+// provider beside the model tells the user anything.
+func AvailableProviders(args Args) int {
+	n := 0
+	for _, name := range ProviderNames() {
+		if storedKey(args, name) != "" {
+			n++
+			continue
+		}
+		for _, v := range Providers[name].EnvVars {
+			if strings.TrimSpace(os.Getenv(v)) != "" {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
 func credentialVars() []string {
 	var out []string
 	for _, name := range ProviderNames() {
