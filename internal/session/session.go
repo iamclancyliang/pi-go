@@ -255,6 +255,16 @@ const (
 	summarySuffix = "\n</summary>"
 )
 
+// SummaryOf is the summary a compaction left, when m is the message that
+// carries it — so a display can show it as a compaction rather than as
+// something the user said.
+func SummaryOf(m ai.Message) (string, bool) {
+	if m.Role != ai.RoleUser || !strings.HasPrefix(m.Content, summaryPrefix) || !strings.HasSuffix(m.Content, summarySuffix) {
+		return "", false
+	}
+	return m.Content[len(summaryPrefix) : len(m.Content)-len(summarySuffix)], true
+}
+
 // Project returns what one model call gets to see.
 //
 // Without a checkpoint this is complete history, losing nothing. With one it is

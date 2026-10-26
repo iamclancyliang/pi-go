@@ -153,7 +153,16 @@ func run(argv []string) int {
 		Config:         cfg,
 	}
 
-	if mode == cli.AppInteractive {
+	// The full-screen interface where the terminal can draw it; otherwise the
+	// line prompt, which needs nothing a terminal might lack.
+	var screen *tui.TTY
+	if mode == cli.AppInteractive && fullScreenCapable(os.Getenv) {
+		if tty, err := tui.OpenTTY(); err == nil {
+			defer tty.Close()
+			screen = tty
+		}
+	}
+	if mode == cli.AppInteractive && screen == nil {
 		// The editing prompt exists only where there is a terminal to edit in.
 		// Failing to open one falls back to plain lines rather than failing
 		// the run: the conversation matters more than the editing.
@@ -178,7 +187,19 @@ func run(argv []string) int {
 	if mode == cli.AppPrint {
 		return cli.RunPrint(ctx, rt, streams, args.Messages)
 	}
+	if screen != nil {
+		return cli.RunFullScreen(ctx, rt, streams, screen, version, args.Messages)
+	}
 	return cli.RunInteractive(ctx, rt, streams)
+}
+
+// fullScreenCapable reports a terminal the full-screen interface can draw
+// on. A dumb terminal cannot move the cursor, and PI_GO_LINE_MODE=1 asks for
+// the line prompt anyway — pi-go's own switch, for a terminal that claims
+// more than it can do.
+func fullScreenCapable(getenv func(string) string) bool {
+	term := getenv("TERM")
+	return term != "" && term != "dumb" && getenv("PI_GO_LINE_MODE") != "1"
 }
 
 // isTerminal reports whether a stream is a terminal.

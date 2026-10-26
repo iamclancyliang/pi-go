@@ -790,11 +790,8 @@ func RunRPC(ctx context.Context, rt Runtime, streams Streams) int {
 
 // RunInteractive reads prompts a line at a time and answers each in turn.
 //
-// A line-based loop, NOT Pi's full-screen interface. The two are different
-// features: this is the conversation, and the interface that renders it — the
-// components, the key handling, the live redraw — is its own body of work that
-// has not been ported. Said plainly rather than approximated, because a
-// half-drawn interface is worse than an honest prompt.
+// The line-based prompt: what runs where the full-screen interface cannot —
+// a terminal that cannot draw it, or input that is not a terminal at all.
 func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	if rt.Conversation == nil || rt.Conversation.Session == nil {
 		// A composition root's mistake rather than a user's, but reported
@@ -803,74 +800,18 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		fmt.Fprintln(streams.Err, "pi: no conversation was opened for this run")
 		return 1
 	}
-	// The agent is rebuilt whenever the conversation changes, because a loop
-	// holds the session it was built with: a command that opened another one
-	// while the agent still pointed at the old would write the next turn into
-	// the conversation the user just left.
-	current := rt.Conversation
-	// Copied so the commands may update it — /reload re-resolves — without
-	// reaching back into the caller's value.
-	config := rt.Config
-	// The model can change mid-session, so what answers is held here rather
-	// than read from the configuration each time.
-	port, provider, modelName := rt.Model, rt.Provider, rt.ModelName
-	var agent *runtime.Agent
-	build := func() error {
-		if err := recordInUse(current.Session, provider, modelName, rt.Thinking); err != nil {
-			return err
-		}
-		next, err := runtime.New(runtime.Config{
-			Model:          port,
-			ModelName:      modelName,
-			Tools:          rt.Tools,
-			Session:        current.Session,
-			Thinking:       rt.Thinking,
-			Retry:          rt.Retry,
-			AutoCompaction: autoCompactionFor(rt.AutoCompaction, provider, modelName),
-			SteeringMode:   rt.SteeringMode,
-			FollowUpMode:   rt.FollowUpMode,
-			// The same summariser /compact uses. Without it an overflow is
-			// terminal: the request is refused, and a conversation long enough
-			// to overflow once will do it again on every turn after.
-			Summarize: (&compaction.Compactor{Model: port, ModelName: modelName}).Summarize,
-		})
-		if err != nil {
-			return err
-		}
-		agent = next
-		return nil
-	}
-	if err := build(); err != nil {
+	s, err := newInteractiveSession(ctx, rt, streams, nil, nil)
+	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
+	defer s.close()
 
-	ctxt := &commandContext{
-		ctx:          ctx,
-		session:      current.Session,
-		conversation: current,
-		out:          streams.Out,
-		errOut:       streams.Err,
-		args:         rt.Args,
-		workingDir:   rt.WorkingDir,
-		config:       &config,
-
-		tools:         rt.Tools,
-		modelProvider: func() string { return provider },
-		modelName:     func() string { return modelName },
-	}
-	if registered, ok := rt.Tools.Lookup("bash"); ok {
-		if runner, ok := registered.(bashExecutor); ok {
-			ctxt.bash = func(bashCtx context.Context, command string, exclude bool, onChunk func(string)) (tools.BashResult, error) {
-				return executeBash(bashCtx, current.Session, runner, command, exclude, onChunk)
-			}
-		}
-	}
 	// The scanner is shared with the prompt loop, so a confirmation reads the
 	// next line the user types rather than opening a second reader that would
 	// race the first for the same input.
 	var lines *bufio.Scanner
-	ctxt.confirm = func() bool {
+	s.ctxt.confirm = func() bool {
 		if lines == nil || !lines.Scan() {
 			return false
 		}
@@ -879,128 +820,13 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		// the outward-facing thing undone, which is the safe way to be wrong.
 		return answer == "y" || answer == "yes"
 	}
-	// What the port and the tool set were BUILT from, frozen at startup. The
-	// live config moves — /settings edits it — so comparing a reload against
-	// the live view would report "nothing changed" for exactly the changes
-	// that only a new run can pick up.
-	builtFrom := rt.Config.Effective
-	ctxt.reloadConfig = func() (bool, error) {
-		resolved, err := ResolveConfig(rt.Args, rt.WorkingDir, nil)
-		if err != nil {
-			return false, err
-		}
-		changed := resolved.Effective.DefaultProvider != builtFrom.DefaultProvider ||
-			resolved.Effective.DefaultModel != builtFrom.DefaultModel ||
-			resolved.Effective.ShellPath != builtFrom.ShellPath ||
-			resolved.Effective.ShellCommandPrefix != builtFrom.ShellCommandPrefix ||
-			resolved.Effective.SessionDir != builtFrom.SessionDir
-		config = resolved
-		return changed, nil
-	}
-	ctxt.compact = func(instructions string) error {
-		// Summarised with whatever model is answering now, so a conversation
-		// switched to a cheaper model is compacted by it too.
-		c := &compaction.Compactor{
-			Model: port, ModelName: modelName, Instructions: instructions,
-			KeepRecentTokens: config.Effective.Compaction.KeepRecentTokens,
-		}
-		summary, kept, err := c.Summarize(ctx, current.Session.Truth())
-		if err != nil {
-			return err
-		}
-		return current.Session.Compact(summary, kept)
-	}
-	ctxt.switchModel = func(toProvider, toModel string) error {
-		next := rt.Args
-		next.Model = toModel
-		if toProvider != "" {
-			next.Provider = toProvider
-		} else {
-			// No provider named means the one already answering, not whichever
-			// credential happens to be found first.
-			next.Provider = provider
-		}
-		opened, openedProvider, openedModel, err := rt.openModel(next)
-		if err != nil {
-			return err
-		}
-		oldPort, oldProvider, oldModel := port, provider, modelName
-		port, provider, modelName = opened, openedProvider, openedModel
-		if err := build(); err != nil {
-			port, provider, modelName = oldPort, oldProvider, oldModel
-			return err
-		}
-		rt.Args = next
-		ctxt.args = next
-		return nil
-	}
-	ctxt.availableModels = func(listCtx context.Context) ([]ai.ModelRef, error) {
-		return listAvailableModels(listCtx, port, provider)
-	}
-	ctxt.cycleModel = func(cycleCtx context.Context) (*ai.ModelCycle, error) {
-		return cycleModelsWithPatterns(cycleCtx, port, provider, modelName, rt.ScopedModels, rt.ModelPatterns,
-			rt.Thinking, ctxt.switchModel)
-	}
-	ctxt.reload = func() error {
-		// Rebuilt from the store the conversation already has, rather than
-		// reopened from its path: reopening would read the leaf back off disk
-		// and undo the move that was just made in memory.
-		restored, err := session.Restore(context.Background(), rt.System, current.Store)
-		if err != nil {
-			return err
-		}
-		current.Session = restored
-		ctxt.session = restored
-		return build()
-	}
-	ctxt.reopen = func(args Args) error {
-		opened, err := OpenConversation(args, rt.WorkingDir, rt.System)
-		if err != nil {
-			return err
-		}
-		// The old one is closed only once the new one is open, so a failure
-		// leaves the session the user was in rather than none at all.
-		_ = current.Close()
-		current = opened
-		ctxt.session, ctxt.conversation = opened.Session, opened
-		// Carry on with what the conversation was last using, as Pi's
-		// session switch does. A recorded model that cannot be opened leaves
-		// the current one answering rather than failing the switch.
-		restored, fromRecord := RestoreRecorded(Args{}, opened.Session)
-		if fromRecord && (restored.Provider != provider || restored.Model != modelName) {
-			next := rt.Args
-			next.Provider, next.Model = restored.Provider, restored.Model
-			if reopened, openedProvider, openedModel, err := rt.openModel(next); err == nil {
-				port, provider, modelName = reopened, openedProvider, openedModel
-				rt.Args, ctxt.args = next, next
-			} else {
-				fmt.Fprintf(streams.Err, "could not restore %s/%s (%v); keeping %s/%s\n",
-					restored.Provider, restored.Model, err, provider, modelName)
-			}
-		}
-		if restored.Thinking != "" {
-			rt.Thinking = ai.ClampThinkingLevel(ai.AvailableThinkingLevels(provider, modelName), restored.Thinking)
-			ctxt.args.Thinking = rt.Thinking
-		}
-		return build()
-	}
-	defer func() { _ = current.Close() }()
 
-	if !config.Effective.QuietStartup {
+	if !s.config.Effective.QuietStartup {
 		fmt.Fprintf(streams.Out, "pi-go · %s/%s · %d tools · /help for commands\n",
-			provider, modelName, len(rt.Tools.All()))
+			s.provider, s.model, len(rt.Tools.All()))
 	}
-	// Said aloud, because continuing silently cannot be told from starting
-	// fresh until the model answers something it should not have known.
-	switch {
-	case current.Resumed:
-		fmt.Fprintf(streams.Out, "resumed %d messages · %s\n",
-			len(current.Session.Snapshot().Messages), current.ID)
-	case current.Path != "":
-		// The id is shown at the start rather than the end: a session ended by
-		// closing the terminal never reaches an ending, and an id the user
-		// never saw is one they cannot resume.
-		fmt.Fprintf(streams.Out, "session %s · -c to continue it later\n", current.ID)
+	for _, notice := range s.startNotices() {
+		fmt.Fprintln(streams.Out, notice)
 	}
 
 	lines = bufio.NewScanner(streams.In)
@@ -1033,7 +859,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 		if prompt == "" {
 			continue
 		}
-		if handled, stop := dispatch(ctxt, prompt); handled {
+		if handled, stop := dispatch(s.ctxt, prompt); handled {
 			if stop {
 				break
 			}
@@ -1042,7 +868,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 
 		// The session carries across turns, so this is one conversation rather
 		// than a series of unrelated questions.
-		if err := agent.Run(ctx, prompt); err != nil {
+		if err := s.agent.Run(ctx, prompt); err != nil {
 			if ctx.Err() != nil {
 				// The user stopped it. Ending the loop as well would exit on a
 				// keystroke meant to interrupt one answer.
@@ -1052,7 +878,7 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 			fmt.Fprintf(streams.Err, "pi: %v\n", err)
 			continue
 		}
-		if answer, ok := lastAnswer(current.Session); ok {
+		if answer, ok := lastAnswer(s.current.Session); ok {
 			fmt.Fprintln(streams.Out, answer)
 		}
 	}
