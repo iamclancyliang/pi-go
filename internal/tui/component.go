@@ -123,6 +123,15 @@ func NewText(text string, paddingX, paddingY int, background Style) *Text {
 	return &Text{text: text, paddingX: paddingX, paddingY: paddingY, background: background}
 }
 
+// SetBackground changes the background, as a tool's box turns from
+// pending to done.
+func (t *Text) SetBackground(background Style) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.background = background
+	t.cached = nil
+}
+
 func (t *Text) SetText(text string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -184,6 +193,9 @@ type Box struct {
 func NewBox(paddingX, paddingY int, background Style) *Box {
 	return &Box{paddingX: paddingX, paddingY: paddingY, background: background}
 }
+
+// SetBackground changes the background.
+func (b *Box) SetBackground(background Style) { b.background = background }
 
 func (b *Box) Render(width int) []string {
 	content := max(1, width-2*b.paddingX)

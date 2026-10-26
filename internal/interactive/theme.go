@@ -207,9 +207,7 @@ func (t *Theme) ThinkingBorder(level string) tui.Style {
 	return t.FgStyle("thinkingOff")
 }
 
-// MarkdownTheme is how messages draw their Markdown. Code blocks are drawn
-// in one colour: Pi highlights the languages highlight.js knows, and that is
-// not yet ported.
+// MarkdownTheme is how messages draw their Markdown.
 func (t *Theme) MarkdownTheme() tui.MarkdownTheme {
 	return tui.MarkdownTheme{
 		Heading: t.FgStyle("mdHeading"), Link: t.FgStyle("mdLink"), LinkURL: t.FgStyle("mdLinkUrl"),
@@ -217,13 +215,7 @@ func (t *Theme) MarkdownTheme() tui.MarkdownTheme {
 		CodeBlockBorder: t.FgStyle("mdCodeBlockBorder"), Quote: t.FgStyle("mdQuote"),
 		QuoteBorder: t.FgStyle("mdQuoteBorder"), HR: t.FgStyle("mdHr"), ListBullet: t.FgStyle("mdListBullet"),
 		Bold: Bold, Italic: Italic, Underline: Underline, Strikethrough: Strikethrough,
-		HighlightCode: func(code, _ string) []string {
-			lines := strings.Split(code, "\n")
-			for i, l := range lines {
-				lines[i] = t.Fg("mdCodeBlock", l)
-			}
-			return lines
-		},
+		HighlightCode: t.highlightCode,
 	}
 }
 
@@ -239,4 +231,20 @@ func (t *Theme) SelectListTheme() tui.SelectListTheme {
 // EditorTheme is how the prompt editor is drawn.
 func (t *Theme) EditorTheme() tui.EditorTheme {
 	return tui.EditorTheme{BorderColor: t.FgStyle("borderMuted"), SelectList: t.SelectListTheme()}
+}
+
+// highlightCode colours code for display. Pi highlights a language
+// highlight.js knows and draws anything else in the code-block colour.
+// Highlighting itself is not ported, so known languages are drawn as the
+// plain text most of a highlighted block is, without the coloured keywords
+// and strings.
+func (t *Theme) highlightCode(code, lang string) []string {
+	lines := strings.Split(code, "\n")
+	if knownLanguage(lang) {
+		return lines
+	}
+	for i, l := range lines {
+		lines[i] = t.Fg("mdCodeBlock", l)
+	}
+	return lines
 }

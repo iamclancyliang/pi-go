@@ -1,0 +1,2210 @@
+{
+	"cwd": "/var/folders/wh/k1n7wl910x9_c86jbhlwfbwm0000gn/T/pi-golden-TNkwl9",
+	"cases": [
+		{
+			"kind": "user",
+			"text": "hello",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mhello\u001b[39m                                  \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "hello",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mhello\u001b[39m                                                                          \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "**bold** and `code`",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[1m\u001b[38;2;212;212;212mbold\u001b[39m\u001b[22m\u001b[38;2;212;212;212m\u001b[38;2;212;212;212m and \u001b[39m\u001b[38;2;138;190;183mcode\u001b[39m                          \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "**bold** and `code`",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[1m\u001b[38;2;212;212;212mbold\u001b[39m\u001b[22m\u001b[38;2;212;212;212m\u001b[38;2;212;212;212m and \u001b[39m\u001b[38;2;138;190;183mcode\u001b[39m                                                                  \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "1) first\n2) second",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m1) \u001b[39m\u001b[38;2;212;212;212mfirst\u001b[39m                               \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m2) \u001b[39m\u001b[38;2;212;212;212msecond\u001b[39m                              \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "1) first\n2) second",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m1) \u001b[39m\u001b[38;2;212;212;212mfirst\u001b[39m                                                                       \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m2) \u001b[39m\u001b[38;2;212;212;212msecond\u001b[39m                                                                      \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "\\*escaped\\*",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212m\\*\u001b[39m\u001b[38;2;212;212;212mescaped\u001b[39m\u001b[38;2;212;212;212m\\*\u001b[39m                            \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "\\*escaped\\*",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212m\\*\u001b[39m\u001b[38;2;212;212;212mescaped\u001b[39m\u001b[38;2;212;212;212m\\*\u001b[39m                                                                    \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "line1\nline2",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mline1\u001b[39m                                  \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mline2\u001b[39m                                  \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "line1\nline2",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mline1\u001b[39m                                                                          \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;212;212;212mline2\u001b[39m                                                                          \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "# heading\n\n- a\n- b",
+			"width": 40,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;240;198;116m\u001b[1m\u001b[4mheading\u001b[24m\u001b[22m\u001b[39m                                \u001b[49m",
+				"\u001b[48;2;52;53;65m                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m- \u001b[39m\u001b[38;2;212;212;212ma\u001b[39m                                    \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m- \u001b[39m\u001b[38;2;212;212;212mb\u001b[39m                                    \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                        \u001b[49m"
+			]
+		},
+		{
+			"kind": "user",
+			"text": "# heading\n\n- a\n- b",
+			"width": 80,
+			"lines": [
+				"\u001b]133;A\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;240;198;116m\u001b[1m\u001b[4mheading\u001b[24m\u001b[22m\u001b[39m                                                                        \u001b[49m",
+				"\u001b[48;2;52;53;65m                                                                                \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m- \u001b[39m\u001b[38;2;212;212;212ma\u001b[39m                                                                            \u001b[49m",
+				"\u001b[48;2;52;53;65m \u001b[38;2;138;190;183m- \u001b[39m\u001b[38;2;212;212;212mb\u001b[39m                                                                            \u001b[49m",
+				"\u001b]133;B\u0007\u001b]133;C\u0007\u001b[48;2;52;53;65m                                                                                \u001b[49m"
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "text",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "Hello **world**"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 Hello \u001b[1mworld\u001b[22m                                                "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "text",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "Hello **world**"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 Hello \u001b[1mworld\u001b[22m                                                "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "thinkingText",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "Let me think\n\nabout it"
+					},
+					{
+						"type": "text",
+						"text": "Answer"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[3m\u001b[38;2;128;128;128mLet me think\u001b[39m\u001b[23m                                               ",
+				"                                                            ",
+				" \u001b[3m\u001b[38;2;128;128;128mabout it\u001b[39m\u001b[23m                                                   ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 Answer                                                     "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "thinkingText",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "Let me think\n\nabout it"
+					},
+					{
+						"type": "text",
+						"text": "Answer"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[3m\u001b[38;2;128;128;128mThinking...\u001b[39m\u001b[23m                                                ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 Answer                                                     "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "twoThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "t1"
+					},
+					{
+						"type": "thinking",
+						"thinking": "t2"
+					},
+					{
+						"type": "text",
+						"text": "x"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[3m\u001b[38;2;128;128;128mt1\u001b[39m\u001b[23m                                                         ",
+				"                                                            ",
+				" \u001b[3m\u001b[38;2;128;128;128mt2\u001b[39m\u001b[23m                                                         ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 x                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "twoThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "t1"
+					},
+					{
+						"type": "thinking",
+						"thinking": "t2"
+					},
+					{
+						"type": "text",
+						"text": "x"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[3m\u001b[38;2;128;128;128mThinking...\u001b[39m\u001b[23m                                                ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 x                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "onlyThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "only thinking"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[3m\u001b[38;2;128;128;128monly thinking\u001b[39m\u001b[23m                                              "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "onlyThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "only thinking"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[3m\u001b[38;2;128;128;128mThinking...\u001b[39m\u001b[23m                                                "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "textTool",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "Calling a tool"
+					},
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"",
+				" Calling a tool                                             "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "textTool",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "Calling a tool"
+					},
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"",
+				" Calling a tool                                             "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "onlyTool",
+			"message": {
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "onlyTool",
+			"message": {
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "thinkingTool",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "plan"
+					},
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"",
+				" \u001b[3m\u001b[38;2;128;128;128mplan\u001b[39m\u001b[23m                                                       "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "thinkingTool",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "plan"
+					},
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"",
+				" \u001b[3m\u001b[38;2;128;128;128mThinking...\u001b[39m\u001b[23m                                                "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "length",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "length"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mResponse was truncated before completion.\u001b[39m                  "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "length",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "length"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mResponse was truncated before completion.\u001b[39m                  "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "aborted",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "aborted"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mOperation aborted\u001b[39m                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "aborted",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "aborted"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mOperation aborted\u001b[39m                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "abortedDefault",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "aborted",
+				"errorMessage": "Request was aborted"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mOperation aborted\u001b[39m                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "abortedDefault",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "aborted",
+				"errorMessage": "Request was aborted"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mOperation aborted\u001b[39m                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "abortedCustom",
+			"message": {
+				"content": [],
+				"stopReason": "aborted",
+				"errorMessage": "Stopped by user"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mStopped by user\u001b[39m                                            "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "abortedCustom",
+			"message": {
+				"content": [],
+				"stopReason": "aborted",
+				"errorMessage": "Stopped by user"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mStopped by user\u001b[39m                                            "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "error",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "error",
+				"errorMessage": "rate limited"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mError: rate limited\u001b[39m                                        "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "error",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "partial"
+					}
+				],
+				"stopReason": "error",
+				"errorMessage": "rate limited"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" partial                                                    ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mError: rate limited\u001b[39m                                        "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "errorBare",
+			"message": {
+				"content": [],
+				"stopReason": "error"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mError: Unknown error\u001b[39m                                       "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "errorBare",
+			"message": {
+				"content": [],
+				"stopReason": "error"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;204;102;102mError: Unknown error\u001b[39m                                       "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "errorWithTool",
+			"message": {
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				],
+				"stopReason": "error",
+				"errorMessage": "boom"
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "errorWithTool",
+			"message": {
+				"content": [
+					{
+						"type": "toolCall",
+						"id": "call-1",
+						"name": "read",
+						"arguments": {
+							"path": "a.txt"
+						}
+					}
+				],
+				"stopReason": "error",
+				"errorMessage": "boom"
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "empty",
+			"message": {
+				"content": []
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "empty",
+			"message": {
+				"content": []
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "blank",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "  "
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "blank",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "  "
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": []
+		},
+		{
+			"kind": "assistant",
+			"name": "blankThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "  "
+					},
+					{
+						"type": "text",
+						"text": "x"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 x                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "blankThinking",
+			"message": {
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "  "
+					},
+					{
+						"type": "text",
+						"text": "x"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 x                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "textThinkingText",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "a"
+					},
+					{
+						"type": "thinking",
+						"thinking": "b"
+					},
+					{
+						"type": "text",
+						"text": "c"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" a                                                          ",
+				" \u001b[3m\u001b[38;2;128;128;128mb\u001b[39m\u001b[23m                                                          ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 c                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "textThinkingText",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "a"
+					},
+					{
+						"type": "thinking",
+						"thinking": "b"
+					},
+					{
+						"type": "text",
+						"text": "c"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" a                                                          ",
+				" \u001b[3m\u001b[38;2;128;128;128mThinking...\u001b[39m\u001b[23m                                                ",
+				"",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 c                                                          "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "markdown",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "# Plan\n\n1. Read `x`\n2. Fix\n\n```go\nfmt.Println()\n```"
+					}
+				]
+			},
+			"hideThinking": false,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[38;2;240;198;116m\u001b[1m\u001b[4mPlan\u001b[24m\u001b[22m\u001b[39m                                                       ",
+				"                                                            ",
+				" \u001b[38;2;138;190;183m1. \u001b[39mRead \u001b[38;2;138;190;183mx\u001b[39m                                                  ",
+				" \u001b[38;2;138;190;183m2. \u001b[39mFix                                                     ",
+				"                                                            ",
+				" \u001b[38;2;128;128;128m```go\u001b[39m                                                      ",
+				"   fmt.Println()                                            ",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;128;128;128m```\u001b[39m                                                        "
+			]
+		},
+		{
+			"kind": "assistant",
+			"name": "markdown",
+			"message": {
+				"content": [
+					{
+						"type": "text",
+						"text": "# Plan\n\n1. Read `x`\n2. Fix\n\n```go\nfmt.Println()\n```"
+					}
+				]
+			},
+			"hideThinking": true,
+			"width": 60,
+			"lines": [
+				"\u001b]133;A\u0007",
+				" \u001b[38;2;240;198;116m\u001b[1m\u001b[4mPlan\u001b[24m\u001b[22m\u001b[39m                                                       ",
+				"                                                            ",
+				" \u001b[38;2;138;190;183m1. \u001b[39mRead \u001b[38;2;138;190;183mx\u001b[39m                                                  ",
+				" \u001b[38;2;138;190;183m2. \u001b[39mFix                                                     ",
+				"                                                            ",
+				" \u001b[38;2;128;128;128m```go\u001b[39m                                                      ",
+				"   fmt.Println()                                            ",
+				"\u001b]133;B\u0007\u001b]133;C\u0007 \u001b[38;2;128;128;128m```\u001b[39m                                                        "
+			]
+		},
+		{
+			"kind": "compaction",
+			"tokensBefore": 12345,
+			"summary": "## Goal\nDo things",
+			"expanded": false,
+			"width": 60,
+			"lines": [
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[38;2;149;117;205m\u001b[1m[compaction]\u001b[22m\u001b[39m                                               \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[38;2;212;212;212mCompacted from 12,345 tokens (\u001b[39m\u001b[38;2;102;102;102mctrl+o\u001b[39m\u001b[38;2;212;212;212m to expand)\u001b[39m            \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "compaction",
+			"tokensBefore": 12345,
+			"summary": "## Goal\nDo things",
+			"expanded": true,
+			"width": 60,
+			"lines": [
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[38;2;149;117;205m\u001b[1m[compaction]\u001b[22m\u001b[39m                                               \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[1m\u001b[38;2;212;212;212mCompacted from 12,345 tokens\u001b[39m\u001b[22m                               \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[38;2;240;198;116m\u001b[1mGoal\u001b[22m\u001b[39m                                                       \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m",
+				"\u001b[48;2;45;40;56m \u001b[38;2;212;212;212mDo things\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;45;40;56m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readCall",
+			"tool": "read",
+			"args": {
+				"path": "src/a.txt"
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183msrc/a.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readRange",
+			"tool": "read",
+			"args": {
+				"path": "src/a.txt",
+				"offset": 5,
+				"limit": 10
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183msrc/a.txt\u001b[39m\u001b[38;2;255;255;0m:5-14\u001b[39m                                        \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readOffset",
+			"tool": "read",
+			"args": {
+				"path": "src/a.txt",
+				"offset": 5
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183msrc/a.txt\u001b[39m\u001b[38;2;255;255;0m:5\u001b[39m                                           \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readNoPath",
+			"tool": "read",
+			"args": {},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;128;128;128m...\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readDone",
+			"tool": "read",
+			"args": {
+				"path": "a.txt"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "line1\nline2"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183ma.txt\u001b[39m                                                 \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readExpanded",
+			"tool": "read",
+			"args": {
+				"path": "a.txt"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+				},
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183ma.txt\u001b[39m                                                 \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 15\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 16\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 17\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 18\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 19\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 20\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 21\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 22\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 23\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 24\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 25\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readTruncLines",
+			"tool": "read",
+			"args": {
+				"path": "a.txt"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "a\nb",
+					"details": {
+						"truncation": {
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 5000,
+							"totalBytes": 99999,
+							"outputLines": 2000,
+							"outputBytes": 51200,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						}
+					}
+				},
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183ma.txt\u001b[39m                                                 \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128ma\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mb\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Truncated: showing 2000 of 5000 lines (2000 line limit)]\u001b[39m  \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readTruncBytes",
+			"tool": "read",
+			"args": {
+				"path": "a.txt"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "a\nb",
+					"details": {
+						"truncation": {
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 5000,
+							"totalBytes": 99999,
+							"outputLines": 2000,
+							"outputBytes": 51200,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						}
+					}
+				},
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183ma.txt\u001b[39m                                                 \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128ma\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mb\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Truncated: 2000 lines shown (50.0KB limit)]\u001b[39m               \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readError",
+			"tool": "read",
+			"args": {
+				"path": "missing.txt"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "ENOENT: no such file",
+					"isError": true
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183mmissing.txt\u001b[39m                                           \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;128;128;128mENOENT: no such file\u001b[39m                                       \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readAgents",
+			"tool": "read",
+			"args": {
+				"path": "AGENTS.md"
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread resource\u001b[22m\u001b[39m \u001b[38;2;138;190;183mAGENTS.md\u001b[39m\u001b[38;2;102;102;102m (ctrl+o to expand)\u001b[39m                 \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readSkill",
+			"tool": "read",
+			"args": {
+				"path": "skills/demo/SKILL.md",
+				"limit": 20
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;149;117;205m\u001b[1m[skill]\u001b[22m \u001b[39m\u001b[38;2;212;212;212mdemo\u001b[39m\u001b[38;2;255;255;0m:1-20\u001b[39m\u001b[38;2;102;102;102m (ctrl+o to expand)\u001b[39m                       \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "readHome",
+			"tool": "read",
+			"args": {
+				"path": "/home/tester/notes.txt"
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b[38;2;138;190;183m~/notes.txt\u001b[39m                                           \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeShort",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": "hello\nworld\n"
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mhello\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mworld\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeLong",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 10\u001b[39m\u001b[38;2;128;128;128m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128m... (15 more lines, 25 total,\u001b[39m \u001b[38;2;102;102;102mctrl+o\u001b[39m\u001b[38;2;128;128;128m to expand\u001b[39m\u001b[38;2;128;128;128m)\u001b[39m            \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeLongExpanded",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+			},
+			"steps": {
+				"argsComplete": true,
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 15\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 16\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 17\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 18\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 19\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 20\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 21\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 22\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 23\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 24\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mout 25\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeDone",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": "x"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "Successfully wrote 1 bytes to out.txt"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mx\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeError",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": "x"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "EACCES: permission denied",
+					"isError": true
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;128;128;128mx\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;204;102;102mEACCES: permission denied\u001b[39m                                  \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "writeEmpty",
+			"tool": "write",
+			"args": {
+				"path": "out.txt",
+				"content": ""
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mwrite\u001b[22m\u001b[39m \u001b[38;2;138;190;183mout.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editPending",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "five",
+						"newText": "5"
+					}
+				]
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editPreview",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "five",
+						"newText": "5"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  1 one\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  2 two\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  3 three\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  4 four\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m- 5 \u001b[7mfive\u001b[27m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+ 5 \u001b[7m5\u001b[27m\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  6 six\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  7 seven\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  8 eight\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  9 nine\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m    ...\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editPreviewError",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "absent",
+						"newText": "x"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;204;102;102mCould not find the exact text in notes.txt. The old text   \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;204;102;102mmust match exactly including all whitespace and newlines.\u001b[39m  \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editMissingFile",
+			"tool": "edit",
+			"args": {
+				"path": "nope.txt",
+				"edits": [
+					{
+						"oldText": "a",
+						"newText": "b"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnope.txt\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;204;102;102mCould not edit file: nope.txt. Error code: ENOENT.\u001b[39m         \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editDone",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "five",
+						"newText": "5"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "Successfully replaced 1 block(s) in notes.txt.",
+					"details": {
+						"diff": " 1 one\n-5 five\n+5 5"
+					}
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m 1 one\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m-5 \u001b[7mfive\u001b[27m\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+5 \u001b[7m5\u001b[27m\u001b[39m                                                       \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editMulti",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "two\nthree",
+						"newText": "2\n3\nthree-and-a-half"
+					},
+					{
+						"oldText": "nine",
+						"newText": "9"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  1 one\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m- 2 two\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m- 3 three\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+ 2 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+ 3 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+ 4 three-and-a-half\u001b[39m                                       \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  4 four\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  5 five\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  6 six\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  7 seven\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  8 eight\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m- 9 \u001b[7mnine\u001b[27m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+10 \u001b[7m9\u001b[27m\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m 10 ten\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "editError",
+			"tool": "edit",
+			"args": {
+				"path": "notes.txt",
+				"edits": [
+					{
+						"oldText": "five",
+						"newText": "5"
+					}
+				]
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "Could not find the exact text",
+					"isError": true
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1medit\u001b[22m\u001b[39m \u001b[38;2;138;190;183mnotes.txt\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  1 one\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  2 two\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  3 three\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  4 four\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;204;102;102m- 5 \u001b[7mfive\u001b[27m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;181;189;104m+ 5 \u001b[7m5\u001b[27m\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  6 six\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  7 seven\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  8 eight\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m  9 nine\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m    ...\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"",
+				" \u001b[38;2;204;102;102mCould not find the exact text\u001b[39m                              "
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashCall",
+			"tool": "bash",
+			"args": {
+				"command": "ls -la"
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1m$ ls -la\u001b[22m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashTimeout",
+			"tool": "bash",
+			"args": {
+				"command": "sleep 1",
+				"timeout": 30
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1m$ sleep 1\u001b[22m\u001b[39m\u001b[38;2;128;128;128m (timeout 30s)\u001b[39m                                    \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashEmpty",
+			"tool": "bash",
+			"args": {},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1m$ \u001b[38;2;128;128;128m...\u001b[39m\u001b[22m\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashDone",
+			"tool": "bash",
+			"args": {
+				"command": "echo hi"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "hi"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1m$ echo hi\u001b[22m\u001b[39m                                                  \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mhi\u001b[39m                                                         \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashLong",
+			"tool": "bash",
+			"args": {
+				"command": "seq 25"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1m$ seq 25\u001b[22m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m... (20 earlier lines,\u001b[39m \u001b[38;2;102;102;102mctrl+o\u001b[39m\u001b[38;2;128;128;128m to expand\u001b[39m\u001b[38;2;128;128;128m)\u001b[39m                   \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 21\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 22\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 23\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 24\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 25\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashLongExpanded",
+			"tool": "bash",
+			"args": {
+				"command": "seq 25"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+				},
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1m$ seq 25\u001b[22m\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 15\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 16\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 17\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 18\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 19\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 20\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 21\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 22\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 23\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 24\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 25\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashTruncated",
+			"tool": "bash",
+			"args": {
+				"command": "big"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "tail\n\n[Showing lines 3001-5000 of 5000. Full output: /tmp/pi-bash-1.log]",
+					"details": {
+						"truncation": {
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 5000,
+							"totalBytes": 99999,
+							"outputLines": 2000,
+							"outputBytes": 51200,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "/tmp/pi-bash-1.log"
+					}
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1m$ big\u001b[22m\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mtail\u001b[39m                                                       \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Full output: /tmp/pi-bash-1.log. Truncated: showing 2000  \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0mof 5000 lines]\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashError",
+			"tool": "bash",
+			"args": {
+				"command": "false"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "oops\n\nCommand exited with code 1",
+					"isError": true
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1m$ false\u001b[22m\u001b[39m                                                    \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;128;128;128moops\u001b[39m                                                       \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;128;128;128m\u001b[39m                                                           \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;128;128;128mCommand exited with code 1\u001b[39m                                 \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "bashPartial",
+			"tool": "bash",
+			"args": {
+				"command": "make"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "building"
+				},
+				"partial": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1m$ make\u001b[22m\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;128;128;128mbuilding\u001b[39m                                                   \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "grepCall",
+			"tool": "grep",
+			"args": {
+				"pattern": "TODO",
+				"path": "src",
+				"glob": "*.go",
+				"limit": 5
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mgrep\u001b[22m\u001b[39m \u001b[38;2;138;190;183m/TODO/\u001b[39m\u001b[38;2;128;128;128m in src\u001b[39m\u001b[38;2;128;128;128m (*.go)\u001b[39m\u001b[38;2;128;128;128m limit 5\u001b[39m                          \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "grepDone",
+			"tool": "grep",
+			"args": {
+				"pattern": "TODO"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "a.go:1: TODO x\nb.go:2: TODO y"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mgrep\u001b[22m\u001b[39m \u001b[38;2;138;190;183m/TODO/\u001b[39m\u001b[38;2;128;128;128m in .\u001b[39m                                           \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128ma.go:1: TODO x\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mb.go:2: TODO y\u001b[39m                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "grepLimits",
+			"tool": "grep",
+			"args": {
+				"pattern": "x"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25",
+					"details": {
+						"matchLimitReached": 100,
+						"truncation": {
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 5000,
+							"totalBytes": 99999,
+							"outputLines": 2000,
+							"outputBytes": 51200,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"linesTruncated": true
+					}
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mgrep\u001b[22m\u001b[39m \u001b[38;2;138;190;183m/x/\u001b[39m\u001b[38;2;128;128;128m in .\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 15\u001b[39m\u001b[38;2;128;128;128m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m... (10 more lines,\u001b[39m \u001b[38;2;102;102;102mctrl+o\u001b[39m\u001b[38;2;128;128;128m to expand\u001b[39m\u001b[38;2;128;128;128m)\u001b[39m                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Truncated: 100 matches limit, 50.0KB limit, some lines    \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0mtruncated]\u001b[39m                                                 \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "grepExpanded",
+			"tool": "grep",
+			"args": {
+				"pattern": "x"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25"
+				},
+				"expanded": true
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mgrep\u001b[22m\u001b[39m \u001b[38;2;138;190;183m/x/\u001b[39m\u001b[38;2;128;128;128m in .\u001b[39m                                              \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 15\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 16\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 17\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 18\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 19\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 20\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 21\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 22\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 23\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 24\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 25\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "findCall",
+			"tool": "find",
+			"args": {
+				"pattern": "*.go",
+				"limit": 50
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mfind\u001b[22m\u001b[39m \u001b[38;2;138;190;183m*.go\u001b[39m\u001b[38;2;128;128;128m in .\u001b[39m\u001b[38;2;128;128;128m (limit 50)\u001b[39m                                  \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "findDone",
+			"tool": "find",
+			"args": {
+				"pattern": "*.go",
+				"path": "/home/tester/src"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "out 1\nout 2\nout 3\nout 4\nout 5\nout 6\nout 7\nout 8\nout 9\nout 10\nout 11\nout 12\nout 13\nout 14\nout 15\nout 16\nout 17\nout 18\nout 19\nout 20\nout 21\nout 22\nout 23\nout 24\nout 25",
+					"details": {
+						"resultLimitReached": 1000
+					}
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mfind\u001b[22m\u001b[39m \u001b[38;2;138;190;183m*.go\u001b[39m\u001b[38;2;128;128;128m in ~/src\u001b[39m                                         \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 1\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 2\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 3\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 4\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 5\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 6\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 7\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 8\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 9\u001b[39m                                                      \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 10\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 11\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 12\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 13\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 14\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 15\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 16\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 17\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 18\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 19\u001b[39m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mout 20\u001b[39m\u001b[38;2;128;128;128m                                                     \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128m... (5 more lines,\u001b[39m \u001b[38;2;102;102;102mctrl+o\u001b[39m\u001b[38;2;128;128;128m to expand\u001b[39m\u001b[38;2;128;128;128m)\u001b[39m                       \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Truncated: 1000 results limit]\u001b[39m                            \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "lsCall",
+			"tool": "ls",
+			"args": {},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mls\u001b[22m\u001b[39m \u001b[38;2;138;190;183m.\u001b[39m                                                       \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "lsLimit",
+			"tool": "ls",
+			"args": {
+				"path": "src",
+				"limit": 10
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "a\nb",
+					"details": {
+						"entryLimitReached": 10
+					}
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mls\u001b[22m\u001b[39m \u001b[38;2;138;190;183msrc\u001b[39m\u001b[38;2;128;128;128m (limit 10)\u001b[39m                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128ma\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;128;128;128mb\u001b[39m                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;255;255;0m[Truncated: 10 entries limit]\u001b[39m                              \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "customCall",
+			"tool": "custom_tool",
+			"args": {
+				"query": "x",
+				"n": 2
+			},
+			"steps": {},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mcustom_tool\u001b[22m\u001b[39m                                                \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m {                                                          \u001b[49m",
+				"\u001b[48;2;40;40;50m   \"query\": \"x\",                                            \u001b[49m",
+				"\u001b[48;2;40;40;50m   \"n\": 2                                                   \u001b[49m",
+				"\u001b[48;2;40;40;50m }                                                          \u001b[49m",
+				"\u001b[48;2;40;40;50m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "customDone",
+			"tool": "custom_tool",
+			"args": {
+				"query": "x"
+			},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "result text"
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mcustom_tool\u001b[22m\u001b[39m                                                \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m",
+				"\u001b[48;2;40;50;40m {                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m   \"query\": \"x\"                                             \u001b[49m",
+				"\u001b[48;2;40;50;40m }                                                          \u001b[49m",
+				"\u001b[48;2;40;50;40m result text                                                \u001b[49m",
+				"\u001b[48;2;40;50;40m                                                            \u001b[49m"
+			]
+		},
+		{
+			"kind": "tool",
+			"name": "customError",
+			"tool": "custom_tool",
+			"args": {},
+			"steps": {
+				"argsComplete": true,
+				"result": {
+					"text": "failed",
+					"isError": true
+				}
+			},
+			"width": 60,
+			"lines": [
+				"",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m \u001b[38;2;212;212;212m\u001b[1mcustom_tool\u001b[22m\u001b[39m                                                \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m",
+				"\u001b[48;2;60;40;40m {}                                                         \u001b[49m",
+				"\u001b[48;2;60;40;40m failed                                                     \u001b[49m",
+				"\u001b[48;2;60;40;40m                                                            \u001b[49m"
+			]
+		}
+	]
+}
