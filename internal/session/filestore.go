@@ -51,6 +51,11 @@ type FileStore struct {
 	// here but not lost — which is the difference between changing your mind
 	// and destroying the evidence.
 	leaf string
+
+	// atRoot says the conversation stands before its first entry, with the next
+	// one starting a new root. A separate flag because an empty leaf already
+	// means "the last entry written".
+	atRoot bool
 }
 
 // fileHeader is the first line of a session file.
@@ -96,6 +101,8 @@ type fileRecord struct {
 	Info       *SessionInfo      `json:"info,omitempty"`
 	Model      *ModelChange      `json:"model_change,omitempty"`
 	Thinking   *ThinkingChange   `json:"thinking_level_change,omitempty"`
+	Label      *LabelChange      `json:"label,omitempty"`
+	Branch     *BranchSummary    `json:"branch_summary,omitempty"`
 }
 
 // wireIntent is a ToolIntent with its replay policy written as the word a
@@ -124,6 +131,8 @@ const (
 	kindInfo       = "session_info"
 	kindModel      = "model_change"
 	kindThinking   = "thinking_level_change"
+	kindLabel      = "label"
+	kindBranch     = "branch_summary"
 	kindHeader     = "session"
 )
 
@@ -225,17 +234,23 @@ func (s *FileStore) Close() error {
 // failure arrives at the start of the NEXT session rather than at the end of
 // this one.
 func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
+	_, err := s.appendEntries(ctx, entries)
+	return err
+}
+
+// appendEntries is Append, reporting the ids the entries were given.
+func (s *FileStore) appendEntries(ctx context.Context, entries []Entry) ([]string, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.file == nil {
-		return fmt.Errorf("session: the store is closed")
+		return nil, fmt.Errorf("session: the store is closed")
 	}
 
 	parent := s.leaf
@@ -244,11 +259,11 @@ func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
 	for _, e := range entries {
 		record, err := s.encode(e, parent)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		line, err := json.Marshal(record)
 		if err != nil {
-			return fmt.Errorf("session: %w", err)
+			return nil, fmt.Errorf("session: %w", err)
 		}
 		buf = append(append(buf, line...), '\n')
 		parent = record.ID
@@ -257,19 +272,20 @@ func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
 
 	before, err := s.file.Seek(0, 1)
 	if err != nil {
-		return fmt.Errorf("session: %w", err)
+		return nil, fmt.Errorf("session: %w", err)
 	}
 	if _, err := s.file.Write(buf); err != nil {
 		// Back to where this started. A failure here is reported alongside the
 		// original, because a store that could not undo a partial write holds
 		// something a reader must be warned about.
 		if undo := s.file.Truncate(before); undo != nil {
-			return fmt.Errorf("session: %w (and the partial write could not be undone: %v)", err, undo)
+			return nil, fmt.Errorf("session: %w (and the partial write could not be undone: %v)", err, undo)
 		}
-		return fmt.Errorf("session: %w", err)
+		return nil, fmt.Errorf("session: %w", err)
 	}
 	s.leaf = ids[len(ids)-1]
-	return nil
+	s.atRoot = false
+	return ids, nil
 }
 
 // Load returns the conversation as it now stands: the path from the root down
@@ -280,8 +296,11 @@ func (s *FileStore) Append(ctx context.Context, entries ...Entry) error {
 // next turn follows from.
 func (s *FileStore) Load(ctx context.Context) ([]Entry, error) {
 	s.mu.Lock()
-	leaf := s.leaf
+	leaf, atRoot := s.leaf, s.atRoot
 	s.mu.Unlock()
+	if atRoot {
+		return nil, ctx.Err()
+	}
 	return s.branch(ctx, leaf)
 }
 
@@ -389,9 +408,60 @@ func (s *FileStore) MoveTo(ctx context.Context, id string) error {
 		return err
 	}
 	s.mu.Lock()
-	s.leaf = id
+	s.leaf, s.atRoot = id, false
 	s.mu.Unlock()
 	return nil
+}
+
+// ResetLeaf puts the conversation back before its first entry. What was said
+// stays in the file; the next entry starts a new root beside it.
+func (s *FileStore) ResetLeaf() {
+	s.mu.Lock()
+	s.leaf, s.atRoot = "", true
+	s.mu.Unlock()
+}
+
+// SetLabel bookmarks an entry, or removes its bookmark with an empty label. The
+// record goes on the current line like any other, moving the leaf onto it.
+func (s *FileStore) SetLabel(ctx context.Context, targetID, label string) error {
+	records, err := s.records()
+	if err != nil {
+		return err
+	}
+	for _, r := range records {
+		if r.ID == targetID {
+			return s.Append(ctx, Entry{Label: &LabelChange{TargetID: targetID, Label: label}})
+		}
+	}
+	return fmt.Errorf("session: no entry %q in this conversation", targetID)
+}
+
+// resolvedLabel is the bookmark an entry ends up with, after every change to it.
+type resolvedLabel struct {
+	label string
+	at    time.Time
+	raw   string
+}
+
+// resolveLabels replays the label records in the order they were written.
+func resolveLabels(records []fileRecord) map[string]resolvedLabel {
+	labels := map[string]resolvedLabel{}
+	for _, r := range records {
+		if r.Label == nil {
+			continue
+		}
+		if r.Label.Label == "" {
+			delete(labels, r.Label.TargetID)
+			continue
+		}
+		raw := r.Label.At
+		if raw == "" {
+			raw = r.Timestamp
+		}
+		at, _ := time.Parse(time.RFC3339Nano, raw)
+		labels[r.Label.TargetID] = resolvedLabel{label: r.Label.Label, at: at, raw: raw}
+	}
+	return labels
 }
 
 // Node is one entry in the shape of the conversation.
@@ -400,6 +470,14 @@ type Node struct {
 	ParentID string
 	Kind     string
 	At       time.Time
+
+	// Entry is what the entry holds, for a display that draws each kind its own
+	// way.
+	Entry Entry
+
+	// Label is the bookmark on this entry, and LabelAt when it was given.
+	Label   string
+	LabelAt time.Time
 
 	// Summary is a short description of what this entry is, for a person
 	// choosing among them.
@@ -427,10 +505,16 @@ func (s *FileStore) Tree(ctx context.Context) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	path, err := pathTo(records, s.Leaf())
-	if err != nil {
-		return nil, err
+	var path []fileRecord
+	s.mu.Lock()
+	atRoot := s.atRoot
+	s.mu.Unlock()
+	if !atRoot {
+		if path, err = pathTo(records, s.Leaf()); err != nil {
+			return nil, err
+		}
 	}
+	labels := resolveLabels(records)
 	onPath := make(map[string]bool, len(path))
 	for _, r := range path {
 		onPath[r.ID] = true
@@ -445,17 +529,128 @@ func (s *FileStore) Tree(ctx context.Context) ([]Node, error) {
 	nodes := make([]Node, 0, len(records))
 	for _, r := range records {
 		at, _ := time.Parse(time.RFC3339Nano, r.Timestamp)
+		entry, err := r.decode()
+		if err != nil {
+			return nil, err
+		}
 		nodes = append(nodes, Node{
 			ID:       r.ID,
 			ParentID: r.ParentID,
 			Kind:     r.Kind,
 			At:       at,
+			Entry:    entry,
+			Label:    labels[r.ID].label,
+			LabelAt:  labels[r.ID].at,
 			Summary:  r.summary(),
 			OnPath:   onPath[r.ID],
 			IsLeaf:   !hasChild[r.ID],
 		})
 	}
 	return nodes, nil
+}
+
+// ForkMessage is a point a conversation can be forked from: something the user
+// said, and the entry that holds it.
+type ForkMessage struct {
+	EntryID string
+	Text    string
+}
+
+// ForkMessages lists what the user said, in the order it was written and on every
+// branch — Pi's getUserMessagesForForking. A shell command is not a message, and
+// neither is a summary.
+func (s *FileStore) ForkMessages(ctx context.Context) ([]ForkMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	records, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	var out []ForkMessage
+	for _, r := range records {
+		if r.Message == nil || r.Message.Role != ai.RoleUser || r.Message.BashExecution != nil || r.Message.Content == "" {
+			continue
+		}
+		out = append(out, ForkMessage{EntryID: r.ID, Text: r.Message.Content})
+	}
+	return out, nil
+}
+
+// Forked says what forking from a user's message leaves: the point to copy up to,
+// empty when the message was the first thing recorded, and the words that go back
+// in the editor. Pi's AgentSessionRuntime.fork with its default position.
+func (s *FileStore) Forked(ctx context.Context, entryID string) (leaf, text string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	records, err := s.records()
+	if err != nil {
+		return "", "", err
+	}
+	for _, r := range records {
+		if r.ID == entryID {
+			if r.Message == nil || r.Message.Role != ai.RoleUser || r.Message.BashExecution != nil {
+				return "", "", fmt.Errorf("session: entry %q is not something the user said", entryID)
+			}
+			return r.ParentID, r.Message.Content, nil
+		}
+	}
+	return "", "", fmt.Errorf("session: no entry %q in this conversation", entryID)
+}
+
+// LeftBehind is what moving to target leaves behind: the entries from the current
+// position back to where the two lines meet, oldest first, and the id of that
+// meeting point, empty when they share nothing. Pi's
+// collectEntriesForBranchSummary.
+func (s *FileStore) LeftBehind(ctx context.Context, target string) ([]Node, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	records, err := s.records()
+	if err != nil {
+		return nil, "", err
+	}
+	s.mu.Lock()
+	leaf, atRoot := s.leaf, s.atRoot
+	s.mu.Unlock()
+	if atRoot || len(records) == 0 {
+		return nil, "", nil
+	}
+	old, err := pathTo(records, leaf)
+	if err != nil {
+		return nil, "", err
+	}
+	towards, err := pathTo(records, target)
+	if err != nil {
+		return nil, "", err
+	}
+	onOld := make(map[string]bool, len(old))
+	for _, r := range old {
+		onOld[r.ID] = true
+	}
+	common := ""
+	for i := len(towards) - 1; i >= 0; i-- {
+		if onOld[towards[i].ID] {
+			common = towards[i].ID
+			break
+		}
+	}
+	var out []Node
+	collecting := common == ""
+	for _, r := range old {
+		if collecting {
+			entry, err := r.decode()
+			if err != nil {
+				return nil, "", err
+			}
+			out = append(out, Node{ID: r.ID, ParentID: r.ParentID, Kind: r.Kind, Entry: entry})
+		}
+		if r.ID == common {
+			collecting = true
+		}
+	}
+	return out, common, nil
 }
 
 // summary is how one entry reads in a listing.
@@ -486,6 +681,13 @@ func (r fileRecord) summary() string {
 		return "thinking: " + string(r.Thinking.Level)
 	case r.Overflow != nil:
 		return "overflow"
+	case r.Label != nil:
+		if r.Label.Label == "" {
+			return "label: (cleared)"
+		}
+		return "label: " + r.Label.Label
+	case r.Branch != nil:
+		return "branch summary: " + firstLine(r.Branch.Summary)
 	default:
 		return r.Kind
 	}
@@ -532,20 +734,47 @@ func (s *FileStore) BranchInto(ctx context.Context, path, dir, id, leaf string) 
 		return nil, err
 	}
 
+	// Labels are left out of the copy and written again at its end: they are real
+	// entries in the chain, and every id changes here, so one copied in place
+	// would point at an entry the new file does not have. Only labels on what was
+	// kept survive, each as it finally stood and when it was given.
 	entries := make([]Entry, 0, len(kept))
+	oldIDs := make([]string, 0, len(kept))
 	for _, r := range kept {
+		if r.Kind == kindLabel {
+			continue
+		}
 		entry, err := r.decode()
 		if err != nil {
 			branched.Close()
 			return nil, err
 		}
 		entries = append(entries, entry)
+		oldIDs = append(oldIDs, r.ID)
 	}
-	if err := branched.Append(ctx, entries...); err != nil {
+	ids, err := branched.appendEntries(ctx, entries)
+	if err != nil {
+		branched.Close()
+		return nil, err
+	}
+	labels := resolveLabels(records)
+	var carried []Entry
+	for i, old := range oldIDs {
+		if l, labelled := labels[old]; labelled {
+			carried = append(carried, Entry{Label: &LabelChange{TargetID: ids[i], Label: l.label, At: l.raw}})
+		}
+	}
+	if _, err := branched.appendEntries(ctx, carried); err != nil {
 		branched.Close()
 		return nil, err
 	}
 	return branched, nil
+}
+
+// EmptyBranch starts a new file that records this one as where it came from and
+// holds nothing yet, for a fork from before the first thing recorded.
+func (s *FileStore) EmptyBranch(path, dir, id string) (*FileStore, error) {
+	return openFileStore(path, dir, id, s.path)
 }
 
 // ParentSession is the file this conversation was branched from, if any.
@@ -589,6 +818,10 @@ func (s *FileStore) encode(e Entry, parent string) (fileRecord, error) {
 		record.Kind, record.Model = kindModel, e.Model
 	case e.Thinking != nil:
 		record.Kind, record.Thinking = kindThinking, e.Thinking
+	case e.Label != nil:
+		record.Kind, record.Label = kindLabel, e.Label
+	case e.BranchSummary != nil:
+		record.Kind, record.Branch = kindBranch, e.BranchSummary
 	default:
 		// Exactly one field is set, by the type's own contract. An empty entry
 		// is a caller's mistake, and writing it would put a record in the file
@@ -644,6 +877,16 @@ func (r fileRecord) decode() (Entry, error) {
 			return Entry{}, fmt.Errorf("session: a %s record carries no level", r.Kind)
 		}
 		return Entry{Thinking: r.Thinking}, nil
+	case kindLabel:
+		if r.Label == nil {
+			return Entry{}, fmt.Errorf("session: a %s record carries no target", r.Kind)
+		}
+		return Entry{Label: r.Label}, nil
+	case kindBranch:
+		if r.Branch == nil {
+			return Entry{}, fmt.Errorf("session: a %s record carries no summary", r.Kind)
+		}
+		return Entry{BranchSummary: r.Branch}, nil
 	default:
 		// Refused rather than skipped. A record this build does not understand
 		// may be the tool call that changed a file, and silently reading past

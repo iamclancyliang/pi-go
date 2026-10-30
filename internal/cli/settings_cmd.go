@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -174,6 +175,167 @@ var settingKeys = []settingKey{
 		func(s *settings.Settings) **int { return &s.Retry.MaxRetries }),
 	retryCount("retry.baseDelayMs", "wait before the first retry, doubling after (default 2000)",
 		func(s *settings.Settings) **int { return &s.Retry.BaseDelayMs }),
+	{
+		name: "enabledModels", hint: "models cycling goes through, comma-separated provider/id patterns; empty means all",
+		get: func(s *settings.Settings) string { return strings.Join(s.EnabledModels, ",") },
+		set: func(s *settings.Settings, v string) error {
+			s.EnabledModels = nil
+			for _, name := range strings.Split(v, ",") {
+				if trimmed := strings.TrimSpace(name); trimmed != "" {
+					s.EnabledModels = append(s.EnabledModels, trimmed)
+				}
+			}
+			return nil
+		},
+	},
+	boolKey("hideThinkingBlock", "fold reasoning in the interface",
+		func(s *settings.Settings) *bool { return &s.HideThinkingBlock }),
+	choiceKey("doubleEscapeAction", "what escape twice on an empty editor opens: tree (default), fork or none",
+		[]string{"tree", "fork", "none"}, func(s *settings.Settings) *string { return &s.DoubleEscapeAction }),
+	choiceKey("treeFilterMode", "the filter /tree opens with: default, no-tools, user-only, labeled-only or all",
+		[]string{"default", "no-tools", "user-only", "labeled-only", "all"}, func(s *settings.Settings) *string { return &s.TreeFilterMode }),
+	optionalBoolKey("showHardwareCursor", "show the terminal's cursor in the interface (default from PI_HARDWARE_CURSOR)",
+		func(s *settings.Settings) **bool { return &s.ShowHardwareCursor }),
+	boundedKey("editorPaddingX", "blank columns beside the editor's text, 0 to 3", 0, 3,
+		func(s *settings.Settings) **int { return &s.EditorPaddingX }),
+	boundedKey("outputPad", "blank columns beside messages, 0 or 1 (default 1)", 0, 1,
+		func(s *settings.Settings) **int { return &s.OutputPad }),
+	{
+		name: "autocompleteMaxVisible", hint: "completions shown at once, 3 to 20 (default 5)",
+		get: func(s *settings.Settings) string {
+			if s.AutocompleteMaxVisible == 0 {
+				return ""
+			}
+			return strconv.Itoa(s.AutocompleteMaxVisible)
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				s.AutocompleteMaxVisible = 0
+				return nil
+			}
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed < 3 || parsed > 20 {
+				return fmt.Errorf("autocompleteMaxVisible takes 3 to 20")
+			}
+			s.AutocompleteMaxVisible = parsed
+			return nil
+		},
+	},
+	optionalBoolKey("terminal.clearOnShrink", "redraw to clear rows a shrinking frame left (default from PI_CLEAR_ON_SHRINK)",
+		func(s *settings.Settings) **bool { return &s.Terminal.ClearOnShrink }),
+	{
+		name: "branchSummary.reserveTokens", hint: "room kept for a branch summary's prompt and reply (default 16384)",
+		get: func(s *settings.Settings) string {
+			if s.BranchSummary.ReserveTokens == 0 {
+				return ""
+			}
+			return strconv.Itoa(s.BranchSummary.ReserveTokens)
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				s.BranchSummary.ReserveTokens = 0
+				return nil
+			}
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed < 0 {
+				return fmt.Errorf("branchSummary.reserveTokens takes a non-negative number")
+			}
+			s.BranchSummary.ReserveTokens = parsed
+			return nil
+		},
+	},
+	boolKey("branchSummary.skipPrompt", "never ask about summarising a branch /tree leaves; leave it unsummarised",
+		func(s *settings.Settings) *bool { return &s.BranchSummary.SkipPrompt }),
+}
+
+// boolKey is a true-or-false setting whose absence means false.
+func boolKey(name, hint string, field func(*settings.Settings) *bool) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string {
+			if !*field(s) {
+				return ""
+			}
+			return "true"
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				*field(s) = false
+				return nil
+			}
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				return fmt.Errorf("%s takes true or false", name)
+			}
+			*field(s) = parsed
+			return nil
+		},
+	}
+}
+
+// optionalBoolKey is a true-or-false setting that can also be unset.
+func optionalBoolKey(name, hint string, field func(*settings.Settings) **bool) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string {
+			if *field(s) == nil {
+				return ""
+			}
+			return strconv.FormatBool(**field(s))
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				*field(s) = nil
+				return nil
+			}
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				return fmt.Errorf("%s takes true or false", name)
+			}
+			*field(s) = &parsed
+			return nil
+		},
+	}
+}
+
+// choiceKey is a setting taking one of a few words, which can also be unset.
+func choiceKey(name, hint string, choices []string, field func(*settings.Settings) *string) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string { return *field(s) },
+		set: func(s *settings.Settings, v string) error {
+			if v != "" && !slices.Contains(choices, v) {
+				return fmt.Errorf("%s takes %s", name, strings.Join(choices, ", "))
+			}
+			*field(s) = v
+			return nil
+		},
+	}
+}
+
+// boundedKey is a number within bounds that can also be unset.
+func boundedKey(name, hint string, lo, hi int, field func(*settings.Settings) **int) settingKey {
+	return settingKey{
+		name: name, hint: hint,
+		get: func(s *settings.Settings) string {
+			if *field(s) == nil {
+				return ""
+			}
+			return strconv.Itoa(**field(s))
+		},
+		set: func(s *settings.Settings, v string) error {
+			if v == "" {
+				*field(s) = nil
+				return nil
+			}
+			parsed, err := strconv.Atoi(v)
+			if err != nil || parsed < lo || parsed > hi {
+				return fmt.Errorf("%s takes %d to %d", name, lo, hi)
+			}
+			*field(s) = &parsed
+			return nil
+		},
+	}
 }
 
 // retryCount is a non-negative number setting that can also be unset.

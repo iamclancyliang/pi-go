@@ -59,6 +59,7 @@ func (r *fakeRun) Follow(text string) error {
 func (r *fakeRun) Wait() error { return <-r.done }
 
 type fakeHost struct {
+	fakeSelectors
 	mu           sync.Mutex
 	prompts      []string
 	ctxs         []context.Context

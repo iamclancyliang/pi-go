@@ -52,6 +52,37 @@ type Entry struct {
 	Info       *SessionInfo
 	Model      *ModelChange
 	Thinking   *ThinkingChange
+
+	// Label names another entry; BranchSummary says what a branch that was left
+	// behind was about.
+	Label         *LabelChange
+	BranchSummary *BranchSummary
+}
+
+// LabelChange sets or, with an empty Label, removes the bookmark on an entry —
+// Pi's label entry. It sits in the chain like any other entry, and never reaches
+// the model.
+type LabelChange struct {
+	TargetID string `json:"target_id"`
+	Label    string `json:"label,omitempty"`
+
+	// At keeps the time the label was given when a copy of the conversation
+	// writes it again; empty means when this record was written.
+	At string `json:"at,omitempty"`
+}
+
+// BranchSummary is what a conversation carried back from a branch it left — Pi's
+// branch_summary entry. Unlike a label it does reach the model, as the user
+// message BranchSummaryMessage makes of it.
+type BranchSummary struct {
+	// FromID is the entry the summary hangs from, or "root".
+	FromID  string `json:"from_id"`
+	Summary string `json:"summary"`
+
+	// The files the branch touched, carried so that a later summary of a line
+	// containing this one still knows about them.
+	ReadFiles     []string `json:"read_files,omitempty"`
+	ModifiedFiles []string `json:"modified_files,omitempty"`
 }
 
 // ModelChange records which model the conversation used from this point —
@@ -140,6 +171,10 @@ type Checkpoint struct {
 	// a summary whose tail lives elsewhere can be read without it, and that
 	// reads as a conversation that lost its recent turns.
 	RetainedTail []ai.Message
+
+	// TokensBefore estimates how large the conversation was when it was
+	// compacted, for a display; zero when it was not recorded.
+	TokensBefore int `json:",omitempty"`
 }
 
 // MemoryStore keeps history in memory. It is durable for the life of the
@@ -277,6 +312,16 @@ func Restore(ctx context.Context, system string, store Store) (*Session, error) 
 			// empty name is not skipped: clearing a title is a thing a person
 			// asked for, and ignoring it would restore a name they removed.
 			s.name = e.Info.Name
+			continue
+		case e.Label != nil:
+			// A bookmark for a person; the model is not told.
+			continue
+		case e.BranchSummary != nil:
+			message := BranchSummaryMessage(e.BranchSummary.Summary)
+			s.messages = append(s.messages, message)
+			if s.checkpoint != nil {
+				s.sinceCheckpoint = append(s.sinceCheckpoint, message)
+			}
 			continue
 		case e.Checkpoint != nil:
 			// A later checkpoint supersedes an earlier one: the newer summary

@@ -61,6 +61,11 @@ func compactionStatus(env *Env, reason string) *statusIndicator {
 	return newStatus(env, "compaction", "accent", label)
 }
 
+// branchSummaryStatus is shown while the branch being left is summarised.
+func branchSummaryStatus(env *Env) *statusIndicator {
+	return newStatus(env, "branchSummary", "accent", "Summarizing branch... ("+env.KeyText("app.interrupt")+" to cancel)")
+}
+
 // retryStatus counts down to the next attempt of a failed model call.
 func retryStatus(env *Env, attempt, maxAttempts int, delay time.Duration) *statusIndicator {
 	message := func(seconds int) string {

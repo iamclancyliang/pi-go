@@ -14,6 +14,16 @@ file carries what a person upgrading would want to know.
   of them starting a run; `--approve` and `--no-approve` settle project trust for
   one run; and the short spellings of all of these work. A piped stdin is now read
   to its end before a run starts, so a pipe that stays open holds the run.
+- The interface's selectors, drawn as Pi draws them: `/model` (searchable, refreshed
+  from providers that list their models), `/scoped-models` (which models `ctrl+p`
+  cycles through, saved to the `enabledModels` setting), `/resume` (threaded by fork,
+  searchable with `re:` patterns and quoted phrases, rename and delete), `/tree`
+  (filters, search, folding, labels, and on request a summary of the branch being
+  left, which the model then sees), `/fork`, `/settings`, `/login` (the key masked
+  as it is typed) and `/logout`, and `/trust`. `ctrl+l` opens the model selector,
+  `ctrl+p` and `shift+tab` cycle models and thinking, and escape twice on an empty
+  editor opens the tree. Settings gain the keys behind these. The RPC channel
+  answers `get_fork_messages`, the last of Pi's 32 commands.
 - A `pi` command: one-shot with `-p`, a session in a terminal, and the mode
   resolved from the terminal itself — a redirected run prints, a terminal
   converses.

@@ -199,6 +199,22 @@ func (u *UI) RequestRender() {
 	})
 }
 
+// SetShowHardwareCursor shows or hides the hardware cursor at the focused
+// component's marker. It is positioned either way, for input methods.
+func (u *UI) SetShowHardwareCursor(show bool) {
+	u.Do(func() {
+		u.screen.showCursor = show
+		if !show {
+			_, _ = u.term.Write([]byte("\x1b[?25l"))
+		}
+		u.renderFrame()
+	})
+}
+
+// SetClearOnShrink says whether a frame that shrinks redraws to clear the rows it
+// left behind.
+func (u *UI) SetClearOnShrink(clear bool) { u.Do(func() { u.screen.clearOnShrink = clear }) }
+
 // Rows is the terminal's height, which components such as the editor size
 // themselves by.
 func (u *UI) Rows() int {

@@ -1,0 +1,5389 @@
+{
+	"cases": [
+		{
+			"kind": "choice",
+			"title": "Summarize branch?",
+			"options": [
+				"No summary",
+				"Summarize",
+				"Summarize with custom prompt"
+			],
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSummarize branch?\u001b[22m\u001b[39m                                                              ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mNo summary\u001b[39m                                                                   ",
+				"   \u001b[38;2;212;212;212mSummarize\u001b[39m                                                                    ",
+				"   \u001b[38;2;212;212;212mSummarize with custom prompt\u001b[39m                                                 ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m select\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "choice",
+			"title": "Summarize branch?",
+			"options": [
+				"No summary",
+				"Summarize",
+				"Summarize with custom prompt"
+			],
+			"keys": [
+				"\u001b[B"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSummarize branch?\u001b[22m\u001b[39m                                                              ",
+				"",
+				"   \u001b[38;2;212;212;212mNo summary\u001b[39m                                                                   ",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mSummarize\u001b[39m                                                                    ",
+				"   \u001b[38;2;212;212;212mSummarize with custom prompt\u001b[39m                                                 ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m select\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "choice",
+			"title": "Summarize branch?",
+			"options": [
+				"No summary",
+				"Summarize",
+				"Summarize with custom prompt"
+			],
+			"keys": [
+				"j",
+				"j",
+				"k"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSummarize branch?\u001b[22m\u001b[39m                                                              ",
+				"",
+				"   \u001b[38;2;212;212;212mNo summary\u001b[39m                                                                   ",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mSummarize\u001b[39m                                                                    ",
+				"   \u001b[38;2;212;212;212mSummarize with custom prompt\u001b[39m                                                 ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m select\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "trust",
+			"name": "fresh",
+			"cwd": "/home/tester/work/project",
+			"saved": null,
+			"trusted": false,
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mProject trust\u001b[22m\u001b[39m                                                                  ",
+				" \u001b[38;2;128;128;128m/home/tester/work/project\u001b[39m                                                      ",
+				"",
+				" \u001b[38;2;128;128;128mSaved decision: none\u001b[39m                                                           ",
+				" \u001b[38;2;128;128;128mCurrent session: untrusted\u001b[39m                                                     ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mTrust\u001b[39m                                                                        ",
+				"   \u001b[38;2;212;212;212mTrust parent folder (/home/tester/work)\u001b[39m                                      ",
+				"   \u001b[38;2;212;212;212mDo not trust\u001b[39m                                                                 ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m save\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                  ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "trust",
+			"name": "parentTrusted",
+			"cwd": "/home/tester/work/project",
+			"saved": {
+				"path": "/home/tester/work",
+				"decision": true
+			},
+			"trusted": true,
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mProject trust\u001b[22m\u001b[39m                                                                  ",
+				" \u001b[38;2;128;128;128m/home/tester/work/project\u001b[39m                                                      ",
+				"",
+				" \u001b[38;2;128;128;128mSaved decision: trusted (inherited from /home/tester/work)\u001b[39m                     ",
+				" \u001b[38;2;128;128;128mCurrent session: trusted\u001b[39m                                                       ",
+				"",
+				"   \u001b[38;2;212;212;212mTrust\u001b[39m                                                                        ",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mTrust parent folder (/home/tester/work)\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                    ",
+				"   \u001b[38;2;212;212;212mDo not trust\u001b[39m                                                                 ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m save\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                  ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "trust",
+			"name": "refused",
+			"cwd": "/home/tester/work/project",
+			"saved": {
+				"path": "/home/tester/work/project",
+				"decision": false
+			},
+			"trusted": false,
+			"keys": [
+				"\u001b[A"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mProject trust\u001b[22m\u001b[39m                                                                  ",
+				" \u001b[38;2;128;128;128m/home/tester/work/project\u001b[39m                                                      ",
+				"",
+				" \u001b[38;2;128;128;128mSaved decision: untrusted (/home/tester/work/project)\u001b[39m                          ",
+				" \u001b[38;2;128;128;128mCurrent session: untrusted\u001b[39m                                                     ",
+				"",
+				"   \u001b[38;2;212;212;212mTrust\u001b[39m                                                                        ",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mTrust parent folder (/home/tester/work)\u001b[39m                                      ",
+				"   \u001b[38;2;212;212;212mDo not trust\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                               ",
+				"",
+				" \u001b[38;2;102;102;102m↑↓\u001b[39m\u001b[38;2;128;128;128m navigate\u001b[39m  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m save\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m                                  ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "fork",
+			"name": "last",
+			"messages": [
+				{
+					"id": "m1",
+					"text": "first question"
+				},
+				{
+					"id": "m2",
+					"text": "a long\nmulti line question that goes on and on past the width of a narrow terminal"
+				},
+				{
+					"id": "m3",
+					"text": "third"
+				}
+			],
+			"initial": "",
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"",
+				" \u001b[1mFork from Message\u001b[22m                                                              ",
+				" \u001b[38;2;128;128;128mSelect a user message to copy the active path up to that point into a new      ",
+				" \u001b[38;2;128;128;128msession\u001b[39m                                                                        ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  first question",
+				"\u001b[38;2;128;128;128m  Message 1 of 3\u001b[39m",
+				"",
+				"  a long multi line question that goes on and on past the width of a narrow t\u001b[0m...\u001b[0m",
+				"\u001b[38;2;128;128;128m  Message 2 of 3\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m› \u001b[39m\u001b[1mthird\u001b[22m",
+				"\u001b[38;2;128;128;128m  Message 3 of 3\u001b[39m",
+				"",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "fork",
+			"name": "first",
+			"messages": [
+				{
+					"id": "m1",
+					"text": "first question"
+				},
+				{
+					"id": "m2",
+					"text": "a long\nmulti line question that goes on and on past the width of a narrow terminal"
+				},
+				{
+					"id": "m3",
+					"text": "third"
+				}
+			],
+			"initial": "m1",
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"",
+				" \u001b[1mFork from Message\u001b[22m                                                              ",
+				" \u001b[38;2;128;128;128mSelect a user message to copy the active path up to that point into a new      ",
+				" \u001b[38;2;128;128;128msession\u001b[39m                                                                        ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m› \u001b[39m\u001b[1mfirst question\u001b[22m",
+				"\u001b[38;2;128;128;128m  Message 1 of 3\u001b[39m",
+				"",
+				"  a long multi line question that goes on and on past the width of a narrow t\u001b[0m...\u001b[0m",
+				"\u001b[38;2;128;128;128m  Message 2 of 3\u001b[39m",
+				"",
+				"  third",
+				"\u001b[38;2;128;128;128m  Message 3 of 3\u001b[39m",
+				"",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "fork",
+			"name": "narrow",
+			"messages": [
+				{
+					"id": "m1",
+					"text": "first question"
+				},
+				{
+					"id": "m2",
+					"text": "a long\nmulti line question that goes on and on past the width of a narrow terminal"
+				},
+				{
+					"id": "m3",
+					"text": "third"
+				}
+			],
+			"initial": "m2",
+			"keys": [
+				"\u001b[B"
+			],
+			"width": 40,
+			"lines": [
+				"",
+				" \u001b[1mFork from Message\u001b[22m                      ",
+				" \u001b[38;2;128;128;128mSelect a user message to copy the      ",
+				" \u001b[38;2;128;128;128mactive path up to that point into a    ",
+				" \u001b[38;2;128;128;128mnew session\u001b[39m                            ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────\u001b[39m",
+				"",
+				"  first question",
+				"\u001b[38;2;128;128;128m  Message 1 of 3\u001b[39m",
+				"",
+				"  a long multi line question that goe\u001b[0m...\u001b[0m",
+				"\u001b[38;2;128;128;128m  Message 2 of 3\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m› \u001b[39m\u001b[1mthird\u001b[22m",
+				"\u001b[38;2;128;128;128m  Message 3 of 3\u001b[39m",
+				"",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "auth",
+			"name": "login",
+			"logout": false,
+			"search": "",
+			"keys": [],
+			"width": 80,
+			"providers": [
+				{
+					"id": "deepseek",
+					"name": "deepseek",
+					"source": ""
+				},
+				{
+					"id": "ollama",
+					"name": "ollama",
+					"source": "stored credential"
+				},
+				{
+					"id": "openai",
+					"name": "openai",
+					"source": "OPENAI_API_KEY"
+				}
+			],
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSelect provider to configure:\u001b[22m\u001b[39m                                                  ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mdeepseek\u001b[39m\u001b[38;2;128;128;128m • unconfigured\u001b[39m                                                      ",
+				"   \u001b[38;2;212;212;212mollama\u001b[39m\u001b[38;2;181;189;104m ✓ configured\u001b[39m                                                          ",
+				"   \u001b[38;2;212;212;212mopenai\u001b[39m\u001b[38;2;181;189;104m ✓ env: OPENAI_API_KEY\u001b[39m                                                 ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "auth",
+			"name": "loginSearched",
+			"logout": false,
+			"search": "",
+			"keys": [
+				"o",
+				"p"
+			],
+			"width": 80,
+			"providers": [
+				{
+					"id": "deepseek",
+					"name": "deepseek",
+					"source": ""
+				},
+				{
+					"id": "ollama",
+					"name": "ollama",
+					"source": "stored credential"
+				},
+				{
+					"id": "openai",
+					"name": "openai",
+					"source": "OPENAI_API_KEY"
+				}
+			],
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSelect provider to configure:\u001b[22m\u001b[39m                                                  ",
+				"",
+				"> op\u001b[7m \u001b[27m                                                                           ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mopenai\u001b[39m\u001b[38;2;181;189;104m ✓ env: OPENAI_API_KEY\u001b[39m                                                 ",
+				"   \u001b[38;2;212;212;212mollama\u001b[39m\u001b[38;2;181;189;104m ✓ configured\u001b[39m                                                          ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "auth",
+			"name": "loginInitial",
+			"logout": false,
+			"search": "olla",
+			"keys": [],
+			"width": 80,
+			"providers": [
+				{
+					"id": "deepseek",
+					"name": "deepseek",
+					"source": ""
+				},
+				{
+					"id": "ollama",
+					"name": "ollama",
+					"source": "stored credential"
+				},
+				{
+					"id": "openai",
+					"name": "openai",
+					"source": "OPENAI_API_KEY"
+				}
+			],
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSelect provider to configure:\u001b[22m\u001b[39m                                                  ",
+				"",
+				"> \u001b[7mo\u001b[27mlla                                                                          ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mollama\u001b[39m\u001b[38;2;181;189;104m ✓ configured\u001b[39m                                                          ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "auth",
+			"name": "logout",
+			"logout": true,
+			"search": "",
+			"keys": [],
+			"width": 80,
+			"providers": [
+				{
+					"id": "ollama",
+					"name": "ollama",
+					"source": "stored credential"
+				}
+			],
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSelect provider to logout:\u001b[22m\u001b[39m                                                     ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				" \u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mollama\u001b[39m\u001b[38;2;181;189;104m ✓ configured\u001b[39m                                                          ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "auth",
+			"name": "logoutEmpty",
+			"logout": true,
+			"search": "",
+			"keys": [],
+			"width": 80,
+			"providers": [],
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[38;2;138;190;183m\u001b[1mSelect provider to logout:\u001b[22m\u001b[39m                                                     ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				" \u001b[38;2;128;128;128m  No providers logged in. Use /login first.\u001b[39m                                    ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "login",
+			"provider": "deepseek",
+			"message": "Enter API key",
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[38;2;138;190;183m\u001b[1mLogin to deepseek\u001b[22m\u001b[39m                                                              ",
+				"",
+				" \u001b[38;2;212;212;212mEnter API key\u001b[39m                                                                  ",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				" (\u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m to cancel,\u001b[39m \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m to submit\u001b[39m)                                     ",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "refreshing",
+			"current": {
+				"provider": "openai",
+				"id": "gpt-5"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [],
+			"search": "",
+			"keys": [],
+			"settled": false,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;255;255;0mOnly showing models from configured providers. Use /login to add providers.\u001b[39m     ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mgpt-5\u001b[39m \u001b[38;2;128;128;128m[openai]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                              ",
+				"  deepseek-chat \u001b[38;2;128;128;128m[deepseek]\u001b[39m                                                      ",
+				"  llama \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  qwen3 \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: gpt-5\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;128;128;128m  Refreshing model catalogs…\u001b[39m                                                    ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "refreshed",
+			"current": {
+				"provider": "openai",
+				"id": "gpt-5"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [],
+			"search": "",
+			"keys": [],
+			"settled": true,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;255;255;0mOnly showing models from configured providers. Use /login to add providers.\u001b[39m     ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mgpt-5\u001b[39m \u001b[38;2;128;128;128m[openai]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                              ",
+				"  deepseek-chat \u001b[38;2;128;128;128m[deepseek]\u001b[39m                                                      ",
+				"  llama \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  qwen3 \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: gpt-5\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;181;189;104m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "searched",
+			"current": {
+				"provider": "openai",
+				"id": "gpt-5"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [],
+			"search": "",
+			"keys": [
+				"l",
+				"l",
+				"a"
+			],
+			"settled": true,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;255;255;0mOnly showing models from configured providers. Use /login to add providers.\u001b[39m     ",
+				"",
+				"> lla\u001b[7m \u001b[27m                                                                          ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mllama\u001b[39m \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  qwen3 \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: llama\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;181;189;104m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "initialSearch",
+			"current": {
+				"provider": "deepseek",
+				"id": "deepseek-chat"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [],
+			"search": "qwen",
+			"keys": [],
+			"settled": true,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;255;255;0mOnly showing models from configured providers. Use /login to add providers.\u001b[39m     ",
+				"",
+				"> \u001b[7mq\u001b[27mwen                                                                          ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mqwen3\u001b[39m \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: qwen3\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;181;189;104m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "scoped",
+			"current": {
+				"provider": "deepseek",
+				"id": "deepseek-chat"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"search": "",
+			"keys": [],
+			"settled": true,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;128;128;128mScope: \u001b[39m\u001b[38;2;128;128;128mall\u001b[39m\u001b[38;2;128;128;128m | \u001b[39m\u001b[38;2;138;190;183mscoped\u001b[39m                                                             ",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m (all/scoped)\u001b[39m                                                          ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mllama\u001b[39m \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  qwen3 \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: llama\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;181;189;104m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "model",
+			"name": "scopedAll",
+			"current": {
+				"provider": "deepseek",
+				"id": "deepseek-chat"
+			},
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"scoped": [
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"search": "",
+			"keys": [
+				"\t",
+				"\u001b[B"
+			],
+			"settled": true,
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;128;128;128mScope: \u001b[39m\u001b[38;2;138;190;183mall\u001b[39m\u001b[38;2;128;128;128m | \u001b[39m\u001b[38;2;128;128;128mscoped\u001b[39m                                                             ",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m (all/scoped)\u001b[39m                                                          ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"  deepseek-chat \u001b[38;2;128;128;128m[deepseek]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                    ",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mllama\u001b[39m \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  qwen3 \u001b[38;2;128;128;128m[ollama]\u001b[39m                                                                ",
+				"  gpt-5 \u001b[38;2;128;128;128m[openai]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: llama\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;181;189;104m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "scoped",
+			"name": "all",
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"enabled": null,
+			"refreshStatus": "Refreshing model catalogs…",
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m\u001b[1mModel Configuration\u001b[22m\u001b[39m                                                             ",
+				"\u001b[38;2;128;128;128mSession-only. ctrl+s to save to settings.\u001b[39m                                       ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mdeepseek-chat\u001b[39m\u001b[38;2;128;128;128m [deepseek]\u001b[39m                                                      ",
+				"  gpt-5\u001b[38;2;128;128;128m [openai]\u001b[39m                                                                ",
+				"  llama\u001b[38;2;128;128;128m [ollama]\u001b[39m                                                                ",
+				"  qwen3\u001b[38;2;128;128;128m [ollama]\u001b[39m                                                                ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: deepseek-chat\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;128;128;128m  Refreshing model catalogs…\u001b[39m                                                    ",
+				"\u001b[38;2;102;102;102m  enter toggle · ctrl+a all · ctrl+x clear · ctrl+p provider ·                  ",
+				"\u001b[38;2;102;102;102moption+up/option+down reorder · ctrl+s save · all enabled\u001b[39m                       ",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "scoped",
+			"name": "toggled",
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"enabled": null,
+			"refreshStatus": "",
+			"keys": [
+				"\r"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m\u001b[1mModel Configuration\u001b[22m\u001b[39m                                                             ",
+				"\u001b[38;2;128;128;128mSession-only. ctrl+s to save to settings.\u001b[39m                                       ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mdeepseek-chat\u001b[39m\u001b[38;2;128;128;128m [deepseek]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                    ",
+				"  gpt-5\u001b[38;2;128;128;128m [openai]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                              ",
+				"  llama\u001b[38;2;128;128;128m [ollama]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                              ",
+				"  qwen3\u001b[38;2;128;128;128m [ollama]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                              ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: deepseek-chat\u001b[39m                                                     ",
+				"",
+				"\u001b[38;2;102;102;102m  enter toggle · ctrl+a all · ctrl+x clear · ctrl+p provider ·                  ",
+				"\u001b[38;2;102;102;102moption+up/option+down reorder · ctrl+s save · 1/4 enabled \u001b[39m\u001b[38;2;255;255;0m(unsaved)\u001b[39m             ",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "scoped",
+			"name": "ordered",
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"enabled": [
+				"openai/gpt-5",
+				"nowhere/x",
+				"ollama/llama"
+			],
+			"refreshStatus": "Model catalogs refreshed.",
+			"keys": [
+				"\u001b[B",
+				"\u001b[B"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m\u001b[1mModel Configuration\u001b[22m\u001b[39m                                                             ",
+				"\u001b[38;2;128;128;128mSession-only. ctrl+s to save to settings.\u001b[39m                                       ",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"  gpt-5\u001b[38;2;128;128;128m [openai]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                              ",
+				"  nowhere/x\u001b[38;2;128;128;128m [unavailable]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                     ",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mllama\u001b[39m\u001b[38;2;128;128;128m [ollama]\u001b[39m\u001b[38;2;181;189;104m ✓\u001b[39m                                                              ",
+				"  deepseek-chat\u001b[38;2;128;128;128m [deepseek]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                    ",
+				"  qwen3\u001b[38;2;128;128;128m [ollama]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                              ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: llama\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;128;128;128m  Model catalogs refreshed.\u001b[39m                                                     ",
+				"\u001b[38;2;102;102;102m  enter toggle · ctrl+a all · ctrl+x clear · ctrl+p provider ·                  ",
+				"\u001b[38;2;102;102;102moption+up/option+down reorder · ctrl+s save · 2/4 enabled · 1 unavailable\u001b[39m       ",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "scoped",
+			"name": "searched",
+			"models": [
+				{
+					"provider": "deepseek",
+					"id": "deepseek-chat"
+				},
+				{
+					"provider": "openai",
+					"id": "gpt-5"
+				},
+				{
+					"provider": "ollama",
+					"id": "llama"
+				},
+				{
+					"provider": "ollama",
+					"id": "qwen3"
+				}
+			],
+			"enabled": [
+				"openai/gpt-5"
+			],
+			"refreshStatus": "",
+			"keys": [
+				"q",
+				"w"
+			],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m\u001b[1mModel Configuration\u001b[22m\u001b[39m                                                             ",
+				"\u001b[38;2;128;128;128mSession-only. ctrl+s to save to settings.\u001b[39m                                       ",
+				"",
+				"> qw\u001b[7m \u001b[27m                                                                           ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mqwen3\u001b[39m\u001b[38;2;128;128;128m [ollama]\u001b[39m\u001b[38;2;102;102;102m ✗\u001b[39m                                                              ",
+				"",
+				"\u001b[38;2;128;128;128m  Model Name: qwen3\u001b[39m                                                             ",
+				"",
+				"\u001b[38;2;102;102;102m  enter toggle · ctrl+a all · ctrl+x clear · ctrl+p provider ·                  ",
+				"\u001b[38;2;102;102;102moption+up/option+down reorder · ctrl+s save · 1/4 enabled\u001b[39m                       ",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "threaded",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (off)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m\u001b[22m                                              \u001b[38;2;102;102;102m4 2h\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m   ├─ \u001b[39mforked from b                                                      \u001b[38;2;102;102;102m1 10m\u001b[39m",
+				"  \u001b[38;2;102;102;102m   └─ \u001b[39manother fork                                                        \u001b[38;2;102;102;102m3 5h\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;255;255;0mnamed one\u001b[39m                                                                 \u001b[38;2;102;102;102m2 3d\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "path",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u0010"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (on)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m\u001b[22m                            \u001b[38;2;102;102;102m/sessions/b.jsonl 4 2h\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m   ├─ \u001b[39mforked from b                                    \u001b[38;2;102;102;102m/sessions/c.jsonl 1 10m\u001b[39m",
+				"  \u001b[38;2;102;102;102m   └─ \u001b[39manother fork                                      \u001b[38;2;102;102;102m/sessions/d.jsonl 3 5h\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;255;255;0mnamed one\u001b[39m                                               \u001b[38;2;102;102;102m/sessions/a.jsonl 2 3d\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "recent",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u0013",
+				"\u001b[B"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Folder\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mRecent\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (off)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;255;255;0mnamed one\u001b[39m                                                                 \u001b[38;2;102;102;102m2 3d\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m\u001b[22m                                              \u001b[38;2;102;102;102m4 2h\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m\u001b[39mforked from b                                                            \u001b[38;2;102;102;102m1 10m\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39manother fork                                                              \u001b[38;2;102;102;102m3 5h\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "named",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u000e"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fo\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mNamed\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (off)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1m\u001b[38;2;255;255;0mnamed one\u001b[39m\u001b[22m                                                                 \u001b[38;2;102;102;102m2 3d\u001b[39m\u001b[49m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "searched",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"p",
+				"a",
+				"r",
+				"s"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (off)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> pars\u001b[7m \u001b[27m                                                                         ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1manother fork\u001b[22m                                                              \u001b[38;2;102;102;102m3 5h\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m                                              \u001b[38;2;102;102;102m4 2h\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "regex",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"r",
+				"e",
+				":",
+				"f",
+				"o",
+				"r",
+				"k"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;102;102;102mtab\u001b[39m\u001b[38;2;128;128;128m scope\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;128;128;128mre:<pattern> regex · \"phrase\" exact\u001b[39m",
+				"\u001b[38;2;102;102;102mctrl+s\u001b[39m\u001b[38;2;128;128;128m sort\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+n\u001b[39m\u001b[38;2;128;128;128m named\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+d\u001b[39m\u001b[38;2;128;128;128m delete\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+p\u001b[39m\u001b[38;2;128;128;128m path (off)\u001b[39m\u001b[38;2;128;128;128m · \u001b[39m\u001b[38;2;102;102;102mctrl+r\u001b[39m\u001b[38;2;128;128;128m rename\u001b[39m",
+				"",
+				"> re:fork\u001b[7m \u001b[27m                                                                      ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1mforked from b\u001b[22m                                                            \u001b[38;2;102;102;102m1 10m\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m\u001b[39manother fork                                                              \u001b[38;2;102;102;102m3 5h\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "deleting",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u001b[B",
+				"\u0004"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;204;102;102mDelete session? \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m confirm\u001b[39m · \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m\u001b[39m",
+				"",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m                                              \u001b[38;2;102;102;102m4 2h\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m   ├─ \u001b[39m\u001b[1m\u001b[38;2;204;102;102mforked from b\u001b[39m\u001b[22m                                                      \u001b[38;2;204;102;102m1 10m\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m   └─ \u001b[39manother fork                                                        \u001b[38;2;102;102;102m3 5h\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;255;255;0mnamed one\u001b[39m                                                                 \u001b[38;2;102;102;102m2 3d\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "deleteCurrent",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u0004"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[1mResume Session (Current Fold\u001b[0m \u001b[38;2;138;190;183m◉ Current Folder\u001b[39m\u001b[38;2;128;128;128m | ○ All\u001b[39m  \u001b[38;2;128;128;128mName: \u001b[39m\u001b[38;2;138;190;183mAll\u001b[39m  \u001b[38;2;128;128;128mSort: \u001b[39m\u001b[38;2;138;190;183mThreaded\u001b[39m",
+				"\u001b[38;2;204;102;102mCannot delete the currently active session\u001b[39m",
+				"",
+				"",
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[38;2;102;102;102m\u001b[39m\u001b[1m\u001b[38;2;138;190;183msecond talk about the parser\u001b[39m\u001b[22m                                              \u001b[38;2;102;102;102m4 2h\u001b[39m\u001b[49m",
+				"  \u001b[38;2;102;102;102m   ├─ \u001b[39mforked from b                                                      \u001b[38;2;102;102;102m1 10m\u001b[39m",
+				"  \u001b[38;2;102;102;102m   └─ \u001b[39manother fork                                                        \u001b[38;2;102;102;102m3 5h\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;255;255;0mnamed one\u001b[39m                                                                 \u001b[38;2;102;102;102m2 3d\u001b[39m",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "session",
+			"name": "rename",
+			"now": "2026-10-30T16:23:20.709Z",
+			"sessions": [
+				{
+					"path": "/sessions/a.jsonl",
+					"id": "a",
+					"cwd": "/home/tester/work",
+					"name": "named one",
+					"offset": 259200000,
+					"messageCount": 2,
+					"firstMessage": "the first message",
+					"allMessagesText": "the first message and its answer"
+				},
+				{
+					"path": "/sessions/b.jsonl",
+					"id": "b",
+					"cwd": "/home/tester/work",
+					"offset": 7200000,
+					"messageCount": 4,
+					"firstMessage": "second talk about the parser",
+					"allMessagesText": "second talk about the parser fixed"
+				},
+				{
+					"path": "/sessions/c.jsonl",
+					"id": "c",
+					"cwd": "/home/tester/other",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 600000,
+					"messageCount": 1,
+					"firstMessage": "forked from b",
+					"allMessagesText": "forked from b"
+				},
+				{
+					"path": "/sessions/d.jsonl",
+					"id": "d",
+					"cwd": "/home/tester/work",
+					"parentSessionPath": "/sessions/b.jsonl",
+					"offset": 18000000,
+					"messageCount": 3,
+					"firstMessage": "another fork",
+					"allMessagesText": "another fork of the parser talk"
+				}
+			],
+			"currentPath": "/sessions/b.jsonl",
+			"keys": [
+				"\u0012"
+			],
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				" \u001b[1mRename Session\u001b[22m                                                                 ",
+				"",
+				"> \u001b_pi:c\u0007\u001b[7m \u001b[27m                                                                             ",
+				"",
+				" \u001b[38;2;128;128;128menter to save · escape/ctrl+c to cancel\u001b[39m                                        ",
+				"",
+				"\u001b[38;2;138;190;183m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "default",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (9/12)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "all",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "all",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[model: gpt-5]\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[thinking: high]\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[title: \u001b[39m\u001b[38;2;102;102;102mmy session\u001b[39m\u001b[38;2;102;102;102m]\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[label: the fork]\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (13/16) [all]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "noTools",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "no-tools",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (7/10) [no-tools]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "userOnly",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "user-only",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└─ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"\u001b[38;2;128;128;128m  (3/4) [user]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "labeled",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "labeled-only",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39msecond question\u001b[22m\u001b[49m",
+				"\u001b[38;2;128;128;128m  (1/1) [labeled]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "otherBranch",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e9",
+			"filter": "default",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mthird question",
+				"\u001b[38;2;128;128;128m  (7/12)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "initial",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "e5",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39msecond question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mthird question",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (5/12)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "searched",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "",
+			"keys": [
+				"s",
+				"e",
+				"c",
+				"o",
+				"n",
+				"d"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m \u001b[38;2;138;190;183msecond\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m   \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"\u001b[38;2;128;128;128m  (2/3)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "folded",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "e5",
+			"keys": [
+				"\u001b[1;3D"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m├⊞ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39msecond question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (5/8)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "labelTime",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "e5",
+			"keys": [
+				"T"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;128;128;128m1/15 18:14 \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39msecond question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mthird question",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (5/12) [+label time]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "labelEdit",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "e5",
+			"keys": [
+				"L"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;128;128;128mLabel (empty to remove):\u001b[39m",
+				"  > \u001b[7mt\u001b[27mhe fork                                                                    ",
+				"  \u001b[38;2;102;102;102menter\u001b[39m\u001b[38;2;128;128;128m save\u001b[39m  \u001b[38;2;102;102;102mescape/ctrl+c\u001b[39m\u001b[38;2;128;128;128m cancel\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "cycled",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "",
+			"keys": [
+				"\u000f",
+				"\u000f"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└─ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"\u001b[38;2;128;128;128m  (3/4) [user]\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "narrow",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "",
+			"keys": [],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 48,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch\u001b[39m",
+				"\u001b[38;2;128;128;128m  ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a\u001b[39m",
+				"\u001b[38;2;128;128;128m  cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────\u001b[39m",
+				"",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mfirst question",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value l\u001b[0m",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other b\u001b[0m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mthird question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a se\u001b[0m",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (9/12)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "tree",
+			"name": "pagedUp",
+			"entries": [
+				{
+					"type": "message",
+					"id": "e1",
+					"parentId": null,
+					"timestamp": "2026-01-15T10:01:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "first question",
+						"timestamp": 1
+					}
+				},
+				{
+					"type": "message",
+					"id": "e2",
+					"parentId": "e1",
+					"timestamp": "2026-01-15T10:02:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "first answer"
+							},
+							{
+								"type": "toolCall",
+								"id": "c1",
+								"name": "read",
+								"arguments": {
+									"path": "/home/tester/a.go",
+									"offset": 10,
+									"limit": 5
+								}
+							},
+							{
+								"type": "toolCall",
+								"id": "c2",
+								"name": "custom_tool",
+								"arguments": {
+									"alpha": "1",
+									"beta": "a value long enough to be cut"
+								}
+							}
+						],
+						"stopReason": "toolUse",
+						"timestamp": 2
+					}
+				},
+				{
+					"type": "message",
+					"id": "e3",
+					"parentId": "e2",
+					"timestamp": "2026-01-15T10:03:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c1",
+						"toolName": "read",
+						"content": [
+							{
+								"type": "text",
+								"text": "the file"
+							}
+						],
+						"isError": false,
+						"timestamp": 3
+					}
+				},
+				{
+					"type": "message",
+					"id": "e4",
+					"parentId": "e3",
+					"timestamp": "2026-01-15T10:04:00.000Z",
+					"message": {
+						"role": "toolResult",
+						"toolCallId": "c2",
+						"toolName": "custom_tool",
+						"content": [
+							{
+								"type": "text",
+								"text": "done"
+							}
+						],
+						"isError": false,
+						"timestamp": 4
+					}
+				},
+				{
+					"type": "message",
+					"id": "e5",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:05:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "second question",
+						"timestamp": 5
+					}
+				},
+				{
+					"type": "message",
+					"id": "e6",
+					"parentId": "e5",
+					"timestamp": "2026-01-15T10:06:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "second answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 6
+					}
+				},
+				{
+					"type": "message",
+					"id": "e7",
+					"parentId": "e4",
+					"timestamp": "2026-01-15T10:07:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "a different second question\nwith a second line",
+						"timestamp": 7
+					}
+				},
+				{
+					"type": "message",
+					"id": "e8",
+					"parentId": "e7",
+					"timestamp": "2026-01-15T10:08:00.000Z",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "another answer"
+							}
+						],
+						"stopReason": "stop",
+						"timestamp": 8
+					}
+				},
+				{
+					"type": "compaction",
+					"id": "e9",
+					"parentId": "e8",
+					"timestamp": "2026-01-15T10:09:00.000Z",
+					"summary": "what happened",
+					"firstKeptEntryId": "e7",
+					"tokensBefore": 12345
+				},
+				{
+					"type": "branch_summary",
+					"id": "e10",
+					"parentId": "e6",
+					"timestamp": "2026-01-15T10:10:00.000Z",
+					"fromId": "e6",
+					"summary": "explored the other branch"
+				},
+				{
+					"type": "model_change",
+					"id": "e11",
+					"parentId": "e10",
+					"timestamp": "2026-01-15T10:11:00.000Z",
+					"provider": "openai",
+					"modelId": "gpt-5"
+				},
+				{
+					"type": "thinking_level_change",
+					"id": "e12",
+					"parentId": "e11",
+					"timestamp": "2026-01-15T10:12:00.000Z",
+					"thinkingLevel": "high"
+				},
+				{
+					"type": "session_info",
+					"id": "e13",
+					"parentId": "e12",
+					"timestamp": "2026-01-15T10:13:00.000Z",
+					"name": "my session"
+				},
+				{
+					"type": "label",
+					"id": "e14",
+					"parentId": "e13",
+					"timestamp": "2026-01-15T10:14:00.000Z",
+					"targetId": "e5",
+					"label": "the fork"
+				},
+				{
+					"type": "message",
+					"id": "e15",
+					"parentId": "e14",
+					"timestamp": "2026-01-15T10:15:00.000Z",
+					"message": {
+						"role": "bashExecution",
+						"command": "ls -la",
+						"output": "",
+						"exitCode": 0,
+						"cancelled": false,
+						"truncated": false,
+						"timestamp": 15
+					}
+				},
+				{
+					"type": "message",
+					"id": "e16",
+					"parentId": "e15",
+					"timestamp": "2026-01-15T10:16:00.000Z",
+					"message": {
+						"role": "user",
+						"content": "third question",
+						"timestamp": 16
+					}
+				}
+			],
+			"leaf": "e16",
+			"filter": "default",
+			"initial": "",
+			"keys": [
+				"\u001b[D"
+			],
+			"now": "2026-03-03T12:00:00.000Z",
+			"width": 80,
+			"lines": [
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				" \u001b[1m  Session Tree\u001b[22m                                                                 ",
+				"\u001b[38;2;128;128;128m  ↑/↓ move · ←/→ page · option+←/→ branch · ctrl+x copy · shift+l label\u001b[39m",
+				"\u001b[38;2;128;128;128m  shift+t label time · filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o\u001b[39m",
+				"  \u001b[38;2;128;128;128mType to search:\u001b[39m",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m",
+				"",
+				"\u001b[48;2;58;58;74m\u001b[38;2;138;190;183m› \u001b[39m\u001b[49m\u001b[48;2;58;58;74m\u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[1m\u001b[38;2;138;190;183muser: \u001b[39mfirst question\u001b[22m\u001b[49m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39mfirst answer",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[read: ~/a.go:10-14]\u001b[39m",
+				"  \u001b[38;2;102;102;102m\u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;128;128;128m[custom_tool: {\"alpha\":\"1\",\"beta\":\"a value long enough...]\u001b[39m",
+				"  \u001b[38;2;102;102;102m├⊟ \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[the fork] \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39msecond question",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39msecond answer",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;255;255;0m[branch summary]: \u001b[39mexplored the other branch",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;102;102;102m[bash]: ls -la\u001b[39m",
+				"  \u001b[38;2;102;102;102m│     \u001b[39m\u001b[38;2;138;190;183m• \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39mthird question",
+				"  \u001b[38;2;102;102;102m└⊟ \u001b[39m\u001b[38;2;138;190;183muser: \u001b[39ma different second question with a second line",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;181;189;104massistant: \u001b[39manother answer",
+				"  \u001b[38;2;102;102;102m      \u001b[39m\u001b[38;2;0;215;255m[compaction: 12k tokens]\u001b[39m",
+				"\u001b[38;2;128;128;128m  (1/12)\u001b[39m",
+				"",
+				"\u001b[38;2;95;135;255m────────────────────────────────────────────────────────────────────────────────\u001b[39m"
+			]
+		},
+		{
+			"kind": "settingsList",
+			"name": "plain",
+			"items": [
+				{
+					"id": "autocompact",
+					"label": "Auto-compact",
+					"description": "Automatically compact context when it gets too large",
+					"currentValue": "true",
+					"values": [
+						"true",
+						"false"
+					]
+				},
+				{
+					"id": "steering-mode",
+					"label": "Steering mode",
+					"description": "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+					"currentValue": "one-at-a-time",
+					"values": [
+						"one-at-a-time",
+						"all"
+					]
+				},
+				{
+					"id": "a-very-long-label-indeed-and-more",
+					"label": "A very long label indeed and more words",
+					"description": "",
+					"currentValue": "x",
+					"values": [
+						"x",
+						"y"
+					]
+				},
+				{
+					"id": "thinking",
+					"label": "Thinking level",
+					"description": "Reasoning depth for thinking-capable models",
+					"currentValue": "off",
+					"values": [
+						"off",
+						"low"
+					]
+				}
+			],
+			"searchEnabled": false,
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mAuto-compact                  \u001b[39m  \u001b[38;2;138;190;183mtrue\u001b[39m",
+				"  Steering mode                   \u001b[38;2;128;128;128mone-at-a-time\u001b[39m",
+				"  A very long label indeed and more words  \u001b[38;2;128;128;128mx\u001b[39m",
+				"  Thinking level                  \u001b[38;2;128;128;128moff\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Automatically compact context when it gets too large\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Enter/Space to change · Esc to cancel\u001b[39m"
+			]
+		},
+		{
+			"kind": "settingsList",
+			"name": "searchable",
+			"items": [
+				{
+					"id": "autocompact",
+					"label": "Auto-compact",
+					"description": "Automatically compact context when it gets too large",
+					"currentValue": "true",
+					"values": [
+						"true",
+						"false"
+					]
+				},
+				{
+					"id": "steering-mode",
+					"label": "Steering mode",
+					"description": "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+					"currentValue": "one-at-a-time",
+					"values": [
+						"one-at-a-time",
+						"all"
+					]
+				},
+				{
+					"id": "a-very-long-label-indeed-and-more",
+					"label": "A very long label indeed and more words",
+					"description": "",
+					"currentValue": "x",
+					"values": [
+						"x",
+						"y"
+					]
+				},
+				{
+					"id": "thinking",
+					"label": "Thinking level",
+					"description": "Reasoning depth for thinking-capable models",
+					"currentValue": "off",
+					"values": [
+						"off",
+						"low"
+					]
+				}
+			],
+			"searchEnabled": true,
+			"keys": [],
+			"width": 80,
+			"lines": [
+				"> \u001b[7m \u001b[27m                                                                             ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mAuto-compact                  \u001b[39m  \u001b[38;2;138;190;183mtrue\u001b[39m",
+				"  Steering mode                   \u001b[38;2;128;128;128mone-at-a-time\u001b[39m",
+				"  A very long label indeed and more words  \u001b[38;2;128;128;128mx\u001b[39m",
+				"  Thinking level                  \u001b[38;2;128;128;128moff\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Automatically compact context when it gets too large\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Type to search · Enter/Space to change · Esc to cancel\u001b[39m"
+			]
+		},
+		{
+			"kind": "settingsList",
+			"name": "searched",
+			"items": [
+				{
+					"id": "autocompact",
+					"label": "Auto-compact",
+					"description": "Automatically compact context when it gets too large",
+					"currentValue": "true",
+					"values": [
+						"true",
+						"false"
+					]
+				},
+				{
+					"id": "steering-mode",
+					"label": "Steering mode",
+					"description": "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+					"currentValue": "one-at-a-time",
+					"values": [
+						"one-at-a-time",
+						"all"
+					]
+				},
+				{
+					"id": "a-very-long-label-indeed-and-more",
+					"label": "A very long label indeed and more words",
+					"description": "",
+					"currentValue": "x",
+					"values": [
+						"x",
+						"y"
+					]
+				},
+				{
+					"id": "thinking",
+					"label": "Thinking level",
+					"description": "Reasoning depth for thinking-capable models",
+					"currentValue": "off",
+					"values": [
+						"off",
+						"low"
+					]
+				}
+			],
+			"searchEnabled": true,
+			"keys": [
+				"s",
+				"t",
+				"e"
+			],
+			"width": 80,
+			"lines": [
+				"> ste\u001b[7m \u001b[27m                                                                          ",
+				"",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mSteering mode                 \u001b[39m  \u001b[38;2;138;190;183mone-at-a-time\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Enter while streaming queues steering messages. 'one-at-a-time': deliver\u001b[39m",
+				"\u001b[38;2;102;102;102m  one, wait for response. 'all': deliver all at once.\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Type to search · Enter/Space to change · Esc to cancel\u001b[39m"
+			]
+		},
+		{
+			"kind": "settingsList",
+			"name": "cycled",
+			"items": [
+				{
+					"id": "autocompact",
+					"label": "Auto-compact",
+					"description": "Automatically compact context when it gets too large",
+					"currentValue": "true",
+					"values": [
+						"true",
+						"false"
+					]
+				},
+				{
+					"id": "steering-mode",
+					"label": "Steering mode",
+					"description": "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+					"currentValue": "one-at-a-time",
+					"values": [
+						"one-at-a-time",
+						"all"
+					]
+				},
+				{
+					"id": "a-very-long-label-indeed-and-more",
+					"label": "A very long label indeed and more words",
+					"description": "",
+					"currentValue": "x",
+					"values": [
+						"x",
+						"y"
+					]
+				},
+				{
+					"id": "thinking",
+					"label": "Thinking level",
+					"description": "Reasoning depth for thinking-capable models",
+					"currentValue": "off",
+					"values": [
+						"off",
+						"low"
+					]
+				}
+			],
+			"searchEnabled": false,
+			"keys": [
+				"\u001b[B",
+				"\r"
+			],
+			"width": 80,
+			"lines": [
+				"  Auto-compact                    \u001b[38;2;128;128;128mtrue\u001b[39m",
+				"\u001b[38;2;138;190;183m→ \u001b[39m\u001b[38;2;138;190;183mSteering mode                 \u001b[39m  \u001b[38;2;138;190;183mall\u001b[39m",
+				"  A very long label indeed and more words  \u001b[38;2;128;128;128mx\u001b[39m",
+				"  Thinking level                  \u001b[38;2;128;128;128moff\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Enter while streaming queues steering messages. 'one-at-a-time': deliver\u001b[39m",
+				"\u001b[38;2;102;102;102m  one, wait for response. 'all': deliver all at once.\u001b[39m",
+				"",
+				"\u001b[38;2;102;102;102m  Enter/Space to change · Esc to cancel\u001b[39m"
+			]
+		},
+		{
+			"kind": "input",
+			"name": "empty",
+			"value": "",
+			"focused": false,
+			"keys": [],
+			"width": 20,
+			"lines": [
+				"> \u001b[7m \u001b[27m                 "
+			]
+		},
+		{
+			"kind": "input",
+			"name": "short",
+			"value": "hello world",
+			"focused": true,
+			"keys": [
+				"\u0005"
+			],
+			"width": 20,
+			"lines": [
+				"> hello world\u001b_pi:c\u0007\u001b[7m \u001b[27m      "
+			]
+		},
+		{
+			"kind": "input",
+			"name": "scrolledEnd",
+			"value": "0123456789abcdefghijklmnopqrstuvwxyz",
+			"focused": false,
+			"keys": [
+				"\u0005"
+			],
+			"width": 20,
+			"lines": [
+				"> jklmnopqrstuvwxyz\u001b[7m \u001b[27m"
+			]
+		},
+		{
+			"kind": "input",
+			"name": "scrolledMiddle",
+			"value": "0123456789abcdefghijklmnopqrstuvwxyz",
+			"focused": true,
+			"keys": [
+				"\u0005",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D",
+				"\u001b[D"
+			],
+			"width": 20,
+			"lines": [
+				"> ijklmnopqr\u001b_pi:c\u0007\u001b[7ms\u001b[27mtuvwxyz"
+			]
+		},
+		{
+			"kind": "input",
+			"name": "wide",
+			"value": "漢字かな混じり文です",
+			"focused": false,
+			"keys": [
+				"\u001b[C",
+				"\u001b[C"
+			],
+			"width": 12,
+			"lines": [
+				"> 漢字\u001b[7mか\u001b[27mな混"
+			]
+		}
+	]
+}

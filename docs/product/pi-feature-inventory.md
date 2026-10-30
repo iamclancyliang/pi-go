@@ -40,7 +40,7 @@ always get distinct IDs.
 | Auth / OAuth | `enumerated` (files) · storage shape read (§27.6); flows still `semantics-needed` |
 | Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
-| TUI | `enumerated` (components) · rendering core, terminal session and key actions `read` (§11.4–11.6) · components, selectors and fullscreen `semantics-needed` |
+| TUI | `enumerated` (components) · rendering core, terminal session, key actions and the selectors `read` (§11.4–11.7) · the remaining components' own behaviour and fullscreen `semantics-needed` |
 | Telemetry | `enumerated` (files) · `schema-needed` |
 | Evals | `enumerated` (files) · `semantics-needed` |
 | server / client / session-backends | `enumerated` (files) · `semantics-needed` |
@@ -746,9 +746,9 @@ Subsystems: `alt-screen-search` · `autocomplete` · `editor-component` · `fuzz
 
 Docs: `docs/tui.md`, `docs/themes.md`, `docs/keybindings.md`, `docs/terminal-setup.md`,
 `docs/tmux.md`, `docs/termux.md`, `docs/windows.md`. Semantics: the regular-mode rendering core,
-the terminal session and the key actions are read (§11.4–11.6); each component's own behaviour,
-the selectors and fullscreen mode remain `semantics-needed`, read slice by slice as the interface
-plan reaches them.
+the terminal session, the key actions and the selectors are read (§11.4–11.7); the remaining
+components' own behaviour and fullscreen mode remain `semantics-needed`, read slice by slice as the
+interface plan reaches them.
 
 ### 11.4 Rendering semantics, regular mode — read 2026-10-24
 
@@ -827,6 +827,227 @@ filter); explicitly bound history actions take precedence over application actio
 main editor is focused; user bindings in `keybindings.json` **replace** an action's defaults
 rather than adding to them; pre-namespaced ids in older configs are migrated on startup; `/reload`
 re-reads the file.
+
+### 11.7 Selectors — read 2026-10-31
+
+Read from `src/modes/interactive/components/` (`model-selector.ts`, `scoped-models-selector.ts`,
+`session-selector.ts`, `session-selector-search.ts`, `tree-selector.ts`, `user-message-selector.ts`,
+`trust-selector.ts`, `oauth-selector.ts`, `login-dialog.ts`, `extension-selector.ts`,
+`extension-editor.ts`), `interactive-mode.ts` (`showSelector` :4395 and the `show*Selector`
+methods :4420–5610), `packages/tui/src/components/{input,settings-list}.ts`, and the session
+operations behind them (`session-manager.ts`, `agent-session.ts` `navigateTree`,
+`agent-session-runtime.ts` `fork` :262, `compaction/branch-summarization.ts`), for slice T4 of
+`docs/specs/tui-split-plan.md`.
+
+**How a selector is shown** (`showSelector`). The editor container is emptied and the selector put
+in its place; focus moves to the component the selector names (its list or search); `done()`
+restores the editor and focus. Opening a second selector disposes the first. A selector opened
+while a response streams is not refused by `showSelector` itself; the commands that open them are
+only reached from the editor between turns.
+
+**Shared pieces.** `DynamicBorder` is a rule of `─` across the width in `border` (the session
+selector draws its own in `accent`). Lists keep the selection near the middle: the window starts at
+`max(0, min(selected − ⌊max/2⌋, length − max))`, and a `(n/N)` line follows when not everything
+fits. Up and down wrap in the model, scope, fork, tree and settings lists; they clamp in the session,
+auth, trust and question lists. `Input` (`input.ts`) is one line behind `> `, scrolled horizontally
+to keep the cursor in view (half-width windows, one column reserved when the cursor is past the
+end), the cursor drawn in inverse video with the hardware-cursor marker before it when focused; it
+has the editor's kill ring, yank, word motion and fish-style undo, and a paste is flattened to one
+line with tabs as four spaces. `SettingsList` (`settings-list.ts`) aligns labels to the widest
+(capped at 30) with the value after two spaces, shows the selected item's description wrapped
+under the list, cycles an item's `values` on enter or space, or opens its `submenu` (a component
+given the current value and a `done(value?)`), restoring the selection when it closes; with search
+on, a fuzzy filter over labels, and space is a search character unless the search is empty. The
+hint line is `Type to search · Enter/Space to change · Esc to cancel`, without the first part when
+search is off.
+
+**`/model` — `ModelSelectorComponent`.** Border, blank, a scope line (`Scope: all | scoped`, the
+active one in `accent`, with a `tab scope (all/scoped)` hint) when the session has scoped models,
+otherwise the warning `Only showing models from configured providers. Use /login to add
+providers.`; blank, the search input, blank, the list (10 visible), blank, border. Models come from
+the runtime's cached snapshot, sorted with the current model first and then by provider; each row
+is `id [provider]` with ` ✓` after the current one, the selected row's arrow and id in `accent`.
+Under the list: `Model Name: <name>` for the selected model, `No matching models`, or the refresh
+error in `error`. Search is `fuzzyFilter` over `provider provider/id provider id name`
+(`getModelSelectorSearchText`), provider first so a provider-prefixed query ranks the provider's own
+model above a proxy's copy; a query moves the selection to the top, clearing it keeps the position.
+Opening starts a catalogue refresh with a 15 s timeout, shown as `Refreshing model catalogs…` and
+then `Model catalogs refreshed.` in `success`, or `Model refresh timed out; showing cached models.`
+/ `Could not refresh <provider>; showing cached models.` / `Could not refresh N model catalogs
+(…)`. Tab switches scope; enter on the search or the list selects, which **saves the model as the
+default** (`setDefaultModelAndProvider`) and sets it on the session; escape cancels and disposes
+the refresh. `/model <term>` first tries an exact match (`findExactModelMatch`) and switches
+without the selector; otherwise opens it with the term as the initial search.
+
+**`/scoped-models` — `ScopedModelsSelectorComponent`.** Chooses the models `ctrl+p` cycles
+through, as an ordered list of `provider/id`. `null` means all. Header `Model Configuration` and
+`Session-only. ctrl+s to save to settings.`; search; the list (8 visible) in scope order with the
+unselected models after; each row `id [provider]` with ` ✓` enabled / ` ✗` disabled (no mark while
+all are enabled), `[unavailable] ✗` for an id the catalogue lacks; `Model Name:` or `Model
+unavailable` under the list; a footer of the keys and `all enabled` or `n/N enabled · m
+unavailable`, with `(unsaved)` in `warning` once changed. Rules (`toggle`, `enableAll`,
+`clearAll`, `move`): the first toggle from `null` starts a list holding only that model; enabling
+every model collapses back to `null`; with a search typed, enable-all and clear-all act on the
+filtered items; `ctrl+p` toggles the whole provider of the selected model; `alt+up`/`alt+down`
+move an enabled model within the list; every change is applied to the session at once
+(`onChange`), `ctrl+s` persists it to `enabledModels` (`onPersist`, `undefined` when all); `ctrl+c`
+clears the search before it cancels; escape cancels. A refresh runs as for `/model`, and when the
+user has not changed anything the enabled set is recomputed from the settings against the
+refreshed catalogue.
+
+**`/resume` — `SessionSelectorComponent`.** Blank, accent border, blank, the header, blank, the
+list, blank, accent border. The header's first line is the bold title `Resume Session (Current
+Folder)` or `(All)` on the left and, right-aligned, the scope (`◉ Current Folder | ○ All`, or
+`Loading n/m` while a scope loads), `Name: All|Named`, `Sort: Threaded|Recent|Fuzzy`; the title is
+truncated to what the right side leaves. Lines two and three are hints: `tab scope ·
+re:<pattern> regex · "phrase" exact` and `ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path
+(on|off) · ctrl+r rename`; while a deletion awaits confirmation they are replaced by `Delete
+session? enter confirm · escape/ctrl+c cancel` in `error`, and a status message (`Session moved to
+trash` / `Session deleted` for 2 s, errors for 3–4 s) takes their place when there is one. Sessions
+load in the background, the current folder first and all folders on the first tab; each
+`SessionInfo` (`buildSessionInfo`) carries the id, cwd, name (the last `session_info`, cleared by an
+empty one), parent session path, the message count, the first user message (`(no messages)` when
+none), every user and assistant text joined by spaces, and `modified` = the newest message's time,
+else the header's, else the file's. The list: the search input, blank, then one row per session —
+the tree prefix (`│  `/`   ` per ancestor, `├─ `/`└─ `) in `dim`, the name or first message with
+control characters blanked, truncated to the room left (at least 10) with `…`; right-aligned
+`<count> <age>` (`now`, `Nm`, `Nh`, `Nd`, `Nw`, `Nmo`, `Ny`), prefixed by the cwd in the all scope
+and by the path with `ctrl+p`, both with `~` for home; the name in `warning`, the current session
+in `accent`, a session awaiting deletion in `error`, the selected row bold on `selectedBg`. Empty
+lists say `No sessions in current folder. Press Tab to view all.`, `No sessions found`, or the named
+variants. Sort modes cycle threaded → recent → relevance. Threaded with no query groups sessions by
+`parentSessionPath` (canonicalised), orders each level by its subtree's latest activity, and
+flattens; any query gives a flat list. The query grammar (`parseSearchQuery`): `re:<pattern>` is a
+case-insensitive regex over `id name allMessagesText cwd`, scored by match position; otherwise
+whitespace-split tokens, with `"…"` phrases matched exactly after whitespace normalisation and the
+rest fuzzy; an unclosed quote falls back to plain tokens; recent mode keeps the incoming order,
+relevance sorts by score then modified. Keys: tab scope, `ctrl+s` sort, `ctrl+n` named filter,
+`ctrl+p` path, `ctrl+d` delete (confirm with enter; the current session refuses with `Cannot delete
+the currently active session`), `ctrl+backspace` deletes only when the search is empty, `ctrl+r`
+rename (a `Rename Session` panel with an input prefilled with the name; enter appends a
+`session_info`, escape returns), up/down clamp, page up/down by 10, enter resumes (`switchSession`;
+`Resumed session`), escape cancels. Deletion tries the `trash` command, then `unlink`.
+
+**`/tree` — `TreeSelectorComponent`.** Blank, border, `  Session Tree` bold, the help (items
+`↑/↓ move · ←/→ page · <fold keys> branch · ctrl+x copy · shift+l label · shift+t label time ·
+filters ctrl+d/t/u/l/a · cycle ctrl+o/shift+ctrl+o`, keys compacted to one prefix and `up`/`down`/
+`left`/`right`/`pageUp`/`pageDown` drawn as `↑ ↓ ← → pgup pgdn`, wrapped between items), the
+search line `Type to search: <query>`, border, blank, the list, blank, border. The list shows
+`max(5, ⌊rows/2⌋)` rows. Entries are flattened depth-first with the branch holding the current leaf
+first; indentation steps in only where a node has more than one child and once more for that
+child's own children (`justBranched`), staying flat along a chain; with several roots a virtual
+root is assumed and the display indent is one less. A row is the cursor (`› ` in `accent`), a
+prefix of three cells per indent level holding `│` where an ancestor branch continues and the
+connector `├─ `/`└─ ` — whose middle cell becomes `⊟` on a foldable node and `⊞` on a folded one —,
+`⊞ ` before a folded root, `• ` in `accent` on the active path, `[label] ` in `warning`, the label's
+time with `shift+t` (`HH:MM` today, `M/D HH:MM` this year, `YY/M/D HH:MM`), then the entry: `user:
+<text>` (`accent`), `assistant: <text>` (`success`; `(aborted)`, the error message cut to 80, or
+`(no content)`), a tool result as its call — `[read: path:start-end]`, `[write: path]`, `[edit:
+path]`, `[bash: command…]` cut at 50, `[grep: /pattern/ in path]`, `[find: pattern in path]`,
+`[ls: path]`, or `[name: <40 chars of JSON>…]`, paths with `~` for home — in `muted`, `[bash]:
+command` in `dim`, `[custom type]: …`, `[compaction: Nk tokens]` in `borderAccent`, `[branch
+summary]: …` in `warning`, `[model: id]`, `[thinking: level]`, `[custom: type]`, `[label: text]`,
+`[title: name]` or `[title: empty]` (italic) in `dim`; text is cut to 200 characters and line breaks
+and tabs become spaces; the selected row is bold on `selectedBg`. The viewport pans the row bodies
+left when the selected row's text would start too far right, keeping the two-cell gutter. Assistant
+entries with no text are hidden unless aborted or failed, or the current leaf. Filters (`ctrl+d`
+default, `ctrl+t` no-tools, `ctrl+u` user-only, `ctrl+l` labeled-only, `ctrl+a` all, each toggling
+back to default; `ctrl+o`/`shift+ctrl+o` cycle; the opening filter is the `treeFilterMode`
+setting): default hides `label`, `custom`, `model_change`, `thinking_level_change` and
+`session_info`; no-tools also hides tool results; user-only keeps user messages; labeled-only keeps
+labelled entries. Typing searches (every token must appear in the entry's text, role and label);
+backspace edits the query; escape clears it before it cancels. Hidden entries attach their
+descendants to the nearest visible ancestor and the structure is recomputed. `alt+left`/`ctrl+left`
+fold a foldable node (one with visible children that is a root or a branch segment's first child)
+or move to the start of the enclosing segment; `alt+right`/`ctrl+right` unfold or move to the next
+place the line divides; left/right also page. `ctrl+x` copies the entry's text (`Selected entry
+has no text to copy` when none). `shift+l` opens `Label (empty to remove):` with an input and
+`enter save  escape cancel`; saving appends a `label` entry (`appendLabelChange`, which moves the
+leaf onto it). Enter selects. **Selecting** (`showTreeSelector` :4995 and `navigateTree`): the
+current leaf is `Already at this point`; otherwise, unless `branchSummary.skipPrompt`, a
+`Summarize branch?` question offers `No summary`, `Summarize`, `Summarize with custom prompt`
+(escape returns to the tree on the same entry; the custom prompt is taken in an editor dialog,
+whose escape returns to the question). A streaming response is aborted first. The entries from the
+old leaf back to the common ancestor are summarised with `BRANCH_SUMMARY_PROMPT` (custom
+instructions appended as `Additional focus:`), walking newest to oldest within `contextWindow −
+reserveTokens` (default 16384) and fitting a compaction or branch summary in when under 90 % of
+the budget; the result is prefixed `The user explored a different conversation branch before
+returning here. Summary of that exploration:` and followed by `<read-files>` and
+`<modified-files>` lists gathered from the branch's tool calls and earlier branch summaries; a
+spinner `Summarizing branch... (escape to cancel)` shows meanwhile and escape aborts back to the
+tree. The new position is the selected entry, or for a user or custom message its parent with the
+message's text put in the editor; a summary is appended there as a `branch_summary` entry (reaching
+the model as a user message between `BRANCH_SUMMARY_PREFIX` and `_SUFFIX`); at the root the leaf is
+reset. The chat is redrawn and `Navigated to selected point` shown. Double escape on an empty
+editor within 500 ms opens the tree (`doubleEscapeAction` `tree`, the default) or the fork selector
+(`fork`), or nothing (`none`) (:2798).
+
+**`/fork` — `UserMessageSelectorComponent`.** Blank, `Fork from Message` bold, `Select a user
+message to copy the active path up to that point into a new session` in `muted`, blank, border,
+blank, the list, blank, border. The list holds every user message with text across the whole
+session (`getUserMessagesForForking`), oldest first, 10 visible, three lines each: `› ` or two
+spaces, the text on one line (bold when selected), `Message n of N` in `muted`, a blank; it opens on
+the newest. Selecting forks **before** the message (`fork` :262, position `before`): the path up
+to its parent is copied into a new session file (`createBranchedSession`, which drops `label`
+entries from the copy, re-chains the rest, and writes the labels of the copied entries again at the
+end; an unsaved session refuses), or a new empty session recording `parentSession` when the message
+was the first entry; the message's text goes back into the editor and `Forked to new session` is
+shown. `/clone` forks at the leaf (position `at`). The RPC `get_fork_messages` returns the same
+list as `{ messages: [{ entryId, text }] }`.
+
+**`/settings` — `SettingsSelectorComponent`.** Border, a searchable `SettingsList` (10 visible),
+border. Every change is applied at once and saved. The items, in order: Auto-compact; Show images
+and Image width (only where the terminal draws images); Auto-resize images; Block images; Skill
+commands; Show hardware cursor; Editor padding (0–3); Output padding (0 or 1); Autocomplete max
+items (3, 5, 7, 10, 15, 20); Clear on shrink; Terminal progress; Steering mode and Follow-up mode
+(`one-at-a-time`, `all`); Transport; HTTP idle timeout; Hide thinking; Mermaid diagrams; Cache miss
+notices; Collapse changelog; Quiet startup; Install telemetry; Default project trust (`Ask`, `Always
+trust`, `Never trust`); Double-escape action (`tree`, `fork`, `none`); Tree filter mode; Warnings
+(a submenu); Thinking level (a submenu listing the model's levels with `No reasoning`, `Very brief
+reasoning (~1k tokens)`, `Light reasoning (~2k tokens)`, `Moderate reasoning (~8k tokens)`, `Deep
+reasoning (~16k tokens)`, `Extra-high reasoning (~32k tokens)`, `Maximum reasoning`); TUI mode;
+Fullscreen exit output; Fullscreen scrollbar; Theme (a submenu with single and automatic modes and
+live preview). A submenu is a titled `SelectList` with `Enter to select · Esc to go back`.
+
+**`/login`, `/logout` — `OAuthSelectorComponent`, `LoginDialogComponent`.** `/login` with no
+argument first asks `subscription` or `API key` when both exist, then lists providers; `/login
+<ref>` matching one provider by id or name goes straight to its flow, otherwise the list opens with
+the term as the search. The list: border, blank, `Select provider to configure:` (or `to logout:`)
+in bold `accent`, blank, search, blank, the list (8 visible, up/down clamp), blank, border; each row
+is the provider name with ` [subscription|API key]` when both kinds are listed and a status: ` •
+unconfigured`, ` ✓ configured` for OAuth or a stored credential, ` ✓ env: VAR, VAR` for environment
+variables, ` ✓ <source>` otherwise, or in `warning` the other kind when one is configured. Empty:
+`No providers available` / `No providers logged in. Use /login first.` / `No matching providers`.
+The API-key dialog: border, `Login to <name>` bold `accent`, the prompt `Enter API key` (from the
+provider's `interaction.prompt`), a plain `Input` — the key is **shown as typed and echoed above
+as `> value` once submitted** —, `(escape to cancel, enter to submit)`, border; saving reports
+`Saved API key for <name>. Credentials saved to <auth path>` and, when no model was selected,
+selects the provider's default. OAuth flows show a URL (opened in the browser), a device code, or a
+manual-code input. `/logout` lists only stored credentials (`No stored credentials to remove.
+/logout only removes credentials saved by /login; environment variables and models.json config are
+unchanged.` when none) and reports `Removed stored API key for <name>. Environment variables and
+models.json config are unchanged.`
+
+**`/trust` — `TrustSelectorComponent`.** Border, blank, `Project trust` bold `accent`, the cwd in
+`muted`, blank, `Saved decision: none | trusted (path) | untrusted (inherited from path)` and
+`Current session: trusted|untrusted`, blank, the options — `Trust`, `Trust parent folder
+(<parent>)`, `Do not trust`, with ` ✓` after the one on record and the arrow on the selection —,
+blank, `↑↓ navigate  enter save  escape cancel`, blank, border. `j`/`k` also move. Saving writes
+each option's updates to the trust store (the parent option also clears the cwd's own entry) and
+reports `Saved trust decision: trusted|untrusted. Restart pi for this to take effect.`
+
+**The question and editor dialogs** (`ExtensionSelectorComponent`, `ExtensionEditorComponent`),
+which the mode uses for its own questions: border, blank, the title bold `accent`, blank, the
+options (`→ ` in `accent`, `j`/`k` move too), blank, `↑↓ navigate  enter select  escape cancel`,
+blank, border; the editor dialog has the full editor between the title and `enter submit
+shift+enter newline  escape cancel  ctrl+g external editor`.
+
+**Keys.** `ctrl+l` opens `/model`; `ctrl+p` / `shift+ctrl+p` cycle through the scoped models or
+the whole snapshot (`Only one model in scope` / `Only one model available`; `Switched to <name>
+(thinking: level)`); `shift+tab` cycles the thinking level (`Thinking level: <level>`; `Current
+model does not support thinking`); the unbound `app.session.new|tree|fork|resume` open `/new`,
+`/tree`, `/fork`, `/resume`. Every change made through `ctrl+p`, `shift+tab`, `/model` and the
+settings is saved as the new default.
 
 ## 12. server / client / session-backends
 

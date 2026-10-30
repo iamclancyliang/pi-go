@@ -167,6 +167,9 @@ func ApplyDefaults(args Args, effective settings.Settings) Args {
 	if args.SessionDir == "" {
 		args.SessionDir = effective.SessionDir
 	}
+	if args.Models == nil && len(effective.EnabledModels) > 0 {
+		args.Models = append([]string(nil), effective.EnabledModels...)
+	}
 	if args.Thinking == "" && effective.DefaultThinkingLevel != "" {
 		// Already validated when the settings loaded, so a failure here would
 		// mean the file changed underneath the run.

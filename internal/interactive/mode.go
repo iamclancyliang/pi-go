@@ -48,6 +48,8 @@ type Host interface {
 	// Bash runs a shell command the user typed after "!", reporting its
 	// output as it arrives; exclude keeps it out of the model's context.
 	Bash(ctx context.Context, command string, exclude bool, onChunk func(string)) (tools.BashResult, error)
+
+	Selectors
 }
 
 // Options configure the mode.
@@ -59,6 +61,16 @@ type Options struct {
 	Notices []string
 	// InitialMessages are sent first, each once the one before has run.
 	InitialMessages []string
+	// HideThinking folds reasoning; OutputPad is the blank columns beside messages.
+	HideThinking bool
+	OutputPad    int
+	// EditorPaddingX is the blank columns beside the editor's text;
+	// AutocompleteMaxVisible how many completions show, zero meaning the default.
+	EditorPaddingX         int
+	AutocompleteMaxVisible int
+	// DoubleEscapeAction is what escape twice on an empty editor opens: "tree",
+	// "fork" or "none".
+	DoubleEscapeAction string
 }
 
 // Mode is the full-screen interactive mode — Pi's InteractiveMode in its
@@ -113,6 +125,17 @@ type Mode struct {
 	contextKnown  bool
 	beforeCompact int
 	compacted     bool
+
+	// outputPad is the blank columns beside messages.
+	outputPad int
+
+	// selectorToken identifies the selector showing, and selectorDispose stops
+	// what it has running; lastEscape is when escape was last pressed on an empty
+	// editor; cancelNavigation stops a branch summary being written.
+	selectorToken    *int
+	selectorDispose  func()
+	lastEscape       time.Time
+	cancelNavigation context.CancelFunc
 }
 
 type queuedMessage struct {
@@ -125,10 +148,11 @@ type queuedMessage struct {
 func NewMode(ui *tui.UI, env *Env, host Host, opts Options) *Mode {
 	env.RequestRender = ui.RequestRender
 	env.Do = ui.Do
-	m := &Mode{host: host, env: env, ui: ui, opts: opts,
+	m := &Mode{host: host, env: env, ui: ui, opts: opts, outputPad: opts.OutputPad, hideThinking: opts.HideThinking,
 		tools: map[string]*ToolExecution{}, toolErrors: map[string]string{}}
 
-	editor := tui.NewEditor(ui, env.Theme.EditorTheme(), tui.EditorOptions{})
+	editor := tui.NewEditor(ui, env.Theme.EditorTheme(), tui.EditorOptions{
+		PaddingX: opts.EditorPaddingX, AutocompleteMaxVisible: opts.AutocompleteMaxVisible})
 	editor.Keybindings = env.Keys
 	editor.SetAutocompleteProvider(tui.NewCombinedAutocompleteProvider(host.SlashCommands(), env.Cwd, host.Files()))
 	m.editor = &appEditor{Editor: editor, keys: env.Keys, actions: map[string]func(){}}
@@ -255,6 +279,13 @@ func (m *Mode) renderHistory() {
 			m.chat.AddChild(c)
 			continue
 		}
+		if summary, ok := session.BranchSummaryOf(msg); ok {
+			m.chat.AddChild(&tui.Spacer{Lines: 1})
+			c := NewBranchSummary(t, summary)
+			c.SetExpanded(m.expanded)
+			m.chat.AddChild(c)
+			continue
+		}
 		switch msg.Role {
 		case ai.RoleUser:
 			if msg.BashExecution != nil {
@@ -277,7 +308,7 @@ func (m *Mode) renderHistory() {
 			for _, call := range msg.ToolCalls {
 				reply.Blocks = append(reply.Blocks, ai.Block{Kind: ai.BlockToolCall, Call: call})
 			}
-			m.chat.AddChild(NewAssistantMessage(t, reply, m.hideThinking, 1))
+			m.chat.AddChild(NewAssistantMessage(t, reply, m.hideThinking, m.outputPad))
 			for _, call := range msg.ToolCalls {
 				x := NewToolExecution(t, call.Name, call.Args)
 				x.SetExpanded(m.expanded)
@@ -299,7 +330,7 @@ func (m *Mode) addUserMessage(text string) {
 	if len(m.chat.Children()) > 0 {
 		m.chat.AddChild(&tui.Spacer{Lines: 1})
 	}
-	m.chat.AddChild(NewUserMessage(m.env, text, 1))
+	m.chat.AddChild(NewUserMessage(m.env, text, m.outputPad))
 }
 
 // addBashExecution shows a shell command the user ran, with its output.
@@ -401,6 +432,18 @@ func (m *Mode) bindKeys() {
 	m.editor.actions["app.tools.expand"] = func() { m.setExpanded(!m.expanded) }
 	m.editor.actions["app.thinking.toggle"] = m.toggleThinking
 	m.editor.actions["app.message.followUp"] = m.followUp
+	m.editor.actions["app.thinking.cycle"] = m.cycleThinking
+	m.editor.actions["app.model.cycleForward"] = func() { m.cycleModel(true) }
+	m.editor.actions["app.model.cycleBackward"] = func() { m.cycleModel(false) }
+	m.editor.actions["app.model.select"] = func() { m.showModelSelector("") }
+	m.editor.actions["app.session.tree"] = func() { m.showTreeSelector("") }
+	m.editor.actions["app.session.fork"] = m.showForkSelector
+	m.editor.actions["app.session.resume"] = m.showSessionSelector
+	m.editor.actions["app.session.new"] = func() {
+		if !m.busy() {
+			m.runCommand("/new")
+		}
+	}
 }
 
 // ctrlC clears the editor; twice within half a second, it exits.
@@ -417,10 +460,16 @@ func (m *Mode) ctrlC() {
 // interrupt stops the run in flight, putting messages still queued for it
 // back in the editor.
 func (m *Mode) interrupt() {
+	if m.cancelNavigation != nil {
+		m.cancelNavigation()
+		return
+	}
 	if !m.running {
 		if m.bashCancel != nil {
 			m.bashCancel()
+			return
 		}
+		m.doubleEscape()
 		return
 	}
 	queued := append(append([]string(nil), m.steering...), m.followUps...)
@@ -439,6 +488,27 @@ func (m *Mode) interrupt() {
 	}
 }
 
+// doubleEscape opens what the setting says on the second escape within half a
+// second, with nothing in the editor. Text being written is not to be navigated
+// away from by a key that also closes everything else.
+func (m *Mode) doubleEscape() {
+	action := m.opts.DoubleEscapeAction
+	if strings.TrimSpace(m.editor.Text()) != "" || action == "none" {
+		return
+	}
+	now := time.Now()
+	if now.Sub(m.lastEscape) >= 500*time.Millisecond {
+		m.lastEscape = now
+		return
+	}
+	m.lastEscape = time.Time{}
+	if action == "fork" {
+		m.showForkSelector()
+		return
+	}
+	m.showTreeSelector("")
+}
+
 func (m *Mode) setExpanded(expanded bool) {
 	m.expanded = expanded
 	if m.headerText != nil {
@@ -450,6 +520,8 @@ func (m *Mode) setExpanded(expanded bool) {
 			c.SetExpanded(expanded)
 		case *CompactionSummary:
 			c.SetExpanded(expanded)
+		case *BranchSummaryMessage:
+			c.SetExpanded(expanded)
 		case *BashExecution:
 			c.SetExpanded(expanded)
 		}
@@ -457,8 +529,17 @@ func (m *Mode) setExpanded(expanded bool) {
 	m.ui.RequestRender()
 }
 
+// toggleThinking is the key: it changes the setting too, as Pi's does, so the
+// choice outlives the run.
 func (m *Mode) toggleThinking() {
-	m.hideThinking = !m.hideThinking
+	m.setHideThinking(!m.hideThinking)
+	if err := m.host.ChangeSetting(SettingHideThinking, boolText(m.hideThinking)); err != nil {
+		m.showError(err.Error())
+	}
+}
+
+func (m *Mode) setHideThinking(hide bool) {
+	m.hideThinking = hide
 	for _, c := range m.chat.Children() {
 		if a, ok := c.(*AssistantMessage); ok {
 			a.SetHideThinking(m.hideThinking)
@@ -522,6 +603,9 @@ func (m *Mode) submit(text string) {
 			return
 		}
 		m.editor.AddToHistory(text)
+		if m.openSelector(text) {
+			return
+		}
 		m.runCommand(text)
 		return
 	}
@@ -864,7 +948,7 @@ func (m *Mode) handleReply(e ai.StreamEvent) {
 			return
 		}
 		if m.streaming == nil {
-			m.streaming = NewAssistantMessage(m.env, nil, m.hideThinking, 1)
+			m.streaming = NewAssistantMessage(m.env, nil, m.hideThinking, m.outputPad)
 			m.chat.AddChild(m.streaming)
 		}
 		if final.StopReason == ai.StopAborted {
@@ -898,7 +982,7 @@ func (m *Mode) handleReply(e ai.StreamEvent) {
 		return
 	}
 	if m.streaming == nil {
-		m.streaming = NewAssistantMessage(m.env, nil, m.hideThinking, 1)
+		m.streaming = NewAssistantMessage(m.env, nil, m.hideThinking, m.outputPad)
 		m.chat.AddChild(m.streaming)
 	}
 	m.streaming.Update(e.Partial)

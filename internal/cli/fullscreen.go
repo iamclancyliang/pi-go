@@ -42,12 +42,20 @@ func RunFullScreen(ctx context.Context, rt Runtime, streams Streams, term tui.Te
 	env := interactive.NewEnv(interactive.DarkTheme(tui.Capabilities().TrueColor),
 		interactive.NewKeybindings(goruntime.GOOS, nil), rt.WorkingDir, home)
 	ui := tui.NewUI(term)
+	effective := s.config.Effective
+	ui.SetShowHardwareCursor(ShowHardwareCursor(effective, os.Getenv))
+	ui.SetClearOnShrink(ClearOnShrink(effective, os.Getenv))
 	host := &fullScreenHost{s: s, providers: AvailableProviders(rt.Args)}
 	mode = interactive.NewMode(ui, env, host, interactive.Options{
-		Version:         version,
-		QuietStartup:    s.config.Effective.QuietStartup,
-		Notices:         s.startNotices(),
-		InitialMessages: prompts,
+		Version:                version,
+		QuietStartup:           effective.QuietStartup,
+		Notices:                s.startNotices(),
+		InitialMessages:        prompts,
+		HideThinking:           effective.HideThinkingBlock,
+		OutputPad:              OutputPad(effective),
+		EditorPaddingX:         EditorPaddingX(effective),
+		AutocompleteMaxVisible: AutocompleteMaxVisible(effective),
+		DoubleEscapeAction:     DoubleEscapeAction(effective),
 	})
 	if err := mode.Run(); err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
@@ -75,8 +83,11 @@ func quoteIfNeeded(s string) string {
 // it.
 type fullScreenHost struct {
 	s *interactiveSession
-	// providers is how many providers have a credential, counted at start.
+	// providers is how many providers have a credential, counted at start and
+	// after a login or logout.
 	providers int
+	// listed is what each provider reported when last asked, guarded by s.mu.
+	listed map[string][]ai.ModelRef
 }
 
 func (h *fullScreenHost) Start(ctx context.Context, prompt string) (interactive.Run, error) {
@@ -133,10 +144,13 @@ func (h *fullScreenHost) SlashCommands() []tui.SlashCommand {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := make([]tui.SlashCommand, 0, len(names))
+	out := make([]tui.SlashCommand, 0, len(names)+1)
 	for _, name := range names {
 		out = append(out, tui.SlashCommand{Name: name, Description: commands[name].Summary})
 	}
+	// The scope selector exists only here, where it can be drawn.
+	out = append(out, tui.SlashCommand{Name: "scoped-models", Description: "choose which models cycling goes through"})
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

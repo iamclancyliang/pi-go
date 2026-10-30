@@ -54,6 +54,13 @@ type Host interface {
 	Commands() (have []CommandInfo, absent []string)
 }
 
+// ForkHost is the optional fork-picker capability of a Host: what the user said,
+// in the order it was said, which `get_fork_messages` lists for a client's own
+// picker.
+type ForkHost interface {
+	ForkMessages() ([]session.ForkMessage, error)
+}
+
 // ModelHost is the optional model discovery capability of a Host. It remains
 // separate from Host so callers whose providers cannot list models continue to
 // implement the core command channel without a fabricated catalogue.
@@ -310,6 +317,24 @@ func (c *Channel) Dispatch(ctx context.Context, cmd Command) Response {
 
 	case "get_tree", "get_entries":
 		return c.entries(cmd, resp)
+
+	case "get_fork_messages":
+		forker, ok := c.host.(ForkHost)
+		if !ok {
+			return fail(resp, FailUnavailable, "this session cannot list what to fork from")
+		}
+		messages, err := forker.ForkMessages()
+		if errors.Is(err, ErrNotRecorded) {
+			return fail(resp, FailUnavailable, err.Error())
+		}
+		if err != nil {
+			return fail(resp, FailInternal, err.Error())
+		}
+		out := make([]map[string]string, 0, len(messages))
+		for _, m := range messages {
+			out = append(out, map[string]string{"entryId": m.EntryID, "text": m.Text})
+		}
+		return okData(resp, map[string]any{"messages": out})
 
 	case "fork":
 		if strings.TrimSpace(cmd.EntryID) == "" {
@@ -824,7 +849,6 @@ func fail(resp Response, kind FailureKind, detail string) Response {
 
 // pi is the set of Pi RPC commands pi-go recognises but has not built. A verb
 // here fails as unimplemented; one not here fails as unknown. The list is the
-// 32-command union from the feature inventory §21.1 minus what Dispatch serves.
-var pi = map[string]bool{
-	"get_fork_messages": true,
-}
+// 32-command union from the feature inventory §21.1 minus what Dispatch serves,
+// which is now all of them.
+var pi = map[string]bool{}

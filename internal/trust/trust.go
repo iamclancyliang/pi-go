@@ -113,6 +113,15 @@ func (s *Store) Entries() ([]string, map[string]Decision, error) {
 	return paths, all, nil
 }
 
+// Canonical is a directory as decisions are keyed: absolute, symlinks resolved.
+func Canonical(dir string) string {
+	path, err := canonical(dir)
+	if err != nil {
+		return dir
+	}
+	return path
+}
+
 // canonical resolves a path the way decisions are keyed, symlinks included, so
 // two names for one directory share one answer.
 func canonical(dir string) (string, error) {

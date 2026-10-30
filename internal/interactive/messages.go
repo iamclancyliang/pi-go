@@ -227,6 +227,47 @@ func (c *CompactionSummary) update() {
 			t.Fg("customMessageText", " to expand)"), 0, 0, nil))
 }
 
+// BranchSummaryMessage is what a conversation brought back from a branch it left —
+// Pi's BranchSummaryMessageComponent, folded until asked for.
+type BranchSummaryMessage struct {
+	env      *Env
+	box      *tui.Box
+	summary  string
+	expanded bool
+}
+
+// NewBranchSummary draws a summary, folded.
+func NewBranchSummary(env *Env, summary string) *BranchSummaryMessage {
+	c := &BranchSummaryMessage{env: env, summary: summary, box: tui.NewBox(1, 1, env.Theme.BgStyle("customMessageBg"))}
+	c.update()
+	return c
+}
+
+// SetExpanded shows or folds the summary.
+func (c *BranchSummaryMessage) SetExpanded(expanded bool) {
+	c.expanded = expanded
+	c.update()
+}
+
+func (c *BranchSummaryMessage) Invalidate()               { c.update() }
+func (c *BranchSummaryMessage) Render(width int) []string { return c.box.Render(width) }
+
+func (c *BranchSummaryMessage) update() {
+	t := c.env.Theme
+	c.box.Clear()
+	c.box.AddChild(tui.NewText(t.Fg("customMessageLabel", "\x1b[1m[branch]\x1b[22m"), 0, 0, nil))
+	c.box.AddChild(&tui.Spacer{Lines: 1})
+	if c.expanded {
+		c.box.AddChild(tui.NewMarkdown("**Branch Summary**\n\n"+c.summary, 0, 0, t.MarkdownTheme(),
+			&tui.DefaultTextStyle{Color: t.FgStyle("customMessageText")}, tui.MarkdownOptions{}))
+		return
+	}
+	c.box.AddChild(tui.NewText(
+		t.Fg("customMessageText", "Branch summary (")+
+			t.Fg("dim", c.env.KeyText("app.tools.expand"))+
+			t.Fg("customMessageText", " to expand)"), 0, 0, nil))
+}
+
 // groupThousands writes n with commas between thousands, as
 // toLocaleString does in an English locale.
 func groupThousands(n int) string {

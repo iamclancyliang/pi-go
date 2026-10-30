@@ -159,15 +159,15 @@ func TestAbortEndsARunningPromptAndTheStreamSaysAborted(t *testing.T) {
 	}
 }
 
-// TestAnUnbuiltCommandFailsWithATypedKind, which is how the channel answers the
-// commands ADR-0010 records as incomplete: one at a time, named, rather than
-// the mode refusing wholesale.
-func TestAnUnbuiltCommandFailsWithATypedKind(t *testing.T) {
+// TestForkMessagesOfAnUnrecordedRunAreUnavailable: --no-session keeps nothing,
+// so there is nothing to fork from, and the channel says that rather than
+// listing an empty conversation.
+func TestForkMessagesOfAnUnrecordedRunAreUnavailable(t *testing.T) {
 	lines := runRPC(t, scripted("unused"), `{"id":"1","command":"get_fork_messages"}`)
 	got := responses(lines)
 	errObj := got[0]["error"].(map[string]any)
-	if got[0]["ok"] != false || errObj["kind"] != "unimplemented" {
-		t.Fatalf("an unbuilt command was not typed unimplemented: %v", got[0])
+	if got[0]["ok"] != false || errObj["kind"] != "unavailable" {
+		t.Fatalf("an unrecorded conversation was not unavailable: %v", got[0])
 	}
 }
 

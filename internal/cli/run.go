@@ -396,6 +396,16 @@ func (h *rpcHost) Fork(entryID string) (rpc.Opened, error) {
 	return h.branch(full)
 }
 
+// ForkMessages is what the user said, for a client's fork picker.
+func (h *rpcHost) ForkMessages() ([]session.ForkMessage, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.current.Store == nil {
+		return nil, rpc.ErrNotRecorded
+	}
+	return h.current.Store.ForkMessages(context.Background())
+}
+
 func (h *rpcHost) Clone() (rpc.Opened, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

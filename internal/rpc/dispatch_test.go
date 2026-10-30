@@ -50,11 +50,12 @@ func (r *fakeRun) Wait() error {
 // fakeHost is a session in memory plus a record of every operation asked of
 // it. Recorded is whether it pretends to have a durable record.
 type fakeHost struct {
-	sess     *session.Session
-	provider string
-	model    string
-	recorded bool
-	tree     []session.Node
+	sess         *session.Session
+	provider     string
+	model        string
+	recorded     bool
+	tree         []session.Node
+	forkMessages []session.ForkMessage
 
 	mu       sync.Mutex
 	last     *fakeRun
@@ -97,7 +98,13 @@ func (h *fakeHost) note(op string) (Opened, error) {
 }
 
 func (h *fakeHost) Fork(id string) (Opened, error) { return h.note("fork:" + id) }
-func (h *fakeHost) Clone() (Opened, error)         { return h.note("clone") }
+func (h *fakeHost) ForkMessages() ([]session.ForkMessage, error) {
+	if !h.recorded {
+		return nil, ErrNotRecorded
+	}
+	return h.forkMessages, nil
+}
+func (h *fakeHost) Clone() (Opened, error) { return h.note("clone") }
 func (h *fakeHost) Switch(s string) (Opened, error) {
 	return h.note("switch:" + s)
 }
@@ -222,9 +229,33 @@ func TestAnUnknownVerbAndAnUnbuiltOneAreDifferentAnswers(t *testing.T) {
 	if unknown.OK || unknown.Error.Kind != FailUnknownCommand {
 		t.Fatalf("an invented command was not unknown: %+v", unknown.Error)
 	}
-	unbuilt := dispatch(c, Command{ID: "2", Command: "get_fork_messages"})
-	if unbuilt.OK || unbuilt.Error.Kind != FailUnimplemented {
-		t.Fatalf("a real Pi command was not unimplemented: %+v", unbuilt.Error)
+	// Every one of Pi's commands is built now; an invented one stays unknown
+	// and the typed unimplemented kind stays for the next one Pi adds.
+	if len(pi) != 0 {
+		t.Fatalf("commands still unbuilt: %v", pi)
+	}
+}
+
+// TestForkMessagesListWhatTheUserSaid, for a client's own fork picker.
+func TestForkMessagesListWhatTheUserSaid(t *testing.T) {
+	c, host := newChannel(t)
+	host.forkMessages = []session.ForkMessage{{EntryID: "e1", Text: "first"}, {EntryID: "e3", Text: "second"}}
+	got := dispatch(c, Command{ID: "1", Command: "get_fork_messages"})
+	if !got.OK {
+		t.Fatalf("refused: %+v", got.Error)
+	}
+	var data struct {
+		Messages []map[string]string `json:"messages"`
+	}
+	if err := json.Unmarshal(got.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Messages) != 2 || data.Messages[0]["entryId"] != "e1" || data.Messages[1]["text"] != "second" {
+		t.Fatalf("listed %v", data.Messages)
+	}
+	host.recorded = false
+	if refused := dispatch(c, Command{ID: "2", Command: "get_fork_messages"}); refused.OK || refused.Error.Kind != FailUnavailable {
+		t.Fatalf("an unrecorded conversation was not unavailable: %+v", refused)
 	}
 }
 

@@ -265,6 +265,26 @@ func SummaryOf(m ai.Message) (string, bool) {
 	return m.Content[len(summaryPrefix) : len(m.Content)-len(summarySuffix)], true
 }
 
+// BranchSummaryMessage is how a branch summary reaches the model: a user message
+// that says what it is, worded as Pi words it (BRANCH_SUMMARY_PREFIX and _SUFFIX).
+func BranchSummaryMessage(summary string) ai.Message {
+	return ai.Message{Role: ai.RoleUser, Content: branchSummaryPrefix + summary + branchSummarySuffix}
+}
+
+const (
+	branchSummaryPrefix = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
+	branchSummarySuffix = "</summary>"
+)
+
+// BranchSummaryOf is the summary a branch left, when m is the message that carries
+// it — so a display can show it as a branch rather than as something the user said.
+func BranchSummaryOf(m ai.Message) (string, bool) {
+	if m.Role != ai.RoleUser || !strings.HasPrefix(m.Content, branchSummaryPrefix) || !strings.HasSuffix(m.Content, branchSummarySuffix) {
+		return "", false
+	}
+	return m.Content[len(branchSummaryPrefix) : len(m.Content)-len(branchSummarySuffix)], true
+}
+
 // Project returns what one model call gets to see.
 //
 // Without a checkpoint this is complete history, losing nothing. With one it is
@@ -563,7 +583,7 @@ func (s *Session) Compact(summary string, retainedTail []ai.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cp := &Checkpoint{Summary: summary, RetainedTail: cloneMessages(retainedTail)}
+	cp := &Checkpoint{Summary: summary, RetainedTail: cloneMessages(retainedTail), TokensBefore: s.estimateTokens()}
 	if s.store != nil {
 		if err := s.store.Append(context.Background(), Entry{Checkpoint: cp}); err != nil {
 			return fmt.Errorf("session: publishing checkpoint: %w", err)
@@ -572,6 +592,27 @@ func (s *Session) Compact(summary string, retainedTail []ai.Message) error {
 	s.checkpoint = cp
 	s.sinceCheckpoint = nil
 	return nil
+}
+
+// estimateTokens is roughly how large what the model would be shown is, at four
+// characters to a token, for saying how much a compaction replaced.
+func (s *Session) estimateTokens() int {
+	messages := s.messages
+	chars := 0
+	if s.checkpoint != nil {
+		chars += len(s.checkpoint.Summary)
+		for _, m := range s.checkpoint.RetainedTail {
+			chars += len(m.Content) + len(m.Reasoning)
+		}
+		messages = s.sinceCheckpoint
+	}
+	for _, m := range messages {
+		chars += len(m.Content) + len(m.Reasoning)
+		for _, call := range m.ToolCalls {
+			chars += len(call.Name) + len(call.Args)
+		}
+	}
+	return chars / 4
 }
 
 func (s *Session) UnmatchedToolCalls() []string {

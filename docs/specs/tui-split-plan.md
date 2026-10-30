@@ -85,6 +85,8 @@
 
 ### T4：各种选择器，每个可以单独合并（对应 Pi 约 5800 行，其中 `tree-selector.ts` 1427 行、`session-selector.ts` 1031 行）
 
+**已完成 2026-10-31。** 先把各选择器的语义从固定版本读出来记进功能清单 §11.7，再实现。交付：通用部件——单行输入框 `tui.Input`（横向滚动、kill ring、撤销、粘贴压成一行、可遮盖）、设置列表 `tui.SettingsList`（两列对齐、说明、循环取值、子菜单、搜索）、按列切片，以及放在编辑器位置上的覆盖层机制（`showSelector`：换掉编辑器、移焦点、`done` 还原，再开一个会先关掉前一个）；`/model`（可搜索，当前模型打勾，后台向能列模型的 provider 刷新，选中即存为默认）、`/scoped-models`（勾选、整个 provider、排序、全选全清、`ctrl+s` 存进 `enabledModels`，该设置也顶替 `--models`）、`/resume`（当前目录或全部、按分叉成树、`re:` 正则和引号短语搜索、三种排序、只看有名字的、显示路径、改名、删除先走 `trash` 再 unlink、不能删当前会话）、`/tree`（五种过滤、搜索、折叠、标签、`ctrl+x` 复制、选中后询问是否总结被离开的分支，总结时可取消并回到树；选中用户消息则站到它前面并把原话放回编辑器）、`/fork`（在某条用户消息之前分叉，原话放回编辑器；从第一条之前分叉得到一个记着来源的空会话）、`/settings`（本项目实际读取的键，改动立即生效并保存）、`/login`（provider 列表标明凭证来源，密钥在对话框里遮盖输入）、`/logout`、`/trust`（含“信任上级目录”选项）；`ctrl+l`、`ctrl+p`/`shift+ctrl+p`、`shift+tab` 选择和循环模型与思考等级，空编辑器连按两次 Esc 按 `doubleEscapeAction` 打开树或分叉。数据层新增标签条目、分支摘要条目、回到根节点、向前分叉、分叉时标签按 Pi 的规则重链；分支摘要的提示词、预算和文件清单照 `branch-summarization.ts`。RPC 补上 `get_fork_messages`，Pi 的 32 条命令全部实现。验证方法同 T3：用固定版本 Pi 的组件在 node 下渲染 57 个场景（`internal/interactive/testdata/selectors/generate.ts`），Go 实现逐字节一致；另有按键驱动的模式测试和宿主层测试。与 Pi 的差异记为 D-21：密钥遮盖且不回显、没有目录所以模型名就是 id、设置项只有本项目读取的、只有 API key 登录、信任决定用 `/reload` 生效。未做：编辑器对话框的外部编辑器键（T5）、思考等级选择器组件（Pi 里没接线）。
+
 - **先做的通用部分：** select-list、settings-list、input、覆盖层和组件栈。
 - **依次接入：**
   1. `/model` 和 scoped-models；

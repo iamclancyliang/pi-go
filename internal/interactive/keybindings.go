@@ -104,6 +104,15 @@ func (e *Env) requestRender() {
 	}
 }
 
+// do runs fn on the interface's loop, or at once with no loop to run it on.
+func (e *Env) do(fn func()) {
+	if e.Do != nil {
+		e.Do(fn)
+		return
+	}
+	fn()
+}
+
 // formatKeyText spells a key for a hint — "ctrl+o", "option+enter" on a
 // Mac, alternatives joined with "/".
 func (e *Env) formatKeyText(key string, capitalize bool) string {

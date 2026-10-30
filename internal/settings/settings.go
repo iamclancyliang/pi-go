@@ -122,6 +122,52 @@ type Settings struct {
 	// point takes: "one-at-a-time" (Pi's default) or "all".
 	SteeringMode string `json:"steeringMode,omitempty"`
 	FollowUpMode string `json:"followUpMode,omitempty"`
+
+	// EnabledModels are the patterns model cycling goes through, standing in for
+	// --models when the flag is absent.
+	EnabledModels []string `json:"enabledModels,omitempty"`
+
+	// HideThinkingBlock folds reasoning in the interface.
+	HideThinkingBlock bool `json:"hideThinkingBlock,omitempty"`
+
+	// DoubleEscapeAction is what escape twice on an empty editor opens: "tree"
+	// (the default), "fork" or "none".
+	DoubleEscapeAction string `json:"doubleEscapeAction,omitempty"`
+
+	// TreeFilterMode is the filter /tree opens with.
+	TreeFilterMode string `json:"treeFilterMode,omitempty"`
+
+	// ShowHardwareCursor shows the terminal's cursor in the interface. Unset leaves
+	// it to PI_HARDWARE_CURSOR.
+	ShowHardwareCursor *bool `json:"showHardwareCursor,omitempty"`
+
+	// EditorPaddingX is the blank columns beside the editor's text.
+	EditorPaddingX *int `json:"editorPaddingX,omitempty"`
+
+	// OutputPad is the blank columns beside messages: 0, or 1 when unset.
+	OutputPad *int `json:"outputPad,omitempty"`
+
+	// AutocompleteMaxVisible is how many completions show at once, 5 when unset.
+	AutocompleteMaxVisible int `json:"autocompleteMaxVisible,omitempty"`
+
+	Terminal Terminal `json:"terminal,omitzero"`
+
+	BranchSummary BranchSummary `json:"branchSummary,omitzero"`
+}
+
+// Terminal is how the interface treats the terminal.
+type Terminal struct {
+	// ClearOnShrink redraws to clear rows a shrinking frame left behind. Unset
+	// leaves it to PI_CLEAR_ON_SHRINK.
+	ClearOnShrink *bool `json:"clearOnShrink,omitempty"`
+}
+
+// BranchSummary is how a branch left behind by /tree is summarised.
+type BranchSummary struct {
+	// ReserveTokens is held back from the model's window for the prompt and reply.
+	ReserveTokens int `json:"reserveTokens,omitempty"`
+	// SkipPrompt never asks, and leaves the branch unsummarised.
+	SkipPrompt bool `json:"skipPrompt,omitempty"`
 }
 
 // GlobalPath is where the global scope lives.
@@ -173,6 +219,28 @@ func (s Settings) validate(path string) error {
 		if mode != "" && mode != "all" && mode != "one-at-a-time" {
 			return fmt.Errorf("settings: %s: %s is %q; it takes all or one-at-a-time", path, key, mode)
 		}
+	}
+	switch s.DoubleEscapeAction {
+	case "", "tree", "fork", "none":
+	default:
+		return fmt.Errorf("settings: %s: doubleEscapeAction is %q; it takes tree, fork or none", path, s.DoubleEscapeAction)
+	}
+	switch s.TreeFilterMode {
+	case "", "default", "no-tools", "user-only", "labeled-only", "all":
+	default:
+		return fmt.Errorf("settings: %s: treeFilterMode is %q; it takes default, no-tools, user-only, labeled-only or all", path, s.TreeFilterMode)
+	}
+	if s.EditorPaddingX != nil && (*s.EditorPaddingX < 0 || *s.EditorPaddingX > 3) {
+		return fmt.Errorf("settings: %s: editorPaddingX takes 0 to 3", path)
+	}
+	if s.OutputPad != nil && *s.OutputPad != 0 && *s.OutputPad != 1 {
+		return fmt.Errorf("settings: %s: outputPad takes 0 or 1", path)
+	}
+	if s.AutocompleteMaxVisible != 0 && (s.AutocompleteMaxVisible < 3 || s.AutocompleteMaxVisible > 20) {
+		return fmt.Errorf("settings: %s: autocompleteMaxVisible takes 3 to 20", path)
+	}
+	if s.BranchSummary.ReserveTokens < 0 {
+		return fmt.Errorf("settings: %s: branchSummary.reserveTokens is negative", path)
 	}
 	if s.Retry.MaxRetries != nil && *s.Retry.MaxRetries < 0 {
 		return fmt.Errorf("settings: %s: retry.maxRetries is negative", path)
@@ -235,6 +303,39 @@ func Merge(global, project Settings) Settings {
 	}
 	if project.FollowUpMode != "" {
 		merged.FollowUpMode = project.FollowUpMode
+	}
+	if project.EnabledModels != nil {
+		merged.EnabledModels = append([]string(nil), project.EnabledModels...)
+	}
+	if project.HideThinkingBlock {
+		merged.HideThinkingBlock = true
+	}
+	if project.DoubleEscapeAction != "" {
+		merged.DoubleEscapeAction = project.DoubleEscapeAction
+	}
+	if project.TreeFilterMode != "" {
+		merged.TreeFilterMode = project.TreeFilterMode
+	}
+	if project.ShowHardwareCursor != nil {
+		merged.ShowHardwareCursor = project.ShowHardwareCursor
+	}
+	if project.EditorPaddingX != nil {
+		merged.EditorPaddingX = project.EditorPaddingX
+	}
+	if project.OutputPad != nil {
+		merged.OutputPad = project.OutputPad
+	}
+	if project.AutocompleteMaxVisible != 0 {
+		merged.AutocompleteMaxVisible = project.AutocompleteMaxVisible
+	}
+	if project.Terminal.ClearOnShrink != nil {
+		merged.Terminal.ClearOnShrink = project.Terminal.ClearOnShrink
+	}
+	if project.BranchSummary.ReserveTokens != 0 {
+		merged.BranchSummary.ReserveTokens = project.BranchSummary.ReserveTokens
+	}
+	if project.BranchSummary.SkipPrompt {
+		merged.BranchSummary.SkipPrompt = true
 	}
 	if project.Retry.Enabled != nil {
 		merged.Retry.Enabled = project.Retry.Enabled

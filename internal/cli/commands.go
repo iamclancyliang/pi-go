@@ -39,7 +39,7 @@ type Command struct {
 // tells them they mistyped it when they did not — the same failure the flag
 // parser refuses to have.
 var notImplemented = map[string]string{
-	"scoped-models": "the full-screen scope selector is not ported",
+	"scoped-models": "the scope selector needs the full-screen interface; use --models or the enabledModels setting here",
 }
 
 // commandContext is what a command may act on.

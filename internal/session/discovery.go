@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +79,20 @@ type Info struct {
 	// opening line in a listing: someone who named a conversation named it so
 	// they would recognise it.
 	Name string
+
+	// ParentSession is the file this one was forked from, if it was.
+	ParentSession string
+
+	// MessageCount is how many messages were recorded, across every branch.
+	MessageCount int
+
+	// AllText is everything the user and the assistant said, for searching.
+	AllText string
+
+	// Activity is when the last message was recorded, or failing that when the
+	// conversation started. Not the file's time: a rename touches the file and
+	// nobody has said anything.
+	Activity time.Time
 }
 
 // List returns the sessions for a working directory, most recently modified
@@ -86,6 +101,12 @@ type Info struct {
 // A file that cannot be read is skipped rather than failing the listing: one
 // corrupt session must not make every other one unreachable.
 func List(agentDir, workingDir string) ([]Info, error) {
+	return ListProgress(agentDir, workingDir, nil)
+}
+
+// ListProgress is List, saying how far it has got: reading every session in a
+// directory is the slow part of opening a picker on it.
+func ListProgress(agentDir, workingDir string, onProgress func(loaded, total int)) ([]Info, error) {
 	dir := DirFor(agentDir, workingDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -95,16 +116,25 @@ func List(agentDir, workingDir string) ([]Info, error) {
 		return nil, fmt.Errorf("session: %w", err)
 	}
 
-	var found []Info
+	var paths []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			paths = append(paths, filepath.Join(dir, e.Name()))
 		}
-		info, err := Describe(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
+	}
+	return describeAll(paths, onProgress), nil
+}
+
+// describeAll reads each session, most recently touched first.
+func describeAll(paths []string, onProgress func(loaded, total int)) []Info {
+	var found []Info
+	for at, path := range paths {
+		if info, err := Describe(path); err == nil {
+			found = append(found, info)
 		}
-		found = append(found, info)
+		if onProgress != nil {
+			onProgress(at+1, len(paths))
+		}
 	}
 	sort.Slice(found, func(i, j int) bool {
 		if !found[i].Modified.Equal(found[j].Modified) {
@@ -114,13 +144,18 @@ func List(agentDir, workingDir string) ([]Info, error) {
 		// listed the same way twice.
 		return found[i].Path > found[j].Path
 	})
-	return found, nil
+	return found
 }
 
 // ListAll is every session under an agent directory, whichever directory each
 // ran in, most recently touched first. Used to find one by id when it is not
 // among this directory's.
 func ListAll(agentDir string) ([]Info, error) {
+	return ListAllProgress(agentDir, nil)
+}
+
+// ListAllProgress is ListAll, saying how far it has got.
+func ListAllProgress(agentDir string, onProgress func(loaded, total int)) ([]Info, error) {
 	root := filepath.Join(agentDir, "sessions")
 	dirs, err := os.ReadDir(root)
 	if err != nil {
@@ -129,7 +164,7 @@ func ListAll(agentDir string) ([]Info, error) {
 		}
 		return nil, fmt.Errorf("session: %w", err)
 	}
-	var found []Info
+	var paths []string
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
@@ -139,21 +174,23 @@ func ListAll(agentDir string) ([]Info, error) {
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-				continue
-			}
-			if info, err := Describe(filepath.Join(root, d.Name(), e.Name())); err == nil {
-				found = append(found, info)
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+				paths = append(paths, filepath.Join(root, d.Name(), e.Name()))
 			}
 		}
 	}
-	sort.Slice(found, func(i, j int) bool {
-		if !found[i].Modified.Equal(found[j].Modified) {
-			return found[i].Modified.After(found[j].Modified)
-		}
-		return found[i].Path > found[j].Path
-	})
-	return found, nil
+	return describeAll(paths, onProgress), nil
+}
+
+// Rename names a conversation that is not the one a run is working in, by
+// appending to its file as a run in it would.
+func Rename(path, name string) error {
+	store, err := OpenFileStore(path, "", NewSessionID(time.Now()))
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	return store.Append(context.Background(), Entry{Info: &SessionInfo{Name: strings.TrimSpace(name)}})
 }
 
 // Describe reads one session's summary without keeping its conversation.
@@ -174,22 +211,37 @@ func Describe(path string) (Info, error) {
 	}
 
 	info := Info{
-		Path:     path,
-		ID:       header.ID,
-		Dir:      header.Dir,
-		Modified: stat.ModTime(),
+		Path:          path,
+		ID:            header.ID,
+		Dir:           header.Dir,
+		ParentSession: header.ParentSession,
+		Modified:      stat.ModTime(),
 		// Everything recorded, not just the current branch. A listing answers
 		// "is there anything here", and a conversation the user branched away
 		// from is still something they may want back.
 		Entries: countHappened(records),
 	}
+	info.Activity = stat.ModTime()
 	if started, err := time.Parse(time.RFC3339Nano, header.Timestamp); err == nil {
 		info.Started = started
+		info.Activity = started
 	}
+	var said []string
 	for _, r := range records {
 		if info.Opening == "" && r.Message != nil && r.Message.Role == "user" &&
 			strings.TrimSpace(r.Message.Content) != "" {
 			info.Opening = strings.TrimSpace(r.Message.Content)
+		}
+		if r.Message != nil {
+			info.MessageCount++
+			if at, err := time.Parse(time.RFC3339Nano, r.Timestamp); err == nil && at.After(info.Activity) {
+				info.Activity = at
+			}
+			if r.Message.Role == "user" || r.Message.Role == "assistant" {
+				if r.Message.Content != "" {
+					said = append(said, r.Message.Content)
+				}
+			}
 		}
 		// The LAST name wins, so the whole record is read rather than stopping
 		// at the first: a conversation renamed twice is called the second thing.
@@ -197,6 +249,7 @@ func Describe(path string) (Info, error) {
 			info.Name = strings.TrimSpace(r.Info.Name)
 		}
 	}
+	info.AllText = strings.Join(said, " ")
 	return info, nil
 }
 
@@ -224,7 +277,7 @@ func MostRecent(agentDir, workingDir string) (Info, bool, error) {
 func countHappened(records []fileRecord) int {
 	n := 0
 	for _, r := range records {
-		if r.Kind != kindModel && r.Kind != kindThinking {
+		if r.Kind != kindModel && r.Kind != kindThinking && r.Kind != kindLabel {
 			n++
 		}
 	}
