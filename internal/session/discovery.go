@@ -117,6 +117,45 @@ func List(agentDir, workingDir string) ([]Info, error) {
 	return found, nil
 }
 
+// ListAll is every session under an agent directory, whichever directory each
+// ran in, most recently touched first. Used to find one by id when it is not
+// among this directory's.
+func ListAll(agentDir string) ([]Info, error) {
+	root := filepath.Join(agentDir, "sessions")
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("session: %w", err)
+	}
+	var found []Info
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(root, d.Name()))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+				continue
+			}
+			if info, err := Describe(filepath.Join(root, d.Name(), e.Name())); err == nil {
+				found = append(found, info)
+			}
+		}
+	}
+	sort.Slice(found, func(i, j int) bool {
+		if !found[i].Modified.Equal(found[j].Modified) {
+			return found[i].Modified.After(found[j].Modified)
+		}
+		return found[i].Path > found[j].Path
+	})
+	return found, nil
+}
+
 // Describe reads one session's summary without keeping its conversation.
 func Describe(path string) (Info, error) {
 	f, err := os.Open(path)

@@ -834,7 +834,14 @@ func RunInteractive(ctx context.Context, rt Runtime, streams Streams) int {
 	// send the fragment.
 	lines.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
+	// What the command line asked goes first, as if it had been typed.
+	pending := rt.Args.Messages
 	readLine := func() (string, bool) {
+		if len(pending) > 0 {
+			line := pending[0]
+			pending = pending[1:]
+			return line, true
+		}
 		if rt.ReadLine != nil {
 			line, ok, err := rt.ReadLine("> ")
 			if err != nil {

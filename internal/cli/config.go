@@ -97,6 +97,16 @@ func ResolveConfig(args Args, workingDir string, ask func(prompt string) bool) (
 	}
 	cfg.Trust, cfg.TrustedFrom = decision, from
 
+	if args.ProjectTrust != nil {
+		// For this run only, so nothing is written to the store: a flag on one
+		// command line must not decide about the project for the next one.
+		decision = trust.Refused
+		if *args.ProjectTrust {
+			decision = trust.Trusted
+		}
+		cfg.Trust = decision
+	}
+
 	if decision == trust.Undecided {
 		switch global.DefaultProjectTrust {
 		case settings.TrustAlways:
@@ -174,16 +184,47 @@ func ApplyDefaults(args Args, effective settings.Settings) Args {
 // than a skip: a filter that silently drops a misspelt entry offers a tool set
 // the user did not choose.
 func BuildTools(root string, effective settings.Settings) (*tools.Registry, error) {
+	return buildTools(root, effective, effective.DefaultTools, "settings: defaultTools", nil)
+}
+
+// ToolsFor is the registry this command line asks for. --tools replaces both the
+// settings and the switches that turn tools off, as Pi's does, and --exclude-tools
+// then applies to whatever was chosen.
+//
+// A name --exclude-tools does not recognise is ignored: removing what is not
+// there leaves the set the user asked for. A name --tools does not recognise is
+// refused for the reason BuildTools gives.
+func ToolsFor(args Args, root string, effective settings.Settings) (*tools.Registry, error) {
+	excluded := map[string]bool{}
+	for _, name := range args.ExcludeTools {
+		excluded[name] = true
+	}
+	switch {
+	case args.Tools != nil:
+		if len(args.Tools) == 0 {
+			return tools.NewRegistry(), nil
+		}
+		return buildTools(root, effective, args.Tools, "--tools", excluded)
+	case args.NoTools || args.NoBuiltinTools:
+		return tools.NewRegistry(), nil
+	default:
+		return buildTools(root, effective, effective.DefaultTools, "settings: defaultTools", excluded)
+	}
+}
+
+func buildTools(root string, effective settings.Settings, names []string, source string,
+	excluded map[string]bool) (*tools.Registry, error) {
+
 	registry := tools.NewRegistry()
 	wanted := map[string]bool{}
-	for _, name := range effective.DefaultTools {
+	for _, name := range names {
 		wanted[name] = true
 	}
 
 	known := map[string]bool{}
 	for _, tool := range tools.BuiltIn(root) {
 		known[tool.Name()] = true
-		if len(wanted) > 0 && !wanted[tool.Name()] {
+		if len(wanted) > 0 && !wanted[tool.Name()] || excluded[tool.Name()] {
 			continue
 		}
 		if shaped, ok := tool.(*tools.Bash); ok {
@@ -196,8 +237,7 @@ func BuildTools(root string, effective settings.Settings) (*tools.Registry, erro
 	}
 	for name := range wanted {
 		if !known[name] {
-			return nil, fmt.Errorf(
-				"settings: defaultTools names %q, which is not a built-in tool", name)
+			return nil, fmt.Errorf("%s names %q, which is not a built-in tool", source, name)
 		}
 	}
 	return registry, nil

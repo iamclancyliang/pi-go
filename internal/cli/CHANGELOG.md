@@ -6,6 +6,14 @@ file carries what a person upgrading would want to know.
 ## Unreleased
 
 ### The agent
+- More of Pi's command line: `@path` puts a file in the first message and piped
+  input goes ahead of it; `--tools`, `--exclude-tools` and `--no-builtin-tools`
+  choose what the model is offered; `--session`, `--session-id`, `--fork` and
+  `--name` choose and name the conversation; `--export` writes a session file
+  out and `--list-models` shows the models a credential here can reach, neither
+  of them starting a run; `--approve` and `--no-approve` settle project trust for
+  one run; and the short spellings of all of these work. A piped stdin is now read
+  to its end before a run starts, so a pipe that stays open holds the run.
 - A `pi` command: one-shot with `-p`, a session in a terminal, and the mode
   resolved from the terminal itself — a redirected run prints, a terminal
   converses.

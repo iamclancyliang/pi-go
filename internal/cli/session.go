@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ type Conversation struct {
 	// lands beside it rather than wherever the default points.
 	Dir string
 
+	// Notice is something opening it found worth saying, empty when nothing was.
+	Notice string
+
 	close func() error
 }
 
@@ -48,19 +52,86 @@ func (c *Conversation) Close() error {
 	return c.close()
 }
 
-// OpenConversation decides which conversation a run belongs to and opens it.
-//
-// Four cases, and they are not interchangeable. --no-session keeps everything
-// in memory. --resume names one. --continue takes the most recent in this
-// directory. Anything else starts a new one, recorded so the NEXT run can
-// continue it — a session that is only recorded when asked for cannot be
-// resumed, because the asking happens after the conversation worth keeping.
+// OpenConversation decides which conversation a run belongs to and opens it,
+// with nobody to ask about a conversation from another directory.
 func OpenConversation(args Args, workingDir, system string) (*Conversation, error) {
+	return OpenConversationAsking(args, workingDir, system, nil)
+}
+
+// OpenConversationAsking opens the conversation this command line names, asking
+// before copying one in from another directory. A nil ask means nobody can be
+// asked, and the copy is refused rather than assumed.
+func OpenConversationAsking(args Args, workingDir, system string, ask func(string) bool) (*Conversation, error) {
+	if err := checkConversationFlags(args); err != nil {
+		return nil, err
+	}
+	conversation, err := openNamedConversation(args, workingDir, system, ask)
+	if err != nil {
+		return nil, err
+	}
+	if args.NameGiven {
+		if err := conversation.Session.SetName(args.Name); err != nil {
+			conversation.Close()
+			return nil, err
+		}
+	}
+	return conversation, nil
+}
+
+// checkConversationFlags refuses the combinations that ask for two conversations
+// at once, and a name that could not be recorded. Refused before anything is
+// opened, so a mistake on the command line leaves no empty session behind it.
+func checkConversationFlags(args Args) error {
+	conflicts := func(flag string, others ...bool) error {
+		names := []string{"--session", "--continue", "--resume", "--no-session"}
+		var found []string
+		for at, on := range others {
+			if on {
+				found = append(found, names[at])
+			}
+		}
+		if len(found) > 0 {
+			return fmt.Errorf("%s cannot be combined with %s", flag, strings.Join(found, ", "))
+		}
+		return nil
+	}
+	if args.NameGiven && strings.TrimSpace(args.Name) == "" {
+		return fmt.Errorf("--name requires a non-empty value")
+	}
+	resuming := args.Continue
+	if args.Fork != "" {
+		if err := conflicts("--fork", args.Session != "", resuming, args.Resume != "", args.NoSession); err != nil {
+			return err
+		}
+	}
+	if args.SessionID != "" {
+		if err := conflicts("--session-id", args.Session != "", resuming, args.Resume != ""); err != nil {
+			return err
+		}
+		if !validSessionID.MatchString(args.SessionID) {
+			return fmt.Errorf("session id must contain only letters, digits, '-', '_' and '.', " +
+				"and start and end with a letter or digit")
+		}
+	}
+	return nil
+}
+
+// validSessionID is Pi's rule. The id becomes part of a file name, so this also
+// keeps a path out of it.
+var validSessionID = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$`)
+
+// openNamedConversation is the choice itself. --no-session keeps everything in
+// memory; --fork copies one; --session and --resume name one; --continue takes
+// the most recent here; --session-id opens or creates an exact id. Anything else
+// starts a new one, recorded so the NEXT run can continue it — a session that is
+// only recorded when asked for cannot be resumed, because the asking happens
+// after the conversation worth keeping.
+func openNamedConversation(args Args, workingDir, system string, ask func(string) bool) (*Conversation, error) {
 	if args.NoSession {
 		// No store: a conversation that keeps nothing has no shape to navigate
 		// and nothing to copy, which the commands check for rather than
 		// discovering through a nil.
-		return &Conversation{Session: session.New(system)}, nil
+		return &Conversation{Session: session.New(system), ID: args.SessionID}, nil
 	}
 
 	agentDir := args.SessionDir
@@ -70,6 +141,45 @@ func OpenConversation(args Args, workingDir, system string) (*Conversation, erro
 			return nil, err
 		}
 		agentDir = resolved
+	}
+
+	if args.Fork != "" {
+		if args.SessionID != "" {
+			existing, err := sessionWithID(agentDir, workingDir, args.SessionID)
+			if err != nil {
+				return nil, err
+			}
+			if existing != "" {
+				return nil, fmt.Errorf("session already exists with id %q", args.SessionID)
+			}
+		}
+		found, err := locateSession(agentDir, workingDir, args.Fork)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(found.path); err != nil {
+			return nil, fmt.Errorf("no session file at %s", found.path)
+		}
+		return forkInto(found.path, agentDir, workingDir, system, args.SessionID)
+	}
+
+	if args.Session != "" {
+		found, err := locateSession(agentDir, workingDir, args.Session)
+		if err != nil {
+			return nil, err
+		}
+		if found.otherDir == "" {
+			return reopen(found.path, workingDir, system, "", true)
+		}
+		// A conversation carries the paths and assumptions of where it ran, so
+		// it is copied here rather than continued in place, and only on a yes.
+		if ask == nil {
+			return nil, fmt.Errorf("that session belongs to %s; use --fork to copy it here", found.otherDir)
+		}
+		if !ask(fmt.Sprintf("Session found in %s.\nFork it into this directory?", found.otherDir)) {
+			return nil, fmt.Errorf("not forked; nothing was opened")
+		}
+		return forkInto(found.path, agentDir, workingDir, system, "")
 	}
 
 	if args.Resume != "" {
@@ -95,12 +205,156 @@ func OpenConversation(args Args, workingDir, system string) (*Conversation, erro
 	}
 
 	now := time.Now()
-	id := session.NewSessionID(now)
+	id := args.SessionID
+	notice := ""
+	if id != "" {
+		existing, err := sessionWithID(agentDir, workingDir, id)
+		if err != nil {
+			return nil, err
+		}
+		if existing != "" {
+			return reopen(existing, workingDir, system, "", true)
+		}
+		notice = fmt.Sprintf("no session here has the id %q; starting a new one with it", id)
+	} else {
+		id = session.NewSessionID(now)
+	}
 	path := filepath.Join(session.DirFor(agentDir, workingDir), session.FileName(id, now))
 	// The SAME id names the file and identifies the record inside it. Two ids
 	// for one conversation means the one a listing shows is not the one the
 	// file is called, and --resume then takes a name that finds nothing.
-	return reopen(path, workingDir, system, id, false)
+	conversation, err := reopen(path, workingDir, system, id, false)
+	if err != nil {
+		return nil, err
+	}
+	conversation.Notice = notice
+	return conversation, nil
+}
+
+// WithoutConversationChoice is these args once the conversation they named is
+// open. The commands that move between conversations reopen from the same args,
+// and /new must not fork the source again or rename what it starts.
+func (a Args) WithoutConversationChoice() Args {
+	a.Session, a.SessionID, a.Fork = "", "", ""
+	a.Name, a.NameGiven = "", false
+	return a
+}
+
+// sessionLocation is where a name led. otherDir is set when the session belongs
+// to a different working directory than this run's.
+type sessionLocation struct {
+	path     string
+	otherDir string
+}
+
+// locateSession turns what the user typed into a session. A path is taken as
+// one, and may not exist yet: --session can name the file a new conversation
+// starts in. Anything else is an id or its prefix, looked for here first and
+// then everywhere. As in resolveSessionName, an ambiguous prefix is refused.
+func locateSession(agentDir, workingDir, name string) (sessionLocation, error) {
+	if strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".jsonl") {
+		return sessionLocation{path: absoluteUnder(workingDir, name)}, nil
+	}
+	here, err := session.List(agentDir, workingDir)
+	if err != nil {
+		return sessionLocation{}, err
+	}
+	if found, err := matchSessionID(here, name); found != nil || err != nil {
+		if err != nil {
+			return sessionLocation{}, err
+		}
+		return sessionLocation{path: found.Path}, nil
+	}
+	everywhere, err := session.ListAll(agentDir)
+	if err != nil {
+		return sessionLocation{}, err
+	}
+	found, err := matchSessionID(everywhere, name)
+	if err != nil {
+		return sessionLocation{}, err
+	}
+	if found == nil {
+		return sessionLocation{}, fmt.Errorf("no session found matching %q", name)
+	}
+	return sessionLocation{path: found.Path, otherDir: found.Dir}, nil
+}
+
+// matchSessionID finds an id exactly, or failing that by an unambiguous prefix.
+// Nil means nothing matched.
+func matchSessionID(all []session.Info, name string) (*session.Info, error) {
+	var matched []session.Info
+	for _, info := range all {
+		if info.ID == name {
+			return &info, nil
+		}
+		if strings.HasPrefix(info.ID, name) {
+			matched = append(matched, info)
+		}
+	}
+	switch len(matched) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &matched[0], nil
+	default:
+		ids := make([]string, 0, len(matched))
+		for _, info := range matched {
+			ids = append(ids, info.ID)
+		}
+		return nil, fmt.Errorf("%q matches more than one session: %s", name, strings.Join(ids, ", "))
+	}
+}
+
+// sessionWithID is the path of the conversation here with exactly this id, or
+// empty when there is none.
+func sessionWithID(agentDir, workingDir, id string) (string, error) {
+	all, err := session.List(agentDir, workingDir)
+	if err != nil {
+		return "", err
+	}
+	for _, info := range all {
+		if info.ID == id {
+			return info.Path, nil
+		}
+	}
+	return "", nil
+}
+
+// forkInto copies a whole conversation into a new one in this directory, and
+// opens the copy. The source is only read.
+func forkInto(source, agentDir, workingDir, system, id string) (*Conversation, error) {
+	now := time.Now()
+	if id == "" {
+		id = session.NewSessionID(now)
+	}
+	from, err := session.OpenFileStore(source, workingDir, id)
+	if err != nil {
+		return nil, err
+	}
+	defer from.Close()
+	path := filepath.Join(session.DirFor(agentDir, workingDir), session.FileName(id, now))
+	copied, err := from.BranchInto(context.Background(), path, workingDir, id, from.Leaf())
+	if err != nil {
+		return nil, err
+	}
+	if err := copied.Close(); err != nil {
+		return nil, err
+	}
+	return reopen(path, workingDir, system, "", true)
+}
+
+// absoluteUnder resolves a path the way a person typing it means: from the
+// working directory, with ~ as their home.
+func absoluteUnder(workingDir, path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[1:])
+		}
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(workingDir, path)
 }
 
 // agentDirOf recovers the agent directory a session path sits under, so a fork

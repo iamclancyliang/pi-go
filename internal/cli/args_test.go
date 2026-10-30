@@ -90,14 +90,14 @@ func TestTheAcceptedModeValues(t *testing.T) {
 // would leave a user believing the flag took effect, which is the one thing a
 // parser must never do.
 func TestAPiFlagThisBuildLacksIsSaidAloud(t *testing.T) {
-	got := cli.ParseArgs([]string{"--fork"})
+	got := cli.ParseArgs([]string{"--skill", "./s"})
 	if len(got.Diagnostics) != 1 || !got.Diagnostics[0].Warning {
-		t.Fatalf("--fork produced %v", got.Diagnostics)
+		t.Fatalf("--skill produced %v", got.Diagnostics)
 	}
 	if !strings.Contains(got.Diagnostics[0].Message, "does not implement") {
 		t.Fatalf("the diagnostic does not say why: %q", got.Diagnostics[0].Message)
 	}
-	if _, kept := got.Unknown["fork"]; kept {
+	if _, kept := got.Unknown["skill"]; kept {
 		t.Fatal("a known-but-unimplemented flag was also kept as unknown")
 	}
 	if got.Failed() {
@@ -194,5 +194,64 @@ func TestModelsFlagKeepsEmptyEntriesForLaterDiagnostics(t *testing.T) {
 	got := cli.ParseArgs([]string{"--models", "alpha,,beta"})
 	if strings.Join(got.Models, "|") != "alpha||beta" {
 		t.Fatalf("empty model pattern disappeared: %v", got.Models)
+	}
+}
+
+// TestAnUnportedSwitchLeavesThePromptAlone. It takes no value, so the word after
+// it is the question being asked.
+func TestAnUnportedSwitchLeavesThePromptAlone(t *testing.T) {
+	got := cli.ParseArgs([]string{"--no-skills", "hello"})
+	if len(got.Messages) != 1 || got.Messages[0] != "hello" {
+		t.Fatalf("the prompt came back as %v", got.Messages)
+	}
+	short := cli.ParseArgs([]string{"-ns", "-e", "./ext.ts", "hello"})
+	if short.Failed() || len(short.Messages) != 1 || short.Messages[0] != "hello" {
+		t.Fatalf("short spellings parsed as %+v", short)
+	}
+}
+
+func TestTheToolFlags(t *testing.T) {
+	got := cli.ParseArgs([]string{"-t", "read, grep,", "-xt", "bash", "-nbt", "-nt", "-nc"})
+	if strings.Join(got.Tools, " ") != "read grep" || strings.Join(got.ExcludeTools, " ") != "bash" {
+		t.Fatalf("lists parsed as %q and %q", got.Tools, got.ExcludeTools)
+	}
+	if !got.NoBuiltinTools || !got.NoTools || !got.NoContextFiles || got.Failed() {
+		t.Fatalf("switches parsed as %+v", got)
+	}
+	if empty := cli.ParseArgs([]string{"--tools", ""}); empty.Tools == nil {
+		t.Fatal("a list naming nothing came back as no list at all")
+	}
+}
+
+func TestTheConversationFlags(t *testing.T) {
+	got := cli.ParseArgs([]string{"-n", "auth", "--session", "a", "--session-id", "b", "--fork", "c", "--export", "d"})
+	if got.Name != "auth" || !got.NameGiven || got.Session != "a" || got.SessionID != "b" || got.Fork != "c" || got.Export != "d" {
+		t.Fatalf("parsed as %+v", got)
+	}
+	if !cli.ParseArgs([]string{"--name"}).Failed() {
+		t.Fatal("--name without a value was accepted")
+	}
+}
+
+func TestListModelsTakesAnOptionalPattern(t *testing.T) {
+	bare := cli.ParseArgs([]string{"--list-models", "--offline"})
+	if !bare.ListModels || bare.ListModelsPattern != "" || !bare.Offline {
+		t.Fatalf("parsed as %+v", bare)
+	}
+	searched := cli.ParseArgs([]string{"--list-models", "chat"})
+	if !searched.ListModels || searched.ListModelsPattern != "chat" || len(searched.Messages) != 0 {
+		t.Fatalf("parsed as %+v", searched)
+	}
+}
+
+func TestTheApproveFlagsOverrideTrustEitherWay(t *testing.T) {
+	if got := cli.ParseArgs([]string{"-a"}); got.ProjectTrust == nil || !*got.ProjectTrust {
+		t.Fatalf("-a parsed as %v", got.ProjectTrust)
+	}
+	if got := cli.ParseArgs([]string{"--no-approve"}); got.ProjectTrust == nil || *got.ProjectTrust {
+		t.Fatalf("--no-approve parsed as %v", got.ProjectTrust)
+	}
+	if got := cli.ParseArgs(nil); got.ProjectTrust != nil {
+		t.Fatalf("no flag parsed as %v", *got.ProjectTrust)
 	}
 }

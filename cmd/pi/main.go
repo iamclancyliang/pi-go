@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/iamclancyliang/pi-go/internal/cli"
 	"github.com/iamclancyliang/pi-go/internal/runtime"
-	"github.com/iamclancyliang/pi-go/internal/tools"
 	"github.com/iamclancyliang/pi-go/internal/tui"
 )
 
@@ -53,9 +53,45 @@ func run(argv []string) int {
 		return 0
 	}
 
-	mode := cli.ResolveAppMode(args, isTerminal(os.Stdin), isTerminal(os.Stdout))
-
 	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
+	}
+
+	// Neither of these is a run: no conversation, no model, no trust question.
+	if args.Export != "" {
+		written, err := cli.ExportFile(args.Export, args, root)
+		if err != nil {
+			fmt.Fprintf(streams.Err, "pi: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(streams.Out, "Exported to: %s\n", written)
+		return 0
+	}
+	if args.ListModels {
+		return cli.RunListModels(context.Background(), args, streams, http.DefaultTransport)
+	}
+
+	mode := cli.ResolveAppMode(args, isTerminal(os.Stdin), isTerminal(os.Stdout))
+	if mode == cli.AppRPC && len(args.FileArgs) > 0 {
+		fmt.Fprintln(streams.Err, "pi: @file arguments are not supported in RPC mode")
+		return 1
+	}
+
+	// Piped input is part of the question, and RPC mode is the exception because
+	// its stdin is the command channel. Read to the end, so a pipe that stays
+	// open holds the run until it closes, as it does in Pi.
+	var piped string
+	if mode != cli.AppRPC && !isTerminal(os.Stdin) {
+		read, err := io.ReadAll(streams.In)
+		if err != nil {
+			fmt.Fprintf(streams.Err, "pi: reading stdin: %v\n", err)
+			return 1
+		}
+		piped = string(read)
+	}
+	args, err = cli.PrepareInitialMessage(args, root, piped)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
@@ -85,24 +121,29 @@ func run(argv []string) int {
 	// set and the system prompt are the same whichever one answers.
 	opening := cli.ApplyDefaults(args, cfg.Effective)
 
-	registry := tools.NewRegistry()
-	if !args.NoTools {
-		if registry, err = cli.BuildTools(root, cfg.Effective); err != nil {
-			fmt.Fprintf(streams.Err, "pi: %v\n", err)
-			return 1
-		}
+	registry, err := cli.ToolsFor(args, root, cfg.Effective)
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: %v\n", err)
+		return 1
 	}
 
 	// Built from the tool set this run offers and the project's own
 	// instructions, not from a constant.
 	system := cli.BuildSystemPrompt(opening, registry, root, cfg.AgentDir)
 
-	conversation, err := cli.OpenConversation(opening, root, system)
+	conversation, err := cli.OpenConversationAsking(opening, root, system, askTrust)
 	if err != nil {
 		fmt.Fprintf(streams.Err, "pi: %v\n", err)
 		return 1
 	}
 	defer conversation.Close()
+	if conversation.Notice != "" {
+		fmt.Fprintf(streams.Err, "pi: warning: %s\n", conversation.Notice)
+	}
+	// Spent now: a later /new must not fork the source again or rename what it
+	// starts.
+	args = args.WithoutConversationChoice()
+	opening = opening.WithoutConversationChoice()
 
 	// What the run did not choose for itself comes from the conversation
 	// first and the settings second, as in Pi.
@@ -223,6 +264,10 @@ Flags:
   -p, --print [prompt]     answer once and exit, rather than starting a session
   -c, --continue           carry on the most recent conversation here
   -r, --resume [id]        reopen a conversation by id; bare means the most recent
+      --session PATH|ID    work in this conversation; a new path starts one there
+      --session-id ID      open this exact id here, creating it if missing
+      --fork PATH|ID       copy a conversation into a new one here
+  -n, --name NAME          what to call the conversation
       --no-session         keep the conversation in memory only
       --session-dir DIR    where conversations are kept
       --mode text|json|rpc how to run; text lets the terminal decide
@@ -234,9 +279,20 @@ Flags:
       --append-system-prompt TEXT   add to it; repeatable
       --thinking LEVEL     off, minimal, low, medium, high, xhigh or max
       --no-context-files   ignore the project's AGENTS.md and the like
-      --no-tools           offer the model no tools
+  -a, --approve            trust this project for this run only
+  -na, --no-approve        do not trust it, for this run only
+  -t, --tools NAMES        offer only these tools, comma-separated
+  -xt, --exclude-tools NAMES   leave these tools out
+  -nt, --no-tools          offer the model no tools
+  -nbt, --no-builtin-tools offer none of the built-in tools
+      --export FILE [OUT]  write a session file out as HTML and exit
+      --list-models [TEXT] list models with a credential here, and exit
+      --offline            do not ask a provider for its models (or PI_OFFLINE=1)
   -h, --help               this text
   -v, --version            the version
+
+@path arguments put a file's contents in the first message, and piped input goes
+ahead of them. Neither applies with --mode rpc.
 
 Without --print, pi starts a session when both input and output are terminals,
 and answers once otherwise — so a redirected run is a one-shot even without the
