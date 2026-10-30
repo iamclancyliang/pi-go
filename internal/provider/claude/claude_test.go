@@ -309,3 +309,239 @@ func TestTheProvidersOwnRetryInstructionSurvivesBeingSuppressed(t *testing.T) {
 		t.Fatalf("a provider that said not to retry was reported as retryable: %v", err)
 	}
 }
+
+// event is one server-sent event as the Messages API frames it.
+func event(name, data string) string { return "event: " + name + "\ndata: " + data + "\n\n" }
+
+// eventStream is a streamed reply. The opening event carries the prompt's counts
+// and the closing one only the output's, which is how this provider splits them.
+func eventStream(content []string, stop, closingUsage string) *http.Response {
+	var body strings.Builder
+	body.WriteString(event("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message",`+
+		`"role":"assistant","model":"claude-test","content":[],"stop_reason":null,`+
+		`"usage":{"input_tokens":25,"cache_read_input_tokens":5,"output_tokens":1}}}`))
+	body.WriteString(event("ping", `{"type":"ping"}`))
+	for _, part := range content {
+		body.WriteString(part)
+	}
+	body.WriteString(event("message_delta", `{"type":"message_delta","delta":{"stop_reason":"`+stop+
+		`","stop_sequence":null},"usage":`+closingUsage+`}`))
+	body.WriteString(event("message_stop", `{"type":"message_stop"}`))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+	}
+}
+
+func textBlock(at, text string) []string {
+	return []string{
+		event("content_block_start", `{"type":"content_block_start","index":`+at+
+			`,"content_block":{"type":"text","text":""}}`),
+		event("content_block_delta", `{"type":"content_block_delta","index":`+at+
+			`,"delta":{"type":"text_delta","text":"`+text+`"}}`),
+		event("content_block_stop", `{"type":"content_block_stop","index":`+at+`}`),
+	}
+}
+
+// toolBlock opens a call the way this provider does, with an empty input, and
+// then streams the arguments as fragments.
+func toolBlock(at, id, name string, fragments ...string) []string {
+	parts := []string{event("content_block_start", `{"type":"content_block_start","index":`+at+
+		`,"content_block":{"type":"tool_use","id":"`+id+`","name":"`+name+`","input":{}}}`)}
+	for _, fragment := range fragments {
+		quoted := strings.ReplaceAll(fragment, `"`, `\"`)
+		parts = append(parts, event("content_block_delta", `{"type":"content_block_delta","index":`+at+
+			`,"delta":{"type":"input_json_delta","partial_json":"`+quoted+`"}}`))
+	}
+	return append(parts, event("content_block_stop", `{"type":"content_block_stop","index":`+at+`}`))
+}
+
+// streamed drains a reply down to its last event. Tools are bound, because the
+// calls these tests are about only happen on a model that has them.
+func streamed(t *testing.T, reply *http.Response) ai.StreamEvent {
+	t.Helper()
+	p := newPort(t, &recordedTransport{responses: []*http.Response{reply}})
+	events, err := p.Stream(context.Background(), ai.Request{
+		Model:    "claude-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+		Tools:    []ai.ToolSpec{{Name: "read", Description: "reads a file"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var last ai.StreamEvent
+	for ev := range events {
+		last = ev
+	}
+	if last.Final == nil {
+		t.Fatalf("the stream ended with %q and no message", last.Kind)
+	}
+	return last
+}
+
+func completed(t *testing.T, reply *http.Response) ai.AssistantMessage {
+	t.Helper()
+	last := streamed(t, reply)
+	if last.Kind != ai.StreamDone {
+		t.Fatalf("the stream ended with %q: %s", last.Kind, last.Final.ErrorMessage)
+	}
+	return *last.Final
+}
+
+func toolCalls(m ai.AssistantMessage) []ai.ToolCall {
+	var calls []ai.ToolCall
+	for _, b := range m.Blocks {
+		if b.Kind == ai.BlockToolCall {
+			calls = append(calls, b.Call)
+		}
+	}
+	return calls
+}
+
+// TestAStreamedTextReplyCompletes, with both halves of its usage. The prompt's
+// count arrives on the first event and the closing event omits it, so taking the
+// last usage seen would report a prompt of nothing and blind the overflow check.
+func TestAStreamedTextReplyCompletes(t *testing.T) {
+	got := completed(t, eventStream(textBlock("0", "hello there"), "end_turn", `{"output_tokens":15}`))
+
+	if got.StopReason != ai.StopEnd {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+	if len(got.Blocks) != 1 || got.Blocks[0].Kind != ai.BlockText || got.Blocks[0].Text != "hello there" {
+		t.Fatalf("blocks: %+v", got.Blocks)
+	}
+	if !got.Usage.Reported || got.Usage.InputTokens != 25 || got.Usage.OutputTokens != 15 {
+		t.Fatalf("usage: %+v", got.Usage)
+	}
+	if got.Usage.CacheReadTokens == nil || *got.Usage.CacheReadTokens != 5 {
+		t.Fatalf("the cached count was lost: %+v", got.Usage)
+	}
+}
+
+// TestAStreamedToolCallCompletes, its fragments rejoined under the call they
+// belong to and each call under its own id.
+func TestAStreamedToolCallCompletes(t *testing.T) {
+	content := textBlock("0", "reading")
+	content = append(content, toolBlock("1", "toolu_a", "read", `{"path":`, `"a"}`)...)
+	content = append(content, toolBlock("2", "toolu_b", "read", `{"path":"b"}`)...)
+
+	got := completed(t, eventStream(content, "tool_use", `{"output_tokens":30}`))
+
+	if got.StopReason != ai.StopToolUse {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+	calls := toolCalls(got)
+	if len(calls) != 2 {
+		t.Fatalf("got %d tool calls: %+v", len(calls), got.Blocks)
+	}
+	want := []ai.ToolCall{
+		{ID: "toolu_a", Name: "read", Args: `{"path":"a"}`},
+		{ID: "toolu_b", Name: "read", Args: `{"path":"b"}`},
+	}
+	for at := range want {
+		if calls[at] != want[at] {
+			t.Fatalf("call %d: got %+v, want %+v", at, calls[at], want[at])
+		}
+	}
+	if got.Usage.InputTokens != 25 || got.Usage.OutputTokens != 30 {
+		t.Fatalf("usage: %+v", got.Usage)
+	}
+}
+
+// TestACallWithNoArgumentsIsAnEmptyObject. The adapter blanks the empty input
+// this provider opens every call with, and a tool cannot parse an empty string.
+func TestACallWithNoArgumentsIsAnEmptyObject(t *testing.T) {
+	content := toolBlock("0", "toolu_a", "ls")
+	content = append(content, toolBlock("1", "toolu_b", "read", "")...)
+	content = append(content, toolBlock("2", "toolu_c", "read", `{"path":"c"}`)...)
+
+	calls := toolCalls(completed(t, eventStream(content, "tool_use", `{"output_tokens":9}`)))
+
+	if len(calls) != 3 {
+		t.Fatalf("got %d tool calls: %+v", len(calls), calls)
+	}
+	for at, want := range []string{"{}", "{}", `{"path":"c"}`} {
+		if calls[at].Args != want {
+			t.Fatalf("call %d carries %q, want %q", at, calls[at].Args, want)
+		}
+	}
+}
+
+// TestACutOffCallIsNotGivenArguments. A call the output cap interrupted may have
+// been about to receive its arguments, so calling them empty would be a guess.
+func TestACutOffCallIsNotGivenArguments(t *testing.T) {
+	got := completed(t, eventStream(toolBlock("0", "toolu_a", "read"), "max_tokens", `{"output_tokens":64}`))
+
+	if got.StopReason != ai.StopLength {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+	if calls := toolCalls(got); len(calls) != 1 || calls[0].Args != "" {
+		t.Fatalf("got %+v", calls)
+	}
+}
+
+// TestHowEachOfThisProvidersEndingsIsReported.
+func TestHowEachOfThisProvidersEndingsIsReported(t *testing.T) {
+	for _, tc := range []struct {
+		stop string
+		want ai.StopReason
+	}{
+		{"end_turn", ai.StopEnd},
+		{"stop_sequence", ai.StopEnd},
+		{"tool_use", ai.StopToolUse},
+		{"max_tokens", ai.StopLength},
+		{"model_context_window_exceeded", ai.StopLength},
+	} {
+		got := completed(t, eventStream(textBlock("0", "hi"), tc.stop, `{"output_tokens":2}`))
+		if got.StopReason != tc.want {
+			t.Errorf("%s stopped with %q, want %q", tc.stop, got.StopReason, tc.want)
+		}
+	}
+}
+
+// TestADeclinedReplyIsARefusal, not a finished one, and keeps what had arrived.
+func TestADeclinedReplyIsARefusal(t *testing.T) {
+	for _, stop := range []string{"refusal", "sensitive"} {
+		last := streamed(t, eventStream(textBlock("0", "partial"), stop, `{"output_tokens":2}`))
+		if last.Kind != ai.StreamError {
+			t.Fatalf("%s ended with %q", stop, last.Kind)
+		}
+		if got := failureOf(t, last.Final.Cause); got != ai.FailureRefused {
+			t.Errorf("%s classified as %q", stop, got)
+		}
+		if len(last.Final.Blocks) != 1 || last.Final.Blocks[0].Text != "partial" {
+			t.Errorf("%s lost what had arrived: %+v", stop, last.Final.Blocks)
+		}
+	}
+}
+
+// TestAnEndingThatIsNotAnAnswerFails. A paused turn expects to be sent back, so
+// reporting it as finished would hand over a partial answer as the last word, and
+// an ending nobody has seen before says nothing about whether the reply is whole.
+func TestAnEndingThatIsNotAnAnswerFails(t *testing.T) {
+	for _, stop := range []string{"pause_turn", "an_ending_from_the_future"} {
+		last := streamed(t, eventStream(textBlock("0", "partial"), stop, `{"output_tokens":2}`))
+		if last.Kind != ai.StreamError {
+			t.Fatalf("%s ended with %q", stop, last.Kind)
+		}
+		if !strings.Contains(last.Final.ErrorMessage, stop) {
+			t.Errorf("%s was not named: %s", stop, last.Final.ErrorMessage)
+		}
+	}
+}
+
+// TestAStreamCutOffBeforeItsEndingIsNotComplete.
+func TestAStreamCutOffBeforeItsEndingIsNotComplete(t *testing.T) {
+	reply := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(event("message_start",
+			`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant",`+
+				`"model":"claude-test","content":[],"usage":{"input_tokens":25,"output_tokens":1}}}`) +
+			strings.Join(textBlock("0", "partial"), ""))),
+	}
+	if last := streamed(t, reply); last.Kind != ai.StreamError {
+		t.Fatalf("a truncated reply ended with %q", last.Kind)
+	}
+}

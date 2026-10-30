@@ -249,3 +249,230 @@ func TestTheBackendIsNotChosenByTheEnvironment(t *testing.T) {
 		t.Fatalf("an environment variable redirected the call to %s", got)
 	}
 }
+
+// eventStream is a streamed reply as this provider frames it: one complete
+// response per event, with the ending and final counts on the last.
+func eventStream(responses ...string) *http.Response {
+	var body strings.Builder
+	for _, response := range responses {
+		body.WriteString("data: " + response + "\r\n\r\n")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+	}
+}
+
+func textChunk(text string) string {
+	return `{"candidates":[{"content":{"role":"model","parts":[{"text":"` + text + `"}]}}],` +
+		`"usageMetadata":{"promptTokenCount":12,"totalTokenCount":12}}`
+}
+
+func callPart(name, args string) string {
+	return `{"functionCall":{"name":"` + name + `","args":` + args + `}}`
+}
+
+func callChunk(parts ...string) string {
+	return `{"candidates":[{"content":{"role":"model","parts":[` + strings.Join(parts, ",") + `]}}]}`
+}
+
+func endChunk(reason string) string {
+	return `{"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"` + reason + `"}],` +
+		`"usageMetadata":{"promptTokenCount":12,"cachedContentTokenCount":4,` +
+		`"candidatesTokenCount":7,"thoughtsTokenCount":2,"totalTokenCount":21}}`
+}
+
+// streamed drains a reply down to its last event. Tools are bound, because the
+// calls these tests are about only happen on a model that has them.
+func streamed(t *testing.T, p *gemini.Port) ai.StreamEvent {
+	t.Helper()
+	events, err := p.Stream(context.Background(), ai.Request{
+		Model:    "gemini-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+		Tools:    []ai.ToolSpec{{Name: "read", Description: "reads a file"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var last ai.StreamEvent
+	for ev := range events {
+		last = ev
+	}
+	if last.Final == nil {
+		t.Fatalf("the stream ended with %q and no message", last.Kind)
+	}
+	return last
+}
+
+func replay(t *testing.T, replies ...*http.Response) *gemini.Port {
+	t.Helper()
+	return newPort(t, &recordedTransport{responses: replies})
+}
+
+func completed(t *testing.T, reply *http.Response) ai.AssistantMessage {
+	t.Helper()
+	last := streamed(t, replay(t, reply))
+	if last.Kind != ai.StreamDone {
+		t.Fatalf("the stream ended with %q: %s", last.Kind, last.Final.ErrorMessage)
+	}
+	return *last.Final
+}
+
+func toolCalls(m ai.AssistantMessage) []ai.ToolCall {
+	var calls []ai.ToolCall
+	for _, b := range m.Blocks {
+		if b.Kind == ai.BlockToolCall {
+			calls = append(calls, b.Call)
+		}
+	}
+	return calls
+}
+
+// TestAStreamedTextReplyCompletes with the counts of its last response.
+func TestAStreamedTextReplyCompletes(t *testing.T) {
+	got := completed(t, eventStream(textChunk("hello "), textChunk("there"), endChunk("STOP")))
+
+	if got.StopReason != ai.StopEnd {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+	if len(got.Blocks) != 1 || got.Blocks[0].Kind != ai.BlockText || got.Blocks[0].Text != "hello there" {
+		t.Fatalf("blocks: %+v", got.Blocks)
+	}
+	// The prompt count includes the cached part and the output count the thoughts.
+	if !got.Usage.Reported || got.Usage.InputTokens != 8 || got.Usage.OutputTokens != 9 {
+		t.Fatalf("usage: %+v", got.Usage)
+	}
+	if got.Usage.CacheReadTokens == nil || *got.Usage.CacheReadTokens != 4 {
+		t.Fatalf("the cached count was lost: %+v", got.Usage)
+	}
+	if got.Usage.ReasoningTokens == nil || *got.Usage.ReasoningTokens != 2 {
+		t.Fatalf("the thoughts count was lost: %+v", got.Usage)
+	}
+}
+
+// TestAStreamedToolCallCompletes. This provider gives a call no position and says
+// STOP even when the model asked for a tool, and the loop needs both.
+func TestAStreamedToolCallCompletes(t *testing.T) {
+	got := completed(t, eventStream(
+		textChunk("reading"),
+		callChunk(callPart("read", `{"path":"a"}`), callPart("read", `{"path":"b"}`)),
+		callChunk(callPart("ls", `{"path":"c"}`)),
+		endChunk("STOP")))
+
+	if got.StopReason != ai.StopToolUse {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+	calls := toolCalls(got)
+	if len(calls) != 3 {
+		t.Fatalf("got %d tool calls: %+v", len(calls), got.Blocks)
+	}
+	seen := map[string]bool{}
+	for at, want := range []ai.ToolCall{
+		{Name: "read", Args: `{"path":"a"}`},
+		{Name: "read", Args: `{"path":"b"}`},
+		{Name: "ls", Args: `{"path":"c"}`},
+	} {
+		if calls[at].Name != want.Name || calls[at].Args != want.Args {
+			t.Fatalf("call %d: got %+v, want %+v", at, calls[at], want)
+		}
+		if calls[at].ID == "" || seen[calls[at].ID] {
+			t.Fatalf("call %d has no id of its own: %+v", at, calls)
+		}
+		seen[calls[at].ID] = true
+	}
+	if !got.Usage.Reported || got.Usage.OutputTokens != 9 {
+		t.Fatalf("usage: %+v", got.Usage)
+	}
+}
+
+// TestAToolCallSharingTheLastResponseCounts. The call and the ending often arrive
+// together, and the ending must be read with that call already counted.
+func TestAToolCallSharingTheLastResponseCounts(t *testing.T) {
+	got := completed(t, eventStream(`{"candidates":[{"content":{"role":"model","parts":[`+
+		callPart("read", `{"path":"a"}`)+`]},"finishReason":"STOP"}]}`))
+
+	if got.StopReason != ai.StopToolUse || len(toolCalls(got)) != 1 {
+		t.Fatalf("stopped with %q: %+v", got.StopReason, got.Blocks)
+	}
+}
+
+// TestACallWithNoArgumentsIsAnEmptyObject, not the JSON null the conversion
+// produces: a tool's arguments are an object, and null fails its schema.
+func TestACallWithNoArgumentsIsAnEmptyObject(t *testing.T) {
+	calls := toolCalls(completed(t, eventStream(
+		callChunk(`{"functionCall":{"name":"ls"}}`), endChunk("STOP"))))
+
+	if len(calls) != 1 || calls[0].Args != "{}" {
+		t.Fatalf("got %+v", calls)
+	}
+}
+
+// TestALengthCutoffIsNotReportedAsToolUse. A reply cut short by the output cap
+// has to say so, even with a complete call in it.
+func TestALengthCutoffIsNotReportedAsToolUse(t *testing.T) {
+	got := completed(t, eventStream(callChunk(callPart("read", `{"path":"a"}`)), endChunk("MAX_TOKENS")))
+
+	if got.StopReason != ai.StopLength {
+		t.Fatalf("stopped with %q", got.StopReason)
+	}
+}
+
+// TestEveryFilterEndingIsARefusal, not a finished reply, and keeps what arrived.
+func TestEveryFilterEndingIsARefusal(t *testing.T) {
+	for _, reason := range []string{
+		"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION",
+	} {
+		last := streamed(t, replay(t, eventStream(textChunk("partial"), endChunk(reason))))
+		if last.Kind != ai.StreamError {
+			t.Fatalf("%s ended with %q", reason, last.Kind)
+		}
+		got, ok := ai.FailureOf(last.Final.Cause)
+		if !ok || got != ai.FailureRefused {
+			t.Errorf("%s classified as %q", reason, got)
+		}
+		if len(last.Final.Blocks) != 1 || last.Final.Blocks[0].Text != "partial" {
+			t.Errorf("%s lost what had arrived: %+v", reason, last.Final.Blocks)
+		}
+	}
+}
+
+// TestAnEndingThatIsNotAnAnswerFails, naming itself. These are the provider's
+// failures rather than its filters, or endings nobody here has seen, and none of
+// them says the reply is whole. A malformed call stays a failure even after a call
+// that was fine, since the ending must not be rewritten just because one arrived.
+func TestAnEndingThatIsNotAnAnswerFails(t *testing.T) {
+	for _, reason := range []string{
+		"FINISH_REASON_UNSPECIFIED", "OTHER", "LANGUAGE", "MALFORMED_FUNCTION_CALL",
+		"UNEXPECTED_TOOL_CALL", "NO_IMAGE", "AN_ENDING_FROM_THE_FUTURE",
+	} {
+		last := streamed(t, replay(t, eventStream(
+			callChunk(callPart("read", `{"path":"a"}`)), endChunk(reason))))
+		if last.Kind != ai.StreamError {
+			t.Fatalf("%s ended with %q", reason, last.Kind)
+		}
+		if !strings.Contains(last.Final.ErrorMessage, reason) {
+			t.Errorf("%s was not named: %s", reason, last.Final.ErrorMessage)
+		}
+	}
+}
+
+// TestAStreamThatNeverFinishesIsNotComplete. Taking the ending from the framework
+// must not turn a dropped connection into a finished reply.
+func TestAStreamThatNeverFinishesIsNotComplete(t *testing.T) {
+	last := streamed(t, replay(t, eventStream(textChunk("partial"))))
+	if last.Kind != ai.StreamError {
+		t.Fatalf("a truncated reply ended with %q", last.Kind)
+	}
+}
+
+// TestABlockedPromptIsNotComplete. A blocked prompt has no candidates and so no
+// ending at all, and the adapter reports it as an error.
+func TestABlockedPromptIsNotComplete(t *testing.T) {
+	last := streamed(t, replay(t, eventStream(
+		`{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":12,"totalTokenCount":12}}`)))
+	if last.Kind != ai.StreamError {
+		t.Fatalf("a blocked prompt ended with %q", last.Kind)
+	}
+}

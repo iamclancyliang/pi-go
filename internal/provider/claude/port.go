@@ -105,11 +105,12 @@ func New(cfg Config) (*Port, error) {
 
 // newModel builds this provider's adapter for one call.
 func newModel(ctx context.Context, req cc.ModelRequest) (model.ToolCallingChatModel, error) {
+	gate := newBodyGate()
 	config := &einoclaude.Config{
 		APIKey:     req.APIKey,
 		Model:      req.Model,
 		MaxTokens:  req.MaxOutputTokens,
-		HTTPClient: req.HTTPClient,
+		HTTPClient: gate.client(req.HTTPClient),
 	}
 	if req.BaseURL != "" {
 		// A pointer, so "not overridden" and "overridden to empty" stay
@@ -118,7 +119,11 @@ func newModel(ctx context.Context, req cc.ModelRequest) (model.ToolCallingChatMo
 		base := req.BaseURL
 		config.BaseURL = &base
 	}
-	return einoclaude.NewChatModel(ctx, config)
+	chat, err := einoclaude.NewChatModel(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	return translatedModel{chat, gate}, nil
 }
 
 // scrub removes the credential from text about to become an error.

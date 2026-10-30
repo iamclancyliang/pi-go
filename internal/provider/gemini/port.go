@@ -104,11 +104,15 @@ func newModel(ctx context.Context, req cc.ModelRequest) (model.ToolCallingChatMo
 		return nil, err
 	}
 	maxTokens := req.MaxOutputTokens
-	return einogemini.NewChatModel(ctx, &einogemini.Config{
+	chat, err := einogemini.NewChatModel(ctx, &einogemini.Config{
 		Client:    client,
 		Model:     req.Model,
 		MaxTokens: &maxTokens,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return translatedModel{chat}, nil
 }
 
 // scrub removes the credential from text about to become an error.
