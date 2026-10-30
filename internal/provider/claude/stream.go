@@ -40,8 +40,41 @@ func (m translatedModel) Stream(ctx context.Context, input []*schema.Message,
 	if err != nil {
 		return nil, err
 	}
-	reply := replyState{hasArgs: map[int]bool{}}
-	return schema.StreamReaderWithConvert(reader, reply.translate), nil
+	return translateStream(reader), nil
+}
+
+// translateStream can emit an argument fragment before the next content chunk.
+// Text and thinking close earlier tool blocks in the shared loop, so completing
+// an empty call in that same chunk would already be too late.
+func translateStream(reader *schema.StreamReader[*schema.Message]) *schema.StreamReader[*schema.Message] {
+	out, writer := schema.Pipe[*schema.Message](0)
+	go func() {
+		defer writer.Close()
+		defer reader.Close()
+		reply := replyState{hasArgs: map[int]bool{}}
+		for {
+			chunk, err := reader.Recv()
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				writer.Send(chunk, err)
+				return
+			}
+			if chunk.Content != "" || chunk.ReasoningContent != "" {
+				if calls := reply.emptyArguments(); len(calls) > 0 {
+					if writer.Send(&schema.Message{ToolCalls: calls}, nil) {
+						return
+					}
+				}
+			}
+			translated, err := reply.translate(chunk)
+			if writer.Send(translated, err) || err != nil {
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // dialectEnding says one of this provider's stop reasons in the shared loop's
@@ -109,9 +142,9 @@ func (r *replyState) translate(chunk *schema.Message) (*schema.Message, error) {
 //
 // The adapter blanks the empty input this provider opens every call with, so a
 // call to a tool taking no arguments ends up with an empty string, which no tool
-// can parse. It can only be told apart once the reply has ended: until then more
-// fragments may come, and a reply cut off by a limit may have been about to send
-// them, which is why this waits for a reply that says it finished by calling tools.
+// can parse. A following text or thinking block proves that call has ended;
+// otherwise completion waits for the tool_use ending. A call cut off by a limit
+// with no later content keeps its missing arguments, since more may have followed.
 func (r *replyState) emptyArguments() []schema.ToolCall {
 	var calls []schema.ToolCall
 	for _, at := range r.calls {
@@ -123,6 +156,7 @@ func (r *replyState) emptyArguments() []schema.ToolCall {
 			Index:    &index,
 			Function: schema.FunctionCall{Arguments: "{}"},
 		})
+		r.hasArgs[at] = true
 	}
 	return calls
 }

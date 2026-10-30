@@ -545,3 +545,32 @@ func TestAStreamCutOffBeforeItsEndingIsNotComplete(t *testing.T) {
 		t.Fatalf("a truncated reply ended with %q", last.Kind)
 	}
 }
+
+func TestAnEmptyCallBeforeLaterContentCompletes(t *testing.T) {
+	for _, kind := range []string{"text", "thinking"} {
+		t.Run(kind, func(t *testing.T) {
+			content := toolBlock("0", "toolu_a", "ls")
+			if kind == "text" {
+				content = append(content, textBlock("1", "done")...)
+			} else {
+				content = append(content,
+					event("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"","signature":""}}`),
+					event("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"done"}}`),
+					event("content_block_stop", `{"type":"content_block_stop","index":1}`))
+			}
+			content = append(content, toolBlock("2", "toolu_b", "read", `{"path":"b"}`)...)
+			got := completed(t, eventStream(content, "tool_use", `{"output_tokens":9}`))
+			calls := toolCalls(got)
+			if got.StopReason != ai.StopToolUse || len(calls) != 2 || calls[0].Args != "{}" || calls[1].Args != `{"path":"b"}` {
+				t.Fatalf("calls: %+v, stop: %s", calls, got.StopReason)
+			}
+			wantKind := ai.BlockText
+			if kind == "thinking" {
+				wantKind = ai.BlockThinking
+			}
+			if len(got.Blocks) != 3 || got.Blocks[1].Kind != wantKind || got.Blocks[1].Text != "done" {
+				t.Fatalf("blocks: %+v", got.Blocks)
+			}
+		})
+	}
+}

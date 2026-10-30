@@ -401,3 +401,13 @@ func TestAStreamThatNeverFinishesIsNotReportedAsComplete(t *testing.T) {
 		t.Fatalf("placeholder zeroes were reported as counts: %+v", last.Final.Usage)
 	}
 }
+
+func TestATerminalZeroUsageIsReported(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{ndjson(
+		`{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":0,"eval_count":0}`)}}
+
+	got := final(t, newPort(t, tr))
+	if !got.Usage.Reported || got.Usage.InputTokens != 0 || got.Usage.OutputTokens != 0 {
+		t.Fatalf("explicit zero counts were lost: %+v", got.Usage)
+	}
+}

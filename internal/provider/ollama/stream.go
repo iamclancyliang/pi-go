@@ -85,8 +85,9 @@ func (r *replyAddress) address(chunk *schema.Message) (*schema.Message, error) {
 		}
 		// The conversion attaches a usage object to every chunk, and only the
 		// last one has counts in it. A stream cut off before then has reported
-		// nothing, which is not the same as having consumed nothing.
-		if used := meta.Usage; used != nil && used.PromptTokens == 0 && used.CompletionTokens == 0 {
+		// nothing, which is not the same as having consumed nothing. A terminal
+		// report of zero is still a report and must survive.
+		if used := meta.Usage; meta.FinishReason == "" && used != nil && used.PromptTokens == 0 && used.CompletionTokens == 0 {
 			meta.Usage = nil
 		}
 		out.ResponseMeta = &meta
