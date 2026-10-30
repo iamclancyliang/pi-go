@@ -229,3 +229,175 @@ func TestAnOrdinaryFaultIsNotMistakenForOverflow(t *testing.T) {
 		t.Fatalf("a crashed runner was reported as an overflow: %v", err)
 	}
 }
+
+// ndjson is a streamed reply as Ollama sends it: one JSON object per line, with
+// no event framing around it.
+func ndjson(lines ...string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/x-ndjson"}},
+		Body:       io.NopCloser(strings.NewReader(strings.Join(lines, "\n") + "\n")),
+	}
+}
+
+const finished = `{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":7,"eval_count":3}`
+
+func toolCallLine(name, args string) string {
+	return `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"index":0,"name":"` +
+		name + `","arguments":` + args + `}}]},"done":false}`
+}
+
+// final drains a stream down to the message it finished with.
+func final(t *testing.T, p *ollama.Port) ai.AssistantMessage {
+	t.Helper()
+	events, err := p.Stream(context.Background(), ai.Request{
+		Model:    "llama-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var last ai.StreamEvent
+	for ev := range events {
+		last = ev
+	}
+	if last.Kind != ai.StreamDone || last.Final == nil {
+		t.Fatalf("the stream ended with %q: %+v", last.Kind, last.Final)
+	}
+	return *last.Final
+}
+
+func toolCalls(m ai.AssistantMessage) []ai.ToolCall {
+	var calls []ai.ToolCall
+	for _, b := range m.Blocks {
+		if b.Kind == ai.BlockToolCall {
+			calls = append(calls, b.Call)
+		}
+	}
+	return calls
+}
+
+// TestAToolCallArrivesAsACompleteBlock. Ollama's reply gives a call no position
+// and no id, and says "stop" even when the model asked for a tool; all three
+// are what the rest of this repository needs in order to run the call and pair
+// its result.
+func TestAToolCallArrivesAsACompleteBlock(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{ndjson(
+		toolCallLine("read", `{"path":"README.md"}`), finished)}}
+
+	got := final(t, newPort(t, tr))
+
+	calls := toolCalls(got)
+	if len(calls) != 1 {
+		t.Fatalf("got %d tool calls: %+v", len(calls), got.Blocks)
+	}
+	if calls[0].Name != "read" || calls[0].Args != `{"path":"README.md"}` {
+		t.Fatalf("the call did not survive: %+v", calls[0])
+	}
+	if calls[0].ID == "" {
+		t.Fatal("the call has no id for its result to pair with")
+	}
+	if got.StopReason != ai.StopToolUse {
+		t.Fatalf("a reply calling a tool stopped with %q", got.StopReason)
+	}
+	if !got.Usage.Reported || got.Usage.InputTokens != 7 || got.Usage.OutputTokens != 3 {
+		t.Fatalf("the reply's counts were lost: %+v", got.Usage)
+	}
+}
+
+// TestSeparateCallsStaySeparate, whether they share a chunk or not. A shared
+// position would append one call's arguments to another's, and a shared id
+// would pair a result with the wrong call — including a call from an earlier
+// reply, since the ids live on in the conversation.
+func TestSeparateCallsStaySeparate(t *testing.T) {
+	sameChunk := `{"message":{"role":"assistant","content":"","tool_calls":[` +
+		`{"function":{"index":0,"name":"read","arguments":{"path":"a"}}},` +
+		`{"function":{"index":1,"name":"read","arguments":{"path":"b"}}}]},"done":false}`
+	reply := func() *http.Response {
+		return ndjson(sameChunk, toolCallLine("ls", `{"path":"c"}`), finished)
+	}
+	tr := &recordedTransport{responses: []*http.Response{reply(), reply()}}
+	p := newPort(t, tr)
+
+	first, second := toolCalls(final(t, p)), toolCalls(final(t, p))
+
+	if len(first) != 3 {
+		t.Fatalf("got %d tool calls: %+v", len(first), first)
+	}
+	for at, want := range []string{`{"path":"a"}`, `{"path":"b"}`, `{"path":"c"}`} {
+		if first[at].Args != want {
+			t.Fatalf("call %d carries %q, want %q", at, first[at].Args, want)
+		}
+	}
+	seen := map[string]bool{}
+	for _, call := range append(first, second...) {
+		if seen[call.ID] {
+			t.Fatalf("id %q was used twice", call.ID)
+		}
+		seen[call.ID] = true
+	}
+}
+
+// TestACallWithNoArgumentsIsAnEmptyObject, not the JSON null the conversion
+// produces: a tool's arguments are an object, and null fails its schema.
+func TestACallWithNoArgumentsIsAnEmptyObject(t *testing.T) {
+	line := `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"ls"}}]},"done":false}`
+	tr := &recordedTransport{responses: []*http.Response{ndjson(line, finished)}}
+
+	calls := toolCalls(final(t, newPort(t, tr)))
+	if len(calls) != 1 || calls[0].Args != "{}" {
+		t.Fatalf("got %+v", calls)
+	}
+}
+
+// TestAPlainReplyEndsAsTheServerSaid. The finish reason is only rewritten for a
+// reply that called a tool; a reply that did not must still read as finished.
+func TestAPlainReplyEndsAsTheServerSaid(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{ndjson(
+		`{"message":{"role":"assistant","content":"hi"},"done":false}`, finished)}}
+
+	got := final(t, newPort(t, tr))
+	if got.StopReason != ai.StopEnd {
+		t.Fatalf("a plain reply stopped with %q", got.StopReason)
+	}
+	if len(toolCalls(got)) != 0 {
+		t.Fatalf("a plain reply gained tool calls: %+v", got.Blocks)
+	}
+}
+
+// TestALengthCutoffIsNotReportedAsToolUse. A reply cut short by the output cap
+// has to say so, even with a complete call in it.
+func TestALengthCutoffIsNotReportedAsToolUse(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{ndjson(
+		toolCallLine("read", `{"path":"a"}`),
+		`{"message":{"role":"assistant","content":""},"done":true,"done_reason":"length"}`)}}
+
+	if got := final(t, newPort(t, tr)); got.StopReason != ai.StopLength {
+		t.Fatalf("a cut-off reply stopped with %q", got.StopReason)
+	}
+}
+
+// TestAStreamThatNeverFinishesIsNotReportedAsComplete. Taking the ending from
+// the framework must not turn a dropped connection into a finished reply.
+func TestAStreamThatNeverFinishesIsNotReportedAsComplete(t *testing.T) {
+	tr := &recordedTransport{responses: []*http.Response{ndjson(
+		`{"message":{"role":"assistant","content":"partial"},"done":false}`)}}
+
+	events, err := newPort(t, tr).Stream(context.Background(), ai.Request{
+		Model:    "llama-test",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var last ai.StreamEvent
+	for ev := range events {
+		last = ev
+	}
+	if last.Kind == ai.StreamDone {
+		t.Fatalf("a truncated reply was reported as complete: %+v", last.Final)
+	}
+	if last.Final != nil && last.Final.Usage.Reported {
+		t.Fatalf("placeholder zeroes were reported as counts: %+v", last.Final.Usage)
+	}
+}

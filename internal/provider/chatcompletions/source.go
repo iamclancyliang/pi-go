@@ -37,6 +37,11 @@ type Source interface {
 	// bytes can.
 	Usage(meta *schema.TokenUsage) ai.Usage
 
+	// FinishReason is how the provider says the reply ended, or "" when it did
+	// not say. The framework's own value is passed in, as it is for Usage, for a
+	// port that has nothing better to read.
+	FinishReason(meta string) string
+
 	// ServedModel is the model the provider says answered, or "" when the port
 	// cannot see it. Not the model requested: providers substitute, and a reply
 	// that does not say which model produced it is one nobody can attribute.
@@ -103,6 +108,19 @@ func (m MetaSource) Usage(meta *schema.TokenUsage) ai.Usage {
 	return counts.Usage()
 }
 
+// FinishReason prefers what the capture read, because a port may be off this
+// wire and still send chunks it can parse. Otherwise it is the framework's value,
+// in whatever words the provider used: a port whose words differ from this
+// dialect's has to translate them for the ending to be recognised.
+func (m MetaSource) FinishReason(meta string) string {
+	if m.Capture != nil {
+		if said := m.Capture.Last().FinishReason; said != "" {
+			return said
+		}
+	}
+	return meta
+}
+
 // ServedModel is unavailable without the wire.
 func (MetaSource) ServedModel() string { return "" }
 
@@ -122,6 +140,10 @@ func (w wireSource) Usage(*schema.TokenUsage) ai.Usage {
 	// per-field presence intact, which is strictly more.
 	return UsageOf(w.capture.Last())
 }
+
+// FinishReason ignores the framework's value. The adapter's is a reinterpretation,
+// and a stream that never reported an ending must not gain one from it.
+func (w wireSource) FinishReason(string) string { return w.capture.Last().FinishReason }
 
 func (w wireSource) ServedModel() string { return w.capture.Last().Model }
 

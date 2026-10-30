@@ -113,6 +113,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	// wire still has counts to report. Updated as chunks arrive, because the
 	// usage lands on one of them.
 	var metaUsage *schema.TokenUsage
+	var metaFinish string
 
 	// Seeded empty: the model that served a reply comes from the reply. Seeding
 	// it with the configured name would report a model nobody confirmed, and a
@@ -224,6 +225,9 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 			// Kept as it arrives: the usage lands on one chunk, and a port
 			// without the wire has nowhere else to read it from.
 			metaUsage = chunk.ResponseMeta.Usage
+		}
+		if chunk != nil && chunk.ResponseMeta != nil && chunk.ResponseMeta.FinishReason != "" {
+			metaFinish = chunk.ResponseMeta.FinishReason
 		}
 		if errors.Is(err, io.EOF) {
 			break
@@ -357,22 +361,28 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 	}
 
 	// The ending comes from what the provider said, captured before the adapter
-	// reinterpreted it.
+	// reinterpreted it — or, for a port that cannot read those bytes, from what
+	// the framework carried. The source decides, so a provider on this wire that
+	// never said why it stopped is still reported as not having said.
 	final := held.Capture.Last()
-	reason, endErr := p.endingFrom(final.FinishReason, final.ErrorCode)
+	reason, endErr := p.endingFrom(src.FinishReason(metaFinish), final.ErrorCode)
 	if endErr != nil {
 		abort(endErr)
 		return
 	}
 	// Checked before the reply is completed: the accumulator has one ending, and
 	// a reply already declared finished cannot then be reported as a failure.
-	if f := p.overflow(reason, UsageOf(final)); f != nil {
+	used := UsageOf(final)
+	if !used.Reported {
+		used = src.Usage(metaUsage)
+	}
+	if f := p.overflow(reason, used); f != nil {
 		ev, accErr := acc.Fail(ai.StopError, f)
 		if accErr != nil {
 			return
 		}
 		if ev.Final != nil {
-			ev.Final.Usage = UsageOf(final)
+			ev.Final.Usage = used
 			if final.Model != "" {
 				ev.Final.Model = final.Model
 			}
@@ -380,7 +390,7 @@ func (p *Port) pump(ctx context.Context, reader *schema.StreamReader[*schema.Mes
 		sendTerminal(ev)
 		return
 	}
-	done, err := acc.Done(reason, UsageOf(final))
+	done, err := acc.Done(reason, used)
 	if err != nil {
 		abort(err)
 		return

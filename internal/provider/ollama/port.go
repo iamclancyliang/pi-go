@@ -198,7 +198,11 @@ func newModel(cfg Config) func(context.Context, cc.ModelRequest) (model.ToolCall
 			keepAlive := cfg.KeepAlive
 			chatConfig.KeepAlive = &keepAlive
 		}
-		return einoollama.NewChatModel(ctx, chatConfig)
+		chat, err := einoollama.NewChatModel(ctx, chatConfig)
+		if err != nil {
+			return nil, err
+		}
+		return addressedModel{chat}, nil
 	}
 }
 
