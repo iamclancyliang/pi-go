@@ -330,6 +330,18 @@ func (r *Run) Steer(text string) error {
 	return nil
 }
 
+// midTurn reports that the model still owes an answer: the conversation ends
+// with a tool result, as it does after a tool round that something interrupted.
+func (a *Agent) midTurn() bool {
+	truth := a.cfg.Session.Truth()
+	return len(truth) > 0 && truth[len(truth)-1].Role == ai.RoleTool
+}
+
+// Withdraw takes back the steering and follow-up messages still queued and
+// returns their texts, steering first, each in the order it was queued. A
+// message the model has already been handed is not among them.
+func (r *Run) Withdraw() []string { return r.agent.queues.withdraw() }
+
 // Wait settles the run and emits agent_end.
 func (r *Run) Wait() error {
 	// eino's TurnLoop is long-running: it waits for more input rather than
@@ -460,10 +472,13 @@ func (a *Agent) buildLoop(ctx context.Context) (*adk.TurnLoop[*schema.Message, *
 			// What this drain point takes, by queue and mode; the rest is
 			// handed back to stay queued.
 			items, remaining := a.queues.split(items)
-			if len(items) == 0 {
+			if len(items) == 0 && !a.midTurn() {
 				// Nothing buffered: the conversation is done for
 				// now. Stopping here is what makes Run return
-				// rather than idling.
+				// rather than idling. Mid-turn — a steer interrupted
+				// the tool round and was then withdrawn — the model
+				// still owes an answer, and the turn goes on without
+				// new input.
 				l.Stop()
 				return nil, nil
 			}

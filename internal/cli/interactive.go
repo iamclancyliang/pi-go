@@ -43,6 +43,10 @@ type interactiveSession struct {
 	// interface watching the run keeps watching across rebuilds.
 	observers []events.Observer
 	replies   []runtime.ReplyObserver
+
+	// reloadKeys re-reads the user's key file, where there is an interface
+	// with keys to rebind.
+	reloadKeys func() error
 }
 
 func newInteractiveSession(ctx context.Context, rt Runtime, streams Streams,
@@ -93,6 +97,11 @@ func newInteractiveSession(ctx context.Context, rt Runtime, streams Streams,
 			resolved.Effective.ShellCommandPrefix != builtFrom.ShellCommandPrefix ||
 			resolved.Effective.SessionDir != builtFrom.SessionDir
 		s.config = resolved
+		if s.reloadKeys != nil {
+			if err := s.reloadKeys(); err != nil {
+				return changed, err
+			}
+		}
 		return changed, nil
 	}
 	s.ctxt.compact = func(instructions string) error {

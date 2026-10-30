@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"sort"
 	"strings"
@@ -39,8 +40,27 @@ func RunFullScreen(ctx context.Context, rt Runtime, streams Streams, term tui.Te
 	defer s.close()
 
 	home, _ := os.UserHomeDir()
-	env := interactive.NewEnv(interactive.DarkTheme(tui.Capabilities().TrueColor),
-		interactive.NewKeybindings(goruntime.GOOS, nil), rt.WorkingDir, home)
+	// The user's keys, from the agent directory. A file that cannot be read is
+	// said rather than silently left: the defaults in its place would be read
+	// as the file having no effect.
+	keysPath := filepath.Join(s.config.AgentDir, interactive.KeybindingsFileName)
+	userKeys, err := interactive.LoadKeybindingsFile(keysPath)
+	if err != nil {
+		fmt.Fprintf(streams.Err, "pi: warning: %v; using the default keys\n", err)
+	}
+	keys := interactive.NewKeybindings(goruntime.GOOS, userKeys)
+	for _, c := range keys.Conflicts() {
+		fmt.Fprintf(streams.Err, "pi: warning: %s is bound to both %s\n", c.Key, strings.Join(c.Actions, " and "))
+	}
+	s.reloadKeys = func() error {
+		user, err := interactive.LoadKeybindingsFile(keysPath)
+		if err != nil {
+			return err
+		}
+		keys.SetUser(user)
+		return nil
+	}
+	env := interactive.NewEnv(interactive.DarkTheme(tui.Capabilities().TrueColor), keys, rt.WorkingDir, home)
 	ui := tui.NewUI(term)
 	effective := s.config.Effective
 	ui.SetShowHardwareCursor(ShowHardwareCursor(effective, os.Getenv))

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -377,6 +378,20 @@ func (h *fullScreenHost) BranchSummarySkipPrompt() bool {
 }
 
 func (h *fullScreenHost) CopyToClipboard(text string) error { return copyToClipboard(text) }
+
+func (h *fullScreenHost) ReadClipboard() (string, error) { return readClipboard() }
+
+func (h *fullScreenHost) LastAssistantText() (string, bool) {
+	current, _, _, _, _ := h.s.snapshot()
+	return lastAnswer(current.Session)
+}
+
+// EditExternally opens the user's editor on the streams the interface is drawn
+// on, which the interface has given up for the purpose.
+func (h *fullScreenHost) EditExternally(content string) (string, bool, error) {
+	command := ExternalEditorCommand(h.s.config.Effective, os.Getenv, goruntime.GOOS)
+	return EditInExternalEditor(command, content, os.Stdin, os.Stdout, os.Stderr)
+}
 
 // NavigateTree moves the conversation to an entry — Pi's navigateTree. Choosing
 // something the user said puts its words back in the editor and stands before it;

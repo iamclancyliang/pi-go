@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,9 @@ type Run interface {
 	Follow(text string) error
 	// Wait returns when the run has settled.
 	Wait() error
+	// Withdraw takes back what is still queued, steering first, each in the
+	// order it was queued.
+	Withdraw() []string
 }
 
 // Host is what the interactive mode drives: the agent, the commands and the
@@ -158,6 +162,7 @@ func NewMode(ui *tui.UI, env *Env, host Host, opts Options) *Mode {
 	m.editor = &appEditor{Editor: editor, keys: env.Keys, actions: map[string]func(){}}
 	editor.OnSubmit = m.submit
 	m.bindKeys()
+	env.EditExternally = m.editExternally
 	m.editorC.AddChild(m.editor)
 
 	m.footer = NewFooter(env, m.footerState)
@@ -444,6 +449,210 @@ func (m *Mode) bindKeys() {
 			m.runCommand("/new")
 		}
 	}
+	m.editor.actions["app.suspend"] = m.suspend
+	m.editor.actions["app.editor.external"] = func() {
+		if edited, ok := m.editExternally(m.editor.ExpandedText()); ok {
+			m.editor.SetText(edited)
+		}
+	}
+	m.editor.actions["app.message.copy"] = m.copyLastAnswer
+	m.editor.actions["app.message.dequeue"] = m.dequeue
+	m.editor.actions["app.clipboard.pasteImage"] = m.pasteClipboard
+}
+
+// suspend puts the process in the background, as ctrl+z in a shell would,
+// with the terminal given back meanwhile.
+func (m *Mode) suspend() {
+	if m.env.GOOS == "windows" {
+		m.showStatus("Suspend to background is not supported on Windows")
+		return
+	}
+	var failed error
+	if err := m.ui.Suspend(func() { failed = suspendProcess() }); err != nil {
+		m.showError(err.Error())
+		return
+	}
+	if failed != nil {
+		m.showError(failed.Error())
+	}
+}
+
+// editExternally hands text to the user's editor with the terminal given up
+// for as long as it runs.
+func (m *Mode) editExternally(content string) (string, bool) {
+	var edited string
+	var ok bool
+	var failed error
+	if err := m.ui.Suspend(func() { edited, ok, failed = m.host.EditExternally(content) }); err != nil {
+		m.showError(err.Error())
+		return "", false
+	}
+	if failed != nil {
+		m.showError(failed.Error())
+		return "", false
+	}
+	return edited, ok
+}
+
+// copyLastAnswer puts the assistant's last words on the clipboard.
+func (m *Mode) copyLastAnswer() {
+	text, ok := m.host.LastAssistantText()
+	if !ok {
+		m.showError("No agent messages to copy yet.")
+		return
+	}
+	go func() {
+		err := m.host.CopyToClipboard(text)
+		m.ui.Do(func() {
+			if err != nil {
+				m.showError(err.Error())
+				return
+			}
+			m.showStatus("Copied last agent message to clipboard")
+		})
+	}()
+}
+
+// pasteClipboard puts the clipboard's text at the cursor. Pi pastes an image
+// as a file; messages here carry text only. A clipboard that cannot be read
+// is left alone, as Pi leaves it.
+func (m *Mode) pasteClipboard() {
+	go func() {
+		text, err := m.host.ReadClipboard()
+		m.ui.Do(func() {
+			if err != nil || text == "" {
+				return
+			}
+			m.editor.InsertTextAtCursor(text)
+			m.ui.RequestRender()
+		})
+	}()
+}
+
+// dequeue takes queued messages back into the editor — Pi's handleDequeue.
+// Only what the run has not taken comes back; a message the model has been
+// handed stays in the conversation.
+func (m *Mode) dequeue() {
+	var steer, follow []string
+	for _, q := range m.unsent {
+		if q.follow {
+			follow = append(follow, q.text)
+		} else {
+			steer = append(steer, q.text)
+		}
+	}
+	m.unsent = nil
+	if m.run != nil {
+		for _, text := range m.run.Withdraw() {
+			if slices.Contains(m.followUps, text) && !slices.Contains(m.steering, text) {
+				follow = append(follow, text)
+			} else {
+				steer = append(steer, text)
+			}
+		}
+	}
+	restored := append(steer, follow...)
+	if len(restored) == 0 {
+		m.showStatus("No queued messages to restore")
+		return
+	}
+	for _, text := range restored {
+		if at := slices.Index(m.steering, text); at >= 0 {
+			m.steering = slices.Delete(m.steering, at, at+1)
+		} else if at := slices.Index(m.followUps, text); at >= 0 {
+			m.followUps = slices.Delete(m.followUps, at, at+1)
+		}
+	}
+	parts := []string{strings.Join(restored, "\n\n")}
+	if current := m.editor.Text(); strings.TrimSpace(current) != "" {
+		parts = append(parts, current)
+	}
+	m.editor.SetText(strings.Join(parts, "\n\n"))
+	m.updatePending()
+	plural := ""
+	if len(restored) > 1 {
+		plural = "s"
+	}
+	m.showStatus("Restored " + itoa(len(restored)) + " queued message" + plural + " to editor")
+}
+
+// showHotkeys lists the keys in the conversation — Pi's handleHotkeysCommand,
+// a table under each heading, naming the keys as they are bound now.
+func (m *Mode) showHotkeys() {
+	t := m.env.Theme
+	key := func(action string) string {
+		return m.env.formatKeyText(strings.Join(m.env.Keys.Keys(action), "/"), true)
+	}
+	newLine := key("tui.input.newLine")
+	if m.env.GOOS == "windows" {
+		newLine += "` | New line (Ctrl+Enter on Windows Terminal) |"
+	} else {
+		newLine += "` | New line |"
+	}
+	text := strings.Join([]string{
+		"**Navigation**",
+		"| Key | Action |",
+		"|-----|--------|",
+		"| `" + key("tui.editor.cursorUp") + "` / `" + key("tui.editor.cursorDown") + "` / `" + key("tui.editor.cursorLeft") + "` / `" + key("tui.editor.cursorRight") + "` | Move cursor / browse history |",
+		"| `" + key("tui.editor.cursorWordLeft") + "` / `" + key("tui.editor.cursorWordRight") + "` | Move by word |",
+		"| `" + key("tui.editor.cursorLineStart") + "` | Start of line |",
+		"| `" + key("tui.editor.cursorLineEnd") + "` | End of line |",
+		"| `" + key("tui.editor.jumpForward") + "` | Jump forward to character |",
+		"| `" + key("tui.editor.jumpBackward") + "` | Jump backward to character |",
+		"| `" + key("tui.editor.pageUp") + "` / `" + key("tui.editor.pageDown") + "` | Scroll by page |",
+		"",
+		"**Editing**",
+		"| Key | Action |",
+		"|-----|--------|",
+		"| `" + key("tui.input.submit") + "` | Send message |",
+		"| `" + newLine,
+		"| `" + key("tui.editor.deleteWordBackward") + "` | Delete word backwards |",
+		"| `" + key("tui.editor.deleteWordForward") + "` | Delete word forwards |",
+		"| `" + key("tui.editor.deleteToLineStart") + "` | Delete to start of line |",
+		"| `" + key("tui.editor.deleteToLineEnd") + "` | Delete to end of line |",
+		"| `" + key("tui.editor.yank") + "` | Paste the most-recently-deleted text |",
+		"| `" + key("tui.editor.yankPop") + "` | Cycle through the deleted text after pasting |",
+		"| `" + key("tui.editor.undo") + "` | Undo |",
+		"",
+		"**Other**",
+		"| Key | Action |",
+		"|-----|--------|",
+		"| `" + key("tui.input.tab") + "` | Path completion / accept autocomplete |",
+		"| `" + key("app.interrupt") + "` | Cancel autocomplete / abort streaming |",
+		"| `" + key("app.clear") + "` | Clear editor (first) / exit (second) |",
+		"| `" + key("app.exit") + "` | Exit (when editor is empty) |",
+		"| `" + key("app.suspend") + "` | Suspend to background |",
+		"| `" + key("app.thinking.cycle") + "` | Cycle thinking level |",
+		"| `" + key("app.model.cycleForward") + "` / `" + key("app.model.cycleBackward") + "` | Cycle models |",
+		"| `" + key("app.model.select") + "` | Open model selector |",
+		"| `" + key("app.tools.expand") + "` | Toggle tool output expansion |",
+		"| `" + key("app.thinking.toggle") + "` | Toggle thinking block visibility |",
+		"| `" + key("app.editor.external") + "` | Edit message in external editor |",
+		"| `" + key("app.message.copy") + "` | Copy last assistant message |",
+		"| `" + key("app.message.followUp") + "` | Queue follow-up message |",
+		"| `" + key("app.message.dequeue") + "` | Restore queued messages |",
+		"| `" + key("app.clipboard.pasteImage") + "` | Paste image or text from clipboard |",
+		"| `/` | Slash commands |",
+		"| `!` | Run bash command |",
+		"| `!!` | Run bash command (excluded from context) |",
+	}, "\n")
+	m.chat.AddChild(spacer())
+	m.chat.AddChild(newBorder(m.env))
+	m.chat.AddChild(tui.NewText(Bold(t.Fg("accent", "Keyboard Shortcuts")), 1, 0, nil))
+	m.chat.AddChild(spacer())
+	m.chat.AddChild(tui.NewMarkdown(text, 1, 1, t.MarkdownTheme(), nil, tui.MarkdownOptions{}))
+	m.chat.AddChild(newBorder(m.env))
+	m.ui.RequestRender()
+}
+
+// rebuildHeader draws the header again, for keys that were rebound.
+func (m *Mode) rebuildHeader() {
+	m.header.Clear()
+	m.buildHeader()
+	if m.headerText != nil {
+		m.headerText.open = m.expanded
+	}
+	m.ui.RequestRender()
 }
 
 // ctrlC clears the editor; twice within half a second, it exits.
@@ -854,6 +1063,10 @@ func (m *Mode) runCommand(text string) {
 			if fingerprint(m.host.Conversation()) != before {
 				m.compacted, m.contextTokens, m.contextKnown = false, 0, false
 				m.renderHistory()
+			}
+			if strings.HasPrefix(text, "/reload") {
+				// The keys may have been rebound, and the header names them.
+				m.rebuildHeader()
 			}
 			m.showOutput(out.String())
 		})

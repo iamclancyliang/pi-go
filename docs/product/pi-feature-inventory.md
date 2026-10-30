@@ -40,7 +40,7 @@ always get distinct IDs.
 | Auth / OAuth | `enumerated` (files) · storage shape read (§27.6); flows still `semantics-needed` |
 | Extension hooks | **all groups have names + return contracts** — tool §19, provider §20, session §23, model/bash/input/startup/resources §24. compaction §25, branch summarization §26. Remaining: `preparation`/`branchEntries`/`Usage` types |
 | Extension context / API | `enumerated` (names) · signatures `schema-needed` |
-| TUI | `enumerated` (components) · rendering core, terminal session, key actions and the selectors `read` (§11.4–11.7) · the remaining components' own behaviour and fullscreen `semantics-needed` |
+| TUI | `enumerated` (components) · rendering core, terminal session, key actions, the selectors and the application keys `read` (§11.4–11.8) · the remaining components' own behaviour and fullscreen `semantics-needed` |
 | Telemetry | `enumerated` (files) · `schema-needed` |
 | Evals | `enumerated` (files) · `semantics-needed` |
 | server / client / session-backends | `enumerated` (files) · `semantics-needed` |
@@ -1048,6 +1048,52 @@ the whole snapshot (`Only one model in scope` / `Only one model available`; `Swi
 model does not support thinking`); the unbound `app.session.new|tree|fork|resume` open `/new`,
 `/tree`, `/fork`, `/resume`. Every change made through `ctrl+p`, `shift+tab`, `/model` and the
 settings is saved as the new default.
+
+### 11.8 The application keys' behaviour, and the key file — read 2026-10-31
+
+Read from `interactive-mode.ts` (`handleCtrlZ` :3954, `handleDequeue` :4023,
+`restoreQueuedMessagesToEditor`, `handleOpenExternalEditor` :4112, `handleClipboardPaste` :2870,
+`handleCopyCommand` :6002, `handleHotkeysCommand` :6143), `external-editor.ts`, `core/keybindings.ts`,
+`utils/clipboard.ts` and `docs/keybindings.md` at the pin, for slice T5 of
+`docs/specs/tui-split-plan.md`. §11.6 records the table of actions; this records what the ones the
+editor answers to do.
+
+* **Suspend** (`ctrl+z`, unbound on Windows): the interface is stopped, giving the terminal back,
+  and `SIGTSTP` is sent to the whole process group (`process.kill(0)`); on `SIGCONT` the interface
+  starts again and redraws everything. On Windows a bound key says `Suspend to background is not
+  supported on Windows`. `SIGINT` is ignored while suspended.
+* **External editor** (`ctrl+g`): the command is the `externalEditor` setting, else `$VISUAL`, else
+  `$EDITOR`, else `notepad` on Windows and `nano` elsewhere; it is split on spaces and given a
+  `prompt.md` in a fresh `pi-editor-` temporary directory holding the editor's text with paste
+  markers expanded; the interface is stopped, `Launching external editor: <command>` and `Pi will
+  resume when the editor exits.` are printed, and the editor runs with the process's own streams.
+  An exit status of zero replaces the editor's text with the file's, less one trailing newline; any
+  other leaves it. The directory is removed afterwards. The interface restarts and redraws.
+* **Copy** (`ctrl+x`, and `/copy`): the last assistant message's text blocks (an aborted reply with
+  no content is skipped; a reply with only tool calls copies nothing), `No agent messages to copy
+  yet.` when none; `Copied last agent message to clipboard` on success. Copying prefers a native
+  clipboard, then `pbcopy`, `clip`, `termux-clipboard-set`, `wl-copy`, `xclip`, `xsel`, then OSC 52
+  (up to 100 000 encoded bytes) — and sends OSC 52 as well over SSH.
+* **Paste** (`ctrl+v`, `alt+v` on Windows): a clipboard image is written to a temporary file whose
+  path is inserted at the cursor; otherwise the clipboard's text is inserted (`wl-paste --no-newline
+  --type text` on Wayland, else the native clipboard). Errors are ignored silently.
+* **Dequeue** (`alt+up`): every queued steering and follow-up message is taken back
+  (`clearAllQueues`), joined with blank lines ahead of whatever the editor holds, and the pending
+  display cleared; `Restored N queued message(s) to editor` or `No queued messages to restore`.
+  Escape during a response does the same and then aborts.
+* **`/hotkeys`**: a `Keyboard Shortcuts` title between two borders and a Markdown page of three
+  tables — Navigation, Editing, Other — naming each key as it is bound now, capitalised
+  (`keyDisplayText`: alternatives joined with `/`, each part's first letter upper-cased, `Option` on
+  macOS), ending with `/`, `!` and `!!`; a fourth table lists extension shortcuts when there are any.
+* **The key file**: `~/.pi/agent/keybindings.json`, an object of action id to one key or a list of
+  keys, in `modifier+key` form (`ctrl`, `shift`, `alt`, `super`, combinable; letters, digits,
+  `escape`/`esc`, `enter`/`return`, `tab`, `space`, `backspace`, `delete`, `insert`, `clear`,
+  `home`, `end`, `pageUp`, `pageDown`, arrows, `f1`–`f12`, and the symbol keys). A user's keys
+  **replace** the action's defaults. Entries that are neither a string nor a list of strings are
+  left out; ids an older file used (`cursorUp`, `expandTools`, …) are migrated to their namespaced
+  names on load, the new name winning where a file has both; a file that is not JSON is read as no
+  bindings. `/reload` re-reads it. Explicit history bindings take precedence over application
+  actions while the main editor is focused (§11.6).
 
 ## 12. server / client / session-backends
 

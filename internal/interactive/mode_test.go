@@ -57,6 +57,13 @@ func (r *fakeRun) Follow(text string) error {
 	return nil
 }
 func (r *fakeRun) Wait() error { return <-r.done }
+func (r *fakeRun) Withdraw() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := append(append([]string(nil), r.steered...), r.follows...)
+	r.steered, r.follows = nil, nil
+	return out
+}
 
 type fakeHost struct {
 	fakeSelectors

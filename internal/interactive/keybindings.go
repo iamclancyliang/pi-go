@@ -91,6 +91,10 @@ type Env struct {
 	// file for an edit's preview — happens on another goroutine and its
 	// result is applied through Do; without it, the work runs inline.
 	Do func(func())
+	// EditExternally hands text to the user's editor and returns what it left,
+	// ok false when nothing should change. Set by the mode; nil where there is
+	// no terminal to give up.
+	EditExternally func(content string) (edited string, ok bool)
 }
 
 // NewEnv is an Env for this machine.

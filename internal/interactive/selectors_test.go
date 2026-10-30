@@ -44,6 +44,11 @@ type fakeSelectors struct {
 	trustCwd  string
 	trustOpts []TrustOption
 	trusted   bool
+	clipboard string
+	lastText  string
+	edited    string
+	editOK    bool
+	editSeen  []string
 }
 
 type navigation struct {
@@ -145,6 +150,12 @@ func (f *fakeSelectors) CopyToClipboard(text string) error {
 	defer f.smu.Unlock()
 	f.copied = append(f.copied, text)
 	return nil
+}
+func (f *fakeSelectors) ReadClipboard() (string, error)    { return f.clipboard, nil }
+func (f *fakeSelectors) LastAssistantText() (string, bool) { return f.lastText, f.lastText != "" }
+func (f *fakeSelectors) EditExternally(content string) (string, bool, error) {
+	f.editSeen = append(f.editSeen, content)
+	return f.edited, f.editOK, nil
 }
 func (f *fakeSelectors) ForkMessages() ([]ForkMessage, error) {
 	var out []ForkMessage

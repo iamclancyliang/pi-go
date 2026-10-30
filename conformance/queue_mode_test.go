@@ -168,3 +168,66 @@ func TestAFollowUpWaitsEvenWhenASteerInterrupts(t *testing.T) {
 		t.Fatalf("the follow-up arrived with the steer (request %d), before the run would have stopped", followed)
 	}
 }
+
+// TestWithdrawnMessagesNeverReachTheModel: what the user takes back before the
+// next drain point is not sent, Withdraw says what it took back with steering
+// first, and a turn interrupted for a message then withdrawn still gets its
+// answer.
+func TestWithdrawnMessagesNeverReachTheModel(t *testing.T) {
+	gate := newGatedTool("FILE-CONTENTS")
+	registry := tools.NewRegistry()
+	registry.MustRegister(gate)
+	model := &ai.Scripted{
+		Name:    "fake-1",
+		Replies: []ai.Response{ai.AssistantToolCalls(ai.ToolCall{ID: "call-1", Name: "slow_read", Args: `{}`})},
+		Final:   ai.AssistantText("done"),
+	}
+	agent, err := runtime.New(runtime.Config{
+		Model: model, ModelName: "fake-1", Tools: registry, Session: session.New("You are pi-go."),
+		Observers: []events.Observer{runtime.NewRecorder()}, Now: fixedClock(),
+	})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	run, err := agent.Start(ctx, "Read the file.")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	gate.waitEntered(t)
+	for _, step := range []struct {
+		text  string
+		steer bool
+	}{{"F1", false}, {"S1", true}, {"F2", false}} {
+		if step.steer {
+			err = run.Steer(step.text)
+		} else {
+			err = run.Follow(step.text)
+		}
+		if err != nil {
+			t.Fatalf("queueing %q: %v", step.text, err)
+		}
+	}
+	if got := run.Withdraw(); len(got) != 3 || got[0] != "S1" || got[1] != "F1" || got[2] != "F2" {
+		t.Fatalf("withdrew %v, want S1 then F1 and F2", got)
+	}
+	if again := run.Withdraw(); len(again) != 0 {
+		t.Fatalf("a second withdrawal took back %v", again)
+	}
+	close(gate.release)
+	if err := run.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	requests := model.Requests()
+	for _, text := range []string{"F1", "S1", "F2"} {
+		if at := firstCarrying(requests, text); at >= 0 {
+			t.Fatalf("%s reached the model in request %d after being withdrawn", text, at)
+		}
+	}
+	last := requests[len(requests)-1]
+	if len(requests) < 2 || !containsToolContent(last.Messages, "FILE-CONTENTS") {
+		t.Fatalf("the turn the steer interrupted never got its answer: %d requests, last %s",
+			len(requests), describeRoles(last.Messages))
+	}
+}

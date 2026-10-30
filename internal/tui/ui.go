@@ -215,6 +215,25 @@ func (u *UI) SetShowHardwareCursor(show bool) {
 // left behind.
 func (u *UI) SetClearOnShrink(clear bool) { u.Do(func() { u.screen.clearOnShrink = clear }) }
 
+// Suspend gives the terminal back for the time fn runs — an external editor,
+// the shell after ctrl+z — and takes it again afterwards, redrawing everything.
+// Loop only: it is for what a key handler does, and nothing is drawn meanwhile.
+func (u *UI) Suspend(fn func()) error {
+	if err := u.term.Stop(); err != nil {
+		return err
+	}
+	fn()
+	if err := u.term.Start(u.receive, u.RequestRender); err != nil {
+		return err
+	}
+	if !u.screen.showCursor {
+		_, _ = u.term.Write([]byte("\x1b[?25l"))
+	}
+	u.screen.reset()
+	u.renderFrame()
+	return nil
+}
+
 // Rows is the terminal's height, which components such as the editor size
 // themselves by.
 func (u *UI) Rows() int {

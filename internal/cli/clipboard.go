@@ -47,6 +47,40 @@ type clipboardCommand struct {
 	args []string
 }
 
+// readClipboard is the clipboard's text, through the platform's tools in the
+// order copying tries them.
+func readClipboard() (string, error) {
+	var attempts []error
+	for _, candidate := range clipboardReadCommands() {
+		out, err := exec.Command(candidate.name, candidate.args...).Output()
+		if err == nil {
+			return string(out), nil
+		}
+		attempts = append(attempts, fmt.Errorf("%s: %w", candidate.name, err))
+	}
+	return "", fmt.Errorf("no way to read the clipboard: %v", attempts)
+}
+
+func clipboardReadCommands() []clipboardCommand {
+	switch runtime.GOOS {
+	case "darwin":
+		return []clipboardCommand{{name: "pbpaste"}}
+	case "windows":
+		return []clipboardCommand{{name: "powershell", args: []string{"-NoProfile", "-Command", "Get-Clipboard"}}}
+	default:
+		var out []clipboardCommand
+		if os.Getenv("TERMUX_VERSION") != "" {
+			out = append(out, clipboardCommand{name: "termux-clipboard-get"})
+		}
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			out = append(out, clipboardCommand{name: "wl-paste", args: []string{"--no-newline", "--type", "text"}})
+		}
+		return append(out,
+			clipboardCommand{name: "xclip", args: []string{"-selection", "clipboard", "-o"}},
+			clipboardCommand{name: "xsel", args: []string{"--clipboard", "--output"}})
+	}
+}
+
 func clipboardCommands() []clipboardCommand {
 	switch runtime.GOOS {
 	case "darwin":

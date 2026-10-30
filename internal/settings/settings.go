@@ -130,6 +130,9 @@ type Settings struct {
 	// HideThinkingBlock folds reasoning in the interface.
 	HideThinkingBlock bool `json:"hideThinkingBlock,omitempty"`
 
+	// ExternalEditor is the command ctrl+g opens, ahead of $VISUAL and $EDITOR.
+	ExternalEditor string `json:"externalEditor,omitempty"`
+
 	// DoubleEscapeAction is what escape twice on an empty editor opens: "tree"
 	// (the default), "fork" or "none".
 	DoubleEscapeAction string `json:"doubleEscapeAction,omitempty"`
@@ -309,6 +312,9 @@ func Merge(global, project Settings) Settings {
 	}
 	if project.HideThinkingBlock {
 		merged.HideThinkingBlock = true
+	}
+	if project.ExternalEditor != "" {
+		merged.ExternalEditor = project.ExternalEditor
 	}
 	if project.DoubleEscapeAction != "" {
 		merged.DoubleEscapeAction = project.DoubleEscapeAction

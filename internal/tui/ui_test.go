@@ -17,6 +17,7 @@ type fakeTerm struct {
 	onResize func()
 	started  bool
 	stopped  bool
+	starts   int
 	frames   int
 }
 
@@ -24,6 +25,7 @@ func (f *fakeTerm) Start(onInput func([]byte), onResize func()) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onInput, f.onResize, f.started = onInput, onResize, true
+	f.starts++
 	return nil
 }
 

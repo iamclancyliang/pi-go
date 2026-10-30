@@ -190,6 +190,11 @@ var settingKeys = []settingKey{
 	},
 	boolKey("hideThinkingBlock", "fold reasoning in the interface",
 		func(s *settings.Settings) *bool { return &s.HideThinkingBlock }),
+	{
+		name: "externalEditor", hint: "command ctrl+g opens, ahead of $VISUAL and $EDITOR",
+		get: func(s *settings.Settings) string { return s.ExternalEditor },
+		set: func(s *settings.Settings, v string) error { s.ExternalEditor = v; return nil },
+	},
 	choiceKey("doubleEscapeAction", "what escape twice on an empty editor opens: tree (default), fork or none",
 		[]string{"tree", "fork", "none"}, func(s *settings.Settings) *string { return &s.DoubleEscapeAction }),
 	choiceKey("treeFilterMode", "the filter /tree opens with: default, no-tools, user-only, labeled-only or all",

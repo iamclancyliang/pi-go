@@ -50,6 +50,9 @@ const (
 	// steering message left queued by one-at-a-time is taken at the next
 	// drain point, and it is dropped when it reaches GenInput.
 	queueMarker
+	// queueDropped is a message the user took back. The framework's buffer
+	// cannot give one up, so it is dropped when it reaches GenInput instead.
+	queueDropped
 )
 
 // queues holds the two modes and the identity of everything queued.
@@ -58,6 +61,9 @@ type queues struct {
 	steering QueueMode
 	followUp QueueMode
 	kinds    map[*schema.Message]queueKind
+	// order is everything tagged and not yet taken, as it was tagged, so a
+	// withdrawal can say what it took back in order.
+	order []*schema.Message
 
 	// rearm is set when steering messages were left queued, and taken by the
 	// next model request of the run, which pushes a marker to preempt it.
@@ -74,6 +80,41 @@ func (q *queues) tag(m *schema.Message, kind queueKind) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.kinds[m] = kind
+	q.order = append(q.order, m)
+}
+
+// withdraw takes back every steering and follow-up message still queued and
+// returns their texts, steering first, each in the order it was queued — what
+// Pi's clearAllQueues hands back. A message already taken into the conversation
+// is past withdrawing.
+func (q *queues) withdraw() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var steer, follow []string
+	for _, m := range q.order {
+		switch q.kinds[m] {
+		case queueSteer:
+			steer = append(steer, m.Content)
+		case queueFollow:
+			follow = append(follow, m.Content)
+		default:
+			continue
+		}
+		q.kinds[m] = queueDropped
+	}
+	q.rearm = false
+	return append(steer, follow...)
+}
+
+// forget drops a message from the order once it has been taken or dropped.
+func (q *queues) forget(m *schema.Message) {
+	delete(q.kinds, m)
+	for i, queued := range q.order {
+		if queued == m {
+			q.order = append(q.order[:i], q.order[i+1:]...)
+			return
+		}
+	}
 }
 
 func (q *queues) modes() (steering, followUp QueueMode) {
@@ -117,8 +158,8 @@ func (q *queues) split(items []*schema.Message) (consumed, remaining []*schema.M
 		}
 		kind := q.kinds[item]
 		switch kind {
-		case queueMarker:
-			delete(q.kinds, item)
+		case queueMarker, queueDropped:
+			q.forget(item)
 		case queueSteer:
 			steer = append(steer, item)
 		case queueFollow:
@@ -149,7 +190,7 @@ func (q *queues) split(items []*schema.Message) (consumed, remaining []*schema.M
 		remaining = left
 	}
 	for _, item := range consumed {
-		delete(q.kinds, item)
+		q.forget(item)
 	}
 	return consumed, remaining
 }

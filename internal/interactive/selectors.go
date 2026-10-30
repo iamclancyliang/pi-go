@@ -60,8 +60,15 @@ type Selectors interface {
 	// with context.Canceled if ctx is cancelled before it has moved.
 	NavigateTree(ctx context.Context, id string, summarize bool, instructions string) (editorText string, err error)
 	BranchSummarySkipPrompt() bool
-	// CopyToClipboard runs off the loop.
+	// CopyToClipboard and ReadClipboard run off the loop.
 	CopyToClipboard(text string) error
+	ReadClipboard() (string, error)
+	// LastAssistantText is the assistant's last words, for copying.
+	LastAssistantText() (string, bool)
+	// EditExternally hands text to the user's editor and returns what it left,
+	// ok false when the editor exited with an error. It runs with the terminal
+	// given up, on the loop.
+	EditExternally(content string) (edited string, ok bool, err error)
 
 	// ForkMessages is what can be forked from; Fork copies the conversation up to
 	// just before one, off the loop, and returns its words.
@@ -125,6 +132,10 @@ func (m *Mode) openSelector(text string) bool {
 	arg = strings.TrimSpace(arg)
 	if name == "login" {
 		m.handleLogin(arg)
+		return true
+	}
+	if name == "hotkeys" {
+		m.showHotkeys()
 		return true
 	}
 	if arg != "" {

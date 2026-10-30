@@ -24,6 +24,12 @@ file carries what a person upgrading would want to know.
   `ctrl+p` and `shift+tab` cycle models and thinking, and escape twice on an empty
   editor opens the tree. Settings gain the keys behind these. The RPC channel
   answers `get_fork_messages`, the last of Pi's 32 commands.
+- The rest of Pi's keys in the interface: `alt+up` takes queued messages back
+  into the editor, `ctrl+g` edits the message in `$VISUAL`, `$EDITOR` or the
+  `externalEditor` setting, `ctrl+z` suspends to the shell, `ctrl+x` copies the
+  last reply, `ctrl+v` pastes the clipboard's text, and `/hotkeys` shows the
+  keys as bound. A `keybindings.json` in the agent directory rebinds any action
+  in Pi's format, and `/reload` re-reads it.
 - A `pi` command: one-shot with `-p`, a session in a terminal, and the mode
   resolved from the terminal itself — a redirected run prints, a terminal
   converses.

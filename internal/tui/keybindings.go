@@ -3,6 +3,7 @@ package tui
 import (
 	"sort"
 	"strings"
+	"sync"
 )
 
 // KeybindingDefinition is an action's default keys and what /hotkeys says it
@@ -81,17 +82,32 @@ type KeybindingConflict struct {
 type Keybindings struct {
 	definitions []KeybindingDefinition
 	byID        map[string]KeybindingDefinition
-	keys        map[string][]string
-	conflicts   []KeybindingConflict
+
+	// mu guards what SetUser replaces: the bindings are read by every key
+	// handler and replaced by /reload.
+	mu        sync.RWMutex
+	keys      map[string][]string
+	conflicts []KeybindingConflict
 }
 
 // NewKeybindings resolves definitions against the user's bindings. A user
 // binding for an action no definition names is ignored, as Pi ignores it.
 func NewKeybindings(definitions []KeybindingDefinition, user map[string][]string) *Keybindings {
-	kb := &Keybindings{definitions: definitions, byID: map[string]KeybindingDefinition{}, keys: map[string][]string{}}
+	kb := &Keybindings{definitions: definitions, byID: map[string]KeybindingDefinition{}}
 	for _, d := range definitions {
 		kb.byID[d.ID] = d
 	}
+	kb.SetUser(user)
+	return kb
+}
+
+// SetUser replaces the user's bindings, as /reload does, for every component
+// holding these keys.
+func (kb *Keybindings) SetUser(user map[string][]string) {
+	kb.mu.Lock()
+	defer kb.mu.Unlock()
+	kb.keys = map[string][]string{}
+	kb.conflicts = nil
 
 	claims := map[string][]string{}
 	for id, keys := range user {
@@ -110,14 +126,13 @@ func NewKeybindings(definitions []KeybindingDefinition, user map[string][]string
 	}
 	sort.Slice(kb.conflicts, func(i, j int) bool { return kb.conflicts[i].Key < kb.conflicts[j].Key })
 
-	for _, d := range definitions {
+	for _, d := range kb.definitions {
 		if keys, ok := user[d.ID]; ok {
 			kb.keys[d.ID] = dedupe(keys)
 		} else {
 			kb.keys[d.ID] = dedupe(d.DefaultKeys)
 		}
 	}
-	return kb
 }
 
 func dedupe(keys []string) []string {
@@ -133,7 +148,11 @@ func dedupe(keys []string) []string {
 }
 
 // Keys is what an action is bound to now.
-func (kb *Keybindings) Keys(id string) []string { return append([]string(nil), kb.keys[id]...) }
+func (kb *Keybindings) Keys(id string) []string {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
+	return append([]string(nil), kb.keys[id]...)
+}
 
 // Definition is an action's definition.
 func (kb *Keybindings) Definition(id string) (KeybindingDefinition, bool) {
@@ -148,11 +167,15 @@ func (kb *Keybindings) Definitions() []KeybindingDefinition {
 
 // Conflicts are the keys the user bound to more than one action.
 func (kb *Keybindings) Conflicts() []KeybindingConflict {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
 	return append([]KeybindingConflict(nil), kb.conflicts...)
 }
 
 // Matches reports whether a keystroke is bound to the action.
 func (kb *Keybindings) Matches(k Key, id string) bool {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
 	for _, bound := range kb.keys[id] {
 		if KeyMatches(k, bound) {
 			return true
