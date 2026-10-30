@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -474,5 +475,92 @@ func TestABlockedPromptIsNotComplete(t *testing.T) {
 		`{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":12,"totalTokenCount":12}}`)))
 	if last.Kind != ai.StreamError {
 		t.Fatalf("a blocked prompt ended with %q", last.Kind)
+	}
+}
+
+// bodyRecorder remembers what each request sent.
+type bodyRecorder struct {
+	recordedTransport
+	bodies [][]byte
+}
+
+func (b *bodyRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	raw, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	b.bodies = append(b.bodies, raw)
+	return b.recordedTransport.RoundTrip(req)
+}
+
+// answeredNames reads the names a request answered tool calls under, in order.
+func answeredNames(t *testing.T, body []byte) []string {
+	t.Helper()
+	var sent struct {
+		Contents []struct {
+			Parts []struct {
+				FunctionResponse *struct {
+					Name string `json:"name"`
+				} `json:"functionResponse"`
+			} `json:"parts"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("the request is not JSON: %v", err)
+	}
+	var names []string
+	for _, content := range sent.Contents {
+		for _, part := range content.Parts {
+			if part.FunctionResponse != nil {
+				names = append(names, part.FunctionResponse.Name)
+			}
+		}
+	}
+	return names
+}
+
+// TestAToolResultIsSentBackUnderTheToolsName. This provider pairs a result with
+// its call by the function's name and has no id of its own, so the adapter's
+// generated id would answer a function the model never called. The ids here come
+// from a real first reply, which is how the second request gets them.
+func TestAToolResultIsSentBackUnderTheToolsName(t *testing.T) {
+	tr := &bodyRecorder{recordedTransport: recordedTransport{responses: []*http.Response{
+		eventStream(callChunk(callPart("read", `{"path":"a"}`), callPart("ls", `{"path":"b"}`)), endChunk("STOP")),
+		eventStream(textChunk("done"), endChunk("STOP")),
+	}}}
+	p := newPort(t, tr)
+
+	first := streamed(t, p)
+	if first.Kind != ai.StreamDone {
+		t.Fatalf("the first reply ended with %q: %s", first.Kind, first.Final.ErrorMessage)
+	}
+	calls := toolCalls(*first.Final)
+	if len(calls) != 2 {
+		t.Fatalf("got %d tool calls", len(calls))
+	}
+
+	events, err := p.Stream(context.Background(), ai.Request{
+		Model: "gemini-test",
+		Messages: []ai.Message{
+			{Role: ai.RoleUser, Content: "hello"},
+			{Role: ai.RoleAssistant, ToolCalls: calls},
+			{Role: ai.RoleTool, ToolCallID: calls[0].ID, Content: "file body"},
+			{Role: ai.RoleTool, ToolCallID: calls[1].ID, Content: "listing"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var last ai.StreamEvent
+	for ev := range events {
+		last = ev
+	}
+	if last.Kind != ai.StreamDone {
+		t.Fatalf("the second reply ended with %q", last.Kind)
+	}
+
+	got := answeredNames(t, tr.bodies[1])
+	if len(got) != 2 || got[0] != "read" || got[1] != "ls" {
+		t.Fatalf("results were answered under %q", got)
 	}
 }

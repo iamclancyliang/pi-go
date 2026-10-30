@@ -38,12 +38,43 @@ func (m translatedModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingC
 func (m translatedModel) Stream(ctx context.Context, input []*schema.Message,
 	opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 
-	reader, err := m.ToolCallingChatModel.Stream(ctx, input, opts...)
+	reader, err := m.ToolCallingChatModel.Stream(ctx, namedResults(input), opts...)
 	if err != nil {
 		return nil, err
 	}
 	reply := replyState{}
 	return schema.StreamReaderWithConvert(reader, reply.translate), nil
+}
+
+// namedResults names each tool result after the function it answers.
+//
+// This provider pairs a result with its call by the function's name, and the id
+// the rest of this repository pairs them by is one the adapter made up. A result
+// without a name goes out under that id, answering a function the model never
+// called. The name is looked up here, not set when the history is converted,
+// because that conversion is shared and other adapters put the field on their wire.
+//
+// A result matching no call is left as it is: there is no name to give it, and the
+// provider rejecting it says more than a guess would. Messages are copied rather
+// than edited, because the caller still holds them.
+func namedResults(input []*schema.Message) []*schema.Message {
+	names := map[string]string{}
+	out := make([]*schema.Message, len(input))
+	for at, message := range input {
+		out[at] = message
+		if message == nil {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			names[call.ID] = call.Function.Name
+		}
+		if name, known := names[message.ToolCallID]; known && message.Role == schema.Tool {
+			named := *message
+			named.ToolName = name
+			out[at] = &named
+		}
+	}
+	return out
 }
 
 // dialectEnding says one of this provider's finish reasons in the shared loop's
